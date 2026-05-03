@@ -14,6 +14,7 @@ defmodule Angler.Statuses.ViewerOverlay do
   alias Angler.Likes.Like
   alias Angler.Reblogs.Reblog
   alias Angler.Repo
+  alias Angler.Statuses.Pinned
 
   @type overlay :: %{
           favourited: boolean(),
@@ -60,13 +61,21 @@ defmodule Angler.Statuses.ViewerOverlay do
       |> Repo.all()
       |> MapSet.new()
 
+    pins =
+      from(p in Pinned,
+        where: p.profile_id == ^viewer_id and p.status_id in ^ids,
+        select: p.status_id
+      )
+      |> Repo.all()
+      |> MapSet.new()
+
     Map.new(ids, fn id ->
       {id,
        %{
          favourited: MapSet.member?(favs, id),
          reblogged: MapSet.member?(reblogs, id),
          bookmarked: MapSet.member?(bookmarks, id),
-         pinned: false,
+         pinned: MapSet.member?(pins, id),
          muted: false
        }}
     end)

@@ -11,7 +11,7 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
 
   alias Angler.Bookmarks
   alias Angler.Statuses
-  alias Angler.Statuses.{Scheduled, Scheduling, Status}
+  alias Angler.Statuses.{Pinning, Scheduled, Scheduling, Status}
   alias Angler.Statuses.Workers.StatusDeliver
   alias Angler.Timelines.Workers.FeedInsert
   alias AnglerWeb.MastodonAPI.ScheduledStatus, as: ScheduledStatusJSON
@@ -28,6 +28,76 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
       json(conn, StatusJSON.render(status, viewer_id))
     else
       :forbidden -> not_found(conn)
+      _ -> not_found(conn)
+    end
+  end
+
+  ## DELETE /api/v1/statuses/:id
+
+  def delete(conn, %{"id" => id}) do
+    %{profile: profile} = BearerAuth.current_scope(conn)
+
+    with {:ok, snowflake} <- parse_id(id),
+         {:ok, deleted} <- Statuses.delete_local(snowflake, profile) do
+      json(conn, StatusJSON.render(deleted, profile.id))
+    else
+      {:error, :forbidden} -> conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+      _ -> not_found(conn)
+    end
+  end
+
+  ## POST /api/v1/statuses/:id/pin
+  ## POST /api/v1/statuses/:id/unpin
+
+  def pin(conn, %{"id" => id}), do: pin_op(conn, id, :pin)
+  def unpin(conn, %{"id" => id}), do: pin_op(conn, id, :unpin)
+
+  defp pin_op(conn, id, op) do
+    %{profile: profile} = BearerAuth.current_scope(conn)
+
+    with {:ok, snowflake} <- parse_id(id),
+         %Status{} = status <- Statuses.get(snowflake) do
+      case op do
+        :pin ->
+          case Pinning.pin(profile, status) do
+            {:ok, _} ->
+              json(conn, StatusJSON.render(status, profile.id))
+
+            {:error, :forbidden} ->
+              conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+
+            {:error, :unpinnable} ->
+              validation_error(conn, "Cannot pin a private or direct status")
+
+            {:error, :limit_reached} ->
+              validation_error(conn, "Pin limit reached")
+          end
+
+        :unpin ->
+          :ok = Pinning.unpin(profile, status)
+          json(conn, StatusJSON.render(status, profile.id))
+      end
+    else
+      _ -> not_found(conn)
+    end
+  end
+
+  ## GET /api/v1/statuses/:id/context
+
+  def context(conn, %{"id" => id}) do
+    viewer_id = viewer_id(conn)
+
+    with {:ok, snowflake} <- parse_id(id),
+         %Status{} = status <- Statuses.get(snowflake),
+         true <- Statuses.visible_to?(status, viewer_id) || :forbidden do
+      ancestors = Statuses.ancestors(status, viewer_id)
+      descendants = Statuses.descendants(status, viewer_id)
+
+      json(conn, %{
+        "ancestors" => StatusJSON.render_many(ancestors, viewer_id),
+        "descendants" => StatusJSON.render_many(descendants, viewer_id)
+      })
+    else
       _ -> not_found(conn)
     end
   end

@@ -108,8 +108,13 @@ defmodule AnglerWeb.Router do
     get "/accounts/:id/statuses", AccountController, :statuses
     get "/accounts/:id/followers", AccountController, :followers
     get "/accounts/:id/following", AccountController, :following
+    get "/accounts/:id/pinned", AccountController, :pinned
+    get "/accounts/:id/identity_proofs", EmptyController, :empty_array
+    get "/accounts/:id/featured_tags", EmptyController, :empty_array
+    get "/featured_tags", EmptyController, :empty_array
 
     get "/statuses/:id", StatusController, :show
+    get "/statuses/:id/context", StatusController, :context
 
     get "/timelines/home", TimelineController, :home
     get "/timelines/public", TimelineController, :public
@@ -183,6 +188,13 @@ defmodule AnglerWeb.Router do
     pipe_through :authenticated
 
     get "/apps/verify_credentials", AppController, :verify
+
+    # Push subscription is bound to the OAuth token itself, so any valid bearer
+    # may read/write its own subscription regardless of the token's scopes.
+    get "/push/subscription", PushSubscriptionController, :show
+    post "/push/subscription", PushSubscriptionController, :create
+    put "/push/subscription", PushSubscriptionController, :update
+    delete "/push/subscription", PushSubscriptionController, :delete
   end
 
   scope "/api/v1", AnglerWeb.MastodonAPI do
@@ -192,6 +204,11 @@ defmodule AnglerWeb.Router do
 
     patch "/accounts/update_credentials", AccountController, :update_credentials
     post "/accounts/update_credentials", AccountController, :update_credentials
+
+    delete "/statuses/:id", StatusController, :delete
+
+    post "/statuses/:id/pin", StatusController, :pin
+    post "/statuses/:id/unpin", StatusController, :unpin
 
     post "/statuses/:id/favourite", StatusController, :favourite
     post "/statuses/:id/unfavourite", StatusController, :unfavourite

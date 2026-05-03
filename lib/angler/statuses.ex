@@ -66,6 +66,129 @@ defmodule Angler.Statuses do
 
   def visible_to?(_, _), do: false
 
+  ## Thread context
+
+  @ancestors_cap 40
+  @descendants_cap 60
+
+  @doc """
+  Walk the in_reply_to chain upward from `status`, oldest-first. Capped at
+  #{@ancestors_cap} statuses. Filters out anything `viewer_id` can't see.
+  """
+  @spec ancestors(Status.t(), integer() | nil) :: [Status.t()]
+  def ancestors(%Status{in_reply_to_id: nil}, _viewer), do: []
+
+  def ancestors(%Status{} = status, viewer_id) do
+    walk_ancestors(status.in_reply_to_id, viewer_id, [], @ancestors_cap)
+  end
+
+  defp walk_ancestors(nil, _viewer, acc, _cap), do: acc
+  defp walk_ancestors(_id, _viewer, acc, 0), do: acc
+
+  defp walk_ancestors(id, viewer_id, acc, remaining) do
+    case Repo.get(Status, id) |> preload_for_render() do
+      nil ->
+        acc
+
+      %Status{deleted_at: %DateTime{}} ->
+        acc
+
+      %Status{} = parent ->
+        if visible_to?(parent, viewer_id) do
+          walk_ancestors(parent.in_reply_to_id, viewer_id, [parent | acc], remaining - 1)
+        else
+          acc
+        end
+    end
+  end
+
+  @doc """
+  Breadth-first walk of the reply tree under `status`, ordered by status id
+  ascending. Capped at #{@descendants_cap} statuses.
+  """
+  @spec descendants(Status.t(), integer() | nil) :: [Status.t()]
+  def descendants(%Status{} = status, viewer_id) do
+    bfs([status.id], viewer_id, [], @descendants_cap)
+  end
+
+  defp bfs([], _viewer, acc, _cap), do: Enum.reverse(acc)
+  defp bfs(_, _viewer, acc, 0), do: Enum.reverse(acc)
+
+  defp bfs([id | rest], viewer_id, acc, remaining) do
+    children =
+      from(s in Status,
+        where: s.in_reply_to_id == ^id and is_nil(s.deleted_at),
+        order_by: [asc: s.id]
+      )
+      |> Repo.all()
+      |> preload_for_render()
+      |> Enum.filter(&visible_to?(&1, viewer_id))
+
+    take = Enum.take(children, remaining)
+    new_acc = Enum.reduce(take, acc, fn s, a -> [s | a] end)
+    bfs(rest ++ Enum.map(take, & &1.id), viewer_id, new_acc, remaining - length(take))
+  end
+
+  defp preload_for_render(nil), do: nil
+
+  defp preload_for_render(%Status{} = s) do
+    Repo.preload(s,
+      profile: [],
+      mentions: :profile,
+      status_hashtags: :hashtag,
+      media_attachments: []
+    )
+  end
+
+  defp preload_for_render(list) when is_list(list) do
+    Repo.preload(list,
+      profile: [],
+      mentions: :profile,
+      status_hashtags: :hashtag,
+      media_attachments: []
+    )
+  end
+
+  ## Local delete
+
+  @doc """
+  Soft-delete a local status owned by `profile`. Decrements the author's
+  status counter, then enqueues an outbound `Delete Tombstone` activity
+  to the same audience the original post reached.
+
+  Returns `{:ok, status}` (the soft-deleted row) or `{:error, atom()}`.
+  """
+  @spec delete_local(integer(), Angler.Profiles.Profile.t()) ::
+          {:ok, Status.t()} | {:error, :not_found | :forbidden | :already_deleted}
+  def delete_local(status_id, %Angler.Profiles.Profile{id: profile_id})
+      when is_integer(status_id) do
+    case Repo.get(Status, status_id) do
+      nil -> {:error, :not_found}
+      %Status{deleted_at: %DateTime{}} -> {:error, :already_deleted}
+      %Status{profile_id: pid} when pid != profile_id -> {:error, :forbidden}
+      %Status{local: false} -> {:error, :forbidden}
+      %Status{} = status -> do_delete(status)
+    end
+  end
+
+  defp do_delete(%Status{} = status) do
+    audience = Angler.Statuses.OutboundAudience.inboxes_for(status)
+
+    {:ok, deleted} =
+      status |> Ecto.Changeset.change(deleted_at: DateTime.utc_now()) |> Repo.update()
+
+    Repo.update_all(
+      from(p in Angler.Profiles.Profile, where: p.id == ^status.profile_id),
+      inc: [statuses_count: -1]
+    )
+
+    Enum.each(audience, fn inbox_url ->
+      Angler.Statuses.Workers.StatusDeleteDeliver.enqueue(deleted.id, inbox_url)
+    end)
+
+    {:ok, deleted}
+  end
+
   ## Federation-facing writes
 
   @doc """

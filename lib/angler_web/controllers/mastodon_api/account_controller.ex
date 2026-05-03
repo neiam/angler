@@ -176,6 +176,20 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
     json(conn, BlocksMutes.list_mutes(actor.id) |> Enum.map(&Account.render/1))
   end
 
+  ## GET /accounts/:id/pinned
+
+  def pinned(conn, %{"id" => id}) do
+    viewer_id = viewer_id(conn)
+
+    with {:ok, int_id} <- parse_id(id),
+         %Profile{} = profile <- Profiles.get_profile(int_id) do
+      statuses = Angler.Statuses.Pinning.list(profile.id)
+      json(conn, StatusJSON.render_many(statuses, viewer_id))
+    else
+      _ -> conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+    end
+  end
+
   ## GET /accounts/:id/statuses
 
   def statuses(conn, %{"id" => id} = params) do
