@@ -1,0 +1,74 @@
+defmodule Angler.Statuses.Status do
+  @moduledoc """
+  A post — text, photo, photo album, video, reply, or reblog.
+
+  Local statuses have `local: true`, no `uri` (computed), and federate via
+  outbound delivery. Remote statuses have `local: false` and store the AS2
+  `id` in `uri`.
+
+  See plans/statuses/models/status.md.
+  """
+
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :integer, autogenerate: false}
+  schema "statuses" do
+    belongs_to :profile, Angler.Profiles.Profile
+
+    field :caption, :string
+    field :rendered, :string
+    field :is_nsfw, :boolean, default: false
+    field :cw_summary, :string
+
+    field :visibility, Ecto.Enum, values: [:public, :unlisted, :private, :direct]
+    field :scope, :string
+    field :type, :string
+    field :pf_type, :string
+
+    field :local, :boolean, default: true
+    field :uri, :string
+    field :url, :string
+
+    field :in_reply_to_id, :integer
+    field :in_reply_to_profile_id, :integer
+    field :reblog_of_id, :integer
+
+    field :language, :string, default: "en"
+    field :comments_disabled, :boolean, default: false
+
+    field :reply_count, :integer, default: 0
+    field :reblogs_count, :integer, default: 0
+    field :likes_count, :integer, default: 0
+
+    field :edited_at, :utc_datetime_usec
+    field :deleted_at, :utc_datetime_usec
+    field :scheduled_at, :utc_datetime_usec
+
+    has_many :mentions, Angler.Statuses.Mention
+    has_many :status_hashtags, Angler.Statuses.StatusHashtag
+
+    timestamps(type: :utc_datetime_usec)
+  end
+
+  @cast_fields ~w(
+    profile_id caption rendered is_nsfw cw_summary visibility scope type pf_type
+    local uri url
+    in_reply_to_id in_reply_to_profile_id reblog_of_id
+    language comments_disabled
+    reply_count reblogs_count likes_count
+    edited_at deleted_at scheduled_at
+  )a
+
+  @doc false
+  def changeset(status \\ %__MODULE__{}, attrs) do
+    status
+    |> maybe_assign_id()
+    |> cast(attrs, @cast_fields)
+    |> validate_required([:profile_id, :visibility])
+    |> unique_constraint(:uri)
+  end
+
+  defp maybe_assign_id(%__MODULE__{id: nil} = s), do: %{s | id: Angler.Snowflake.next()}
+  defp maybe_assign_id(s), do: s
+end

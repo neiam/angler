@@ -1,0 +1,67 @@
+defmodule Angler.Federation.Instance do
+  @moduledoc """
+  Known peer instance metadata + admin moderation flags.
+
+  See `plans/federation/models/instance.md`.
+  """
+
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  schema "instances" do
+    field :domain, :string
+    field :software, :string
+    field :version, :string
+    field :description, :string
+    field :open_registrations, :boolean, default: true
+    field :user_count, :integer
+    field :status_count, :integer
+    field :nodeinfo, :map
+
+    field :banned, :boolean, default: false
+    field :ban_reason, :string
+    field :ban_severity, :string
+    field :reject_media, :boolean, default: false
+    field :reject_reports, :boolean, default: false
+    field :public_comments, :string
+    field :private_comments, :string
+
+    field :last_fetched_at, :utc_datetime_usec
+    field :unreachable_since, :utc_datetime_usec
+
+    timestamps(type: :utc_datetime_usec)
+  end
+
+  @doc false
+  def upsert_changeset(attrs) do
+    %__MODULE__{}
+    |> cast(attrs, [
+      :domain,
+      :software,
+      :version,
+      :description,
+      :open_registrations,
+      :user_count,
+      :status_count,
+      :nodeinfo,
+      :last_fetched_at
+    ])
+    |> validate_required([:domain])
+    |> update_change(:domain, &String.downcase/1)
+    |> unique_constraint(:domain)
+  end
+
+  @doc false
+  def moderation_changeset(instance, attrs) do
+    instance
+    |> cast(attrs, [
+      :banned,
+      :ban_reason,
+      :ban_severity,
+      :reject_media,
+      :reject_reports,
+      :public_comments,
+      :private_comments
+    ])
+  end
+end
