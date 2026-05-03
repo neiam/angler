@@ -33,7 +33,8 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
         "status_count" => stats.status_count,
         "domain_count" => stats.domain_count
       },
-      "thumbnail" => Application.get_env(:angler, :instance_banner_url) || base <> "/images/banner.jpg",
+      "thumbnail" =>
+        Application.get_env(:angler, :instance_banner_url) || base <> "/images/banner.jpg",
       "languages" => ["en"],
       "registrations" => Instance.open_registration?(),
       "approval_required" => Instance.approval_required?(),
