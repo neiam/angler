@@ -158,6 +158,27 @@ defmodule AnglerWeb.Router do
     get "/suggestions", EmptyController, :empty_array
   end
 
+  # Pixelfed v1.1 namespace — bootstrap reads + a few user-initiated actions.
+  scope "/api/v1.1", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_read
+
+    get "/accounts/login-activity", ApiV1Dot1Controller, :login_activity
+    get "/accounts/two-factor", ApiV1Dot1Controller, :two_factor
+    get "/accounts/emails-from-pixelfed", ApiV1Dot1Controller, :emails_from_pixelfed
+    get "/accounts/apps-and-applications", ApiV1Dot1Controller, :apps_and_applications
+    get "/accounts/mutuals/:id", ApiV1Dot1Controller, :mutuals
+    get "/accounts/username/:username", ApiV1Dot1Controller, :username_to_id
+    get "/accounts/:id/posts", ApiV1Dot1Controller, :posts
+  end
+
+  scope "/api/v1.1", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_write
+
+    delete "/accounts/avatar", ApiV1Dot1Controller, :delete_avatar
+    post "/accounts/change-password", ApiV1Dot1Controller, :change_password
+    post "/report", ApiV1Dot1Controller, :report
+  end
+
   scope "/api/v1", AnglerWeb.MastodonAPI do
     pipe_through :authenticated
 

@@ -100,6 +100,19 @@ defmodule Angler.Accounts.User do
     end
   end
 
+  @doc """
+  Changeset for `POST /api/v1.1/accounts/change-password`. Validates the
+  candidate `password` shape and hashes it; the controller is responsible
+  for verifying the *current* password before invoking this.
+  """
+  def change_password_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password])
+    |> validate_required([:password])
+    |> validate_password()
+    |> hash_password()
+  end
+
   @doc "Constant-time check of a candidate password against a user's stored hash."
   def valid_password?(%__MODULE__{password_hash: hash}, password)
       when is_binary(hash) and is_binary(password) and byte_size(password) > 0 do
