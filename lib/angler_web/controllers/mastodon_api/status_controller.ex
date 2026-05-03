@@ -11,9 +11,10 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
 
   alias Angler.Bookmarks
   alias Angler.Statuses
-  alias Angler.Statuses.Status
+  alias Angler.Statuses.{Scheduled, Scheduling, Status}
   alias Angler.Statuses.Workers.StatusDeliver
   alias Angler.Timelines.Workers.FeedInsert
+  alias AnglerWeb.MastodonAPI.ScheduledStatus, as: ScheduledStatusJSON
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
   alias AnglerWeb.Plugs.BearerAuth
 
@@ -36,6 +37,19 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
   def create(conn, params) do
     %{profile: profile} = BearerAuth.current_scope(conn)
 
+    cond do
+      Scheduling.scheduled?(params) ->
+        case Scheduling.schedule(profile, params) do
+          {:ok, %Scheduled{} = row} -> json(conn, ScheduledStatusJSON.render(row))
+          {:error, reason} -> validation_error(conn, to_string(reason))
+        end
+
+      true ->
+        do_create(conn, profile, params)
+    end
+  end
+
+  defp do_create(conn, profile, params) do
     case Statuses.create_local(profile, params) do
       {:ok, status} ->
         FeedInsert.enqueue(status.id)

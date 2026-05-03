@@ -11,6 +11,7 @@ defmodule Angler.Statuses.Federation do
   import Ecto.Query, warn: false
   require Logger
 
+  alias Angler.Conversations
   alias Angler.Federation.Actor
   alias Angler.Hashtags
   alias Angler.Notifications
@@ -50,6 +51,8 @@ defmodule Angler.Statuses.Federation do
       attach_hashtags(status, object)
       bump_author_count(status.profile_id)
       maybe_increment_reply_count(status)
+
+      if status.visibility == :direct, do: Conversations.record(status)
 
       # Fan into local followers' home timelines. Skips :direct visibility.
       Angler.Timelines.Workers.FeedInsert.enqueue(status.id)

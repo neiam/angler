@@ -130,9 +130,11 @@ defmodule Angler.Statuses do
 
   ## Local interactions (favourite / reblog / bookmark)
 
+  alias Angler.Conversations
   alias Angler.Likes
   alias Angler.Media
   alias Angler.Notifications
+  alias Angler.Polls
   alias Angler.Reblogs
   alias Angler.Statuses.Workers.InteractionDeliver
 
@@ -352,10 +354,19 @@ defmodule Angler.Statuses do
 
             insert_mentions(status, lex.mention_profile_ids)
             insert_hashtags(status, lex.hashtag_names, visibility)
+
+            case attach_poll(status, attrs["poll"]) do
+              :ok -> :ok
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
             bump_author!(profile.id)
             if parent, do: inc_counter(parent.id, :reply_count)
 
-            preload_local(status)
+            loaded = preload_local(status)
+            if visibility == :direct, do: Conversations.record(loaded)
+
+            loaded
 
           {:error, %Ecto.Changeset{} = cs} ->
             Repo.rollback(cs)
@@ -365,6 +376,17 @@ defmodule Angler.Statuses do
   end
 
   def create_local(%Profile{}, _), do: {:error, :not_local_profile}
+
+  defp attach_poll(_status, nil), do: :ok
+
+  defp attach_poll(%Status{} = status, %{"options" => _} = poll_attrs) do
+    case Polls.create(status, poll_attrs) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp attach_poll(_, _), do: :ok
 
   ## Internals — local create
 

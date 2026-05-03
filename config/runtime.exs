@@ -213,6 +213,7 @@ config :angler, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
-       {"15 3 * * *", Angler.OAuth.Workers.PruneExpired}
+       {"15 3 * * *", Angler.OAuth.Workers.PruneExpired},
+       {"* * * * *", Angler.Statuses.Workers.ScheduledFire}
      ]}
   ]

@@ -20,9 +20,10 @@ defmodule Angler.Media do
   alias Angler.Profiles.Profile
   alias Angler.Repo
 
-  @max_size_bytes 25 * 1_048_576
+  @max_size_bytes 100 * 1_048_576
 
   @image_mimes ~w(image/jpeg image/png image/webp image/gif)
+  @video_mimes ~w(video/mp4 video/webm video/quicktime)
   @magic_jpeg <<0xFF, 0xD8, 0xFF>>
   @magic_png <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A>>
   @magic_gif "GIF8"
@@ -52,7 +53,7 @@ defmodule Angler.Media do
          {:ok, declared_type} <- fetch_type(upload),
          {:ok, magic} <- read_magic(path),
          {:ok, sniffed_type} <- sniff_mime(magic, declared_type),
-         :ok <- check_image_only(sniffed_type),
+         :ok <- check_supported(sniffed_type),
          {:ok, size} <- check_size(path),
          {:ok, sha} <- hash(path) do
       case Repo.get_by(Asset, profile_id: profile_id, sha256: sha) do
@@ -123,10 +124,21 @@ defmodule Angler.Media do
   defp sniff_mime(<<@magic_png, _::binary>>, _), do: {:ok, "image/png"}
   defp sniff_mime(<<@magic_gif, _::binary>>, _), do: {:ok, "image/gif"}
   defp sniff_mime(<<@magic_webp_riff, _::32, "WEBP", _::binary>>, _), do: {:ok, "image/webp"}
+
+  defp sniff_mime(<<_::32, "ftyp", brand::binary-size(4), _::binary>>, declared) do
+    cond do
+      brand in ["qt  ", "qtco"] -> {:ok, "video/quicktime"}
+      declared == "video/quicktime" -> {:ok, "video/quicktime"}
+      true -> {:ok, "video/mp4"}
+    end
+  end
+
+  defp sniff_mime(<<0x1A, 0x45, 0xDF, 0xA3, _::binary>>, _), do: {:ok, "video/webm"}
   defp sniff_mime(_, _), do: {:error, :unsupported_type}
 
-  defp check_image_only(t) when t in @image_mimes, do: :ok
-  defp check_image_only(_), do: {:error, :unsupported_type}
+  defp check_supported(t) when t in @image_mimes, do: :ok
+  defp check_supported(t) when t in @video_mimes, do: :ok
+  defp check_supported(_), do: {:error, :unsupported_type}
 
   defp check_size(path) do
     case File.stat(path) do
@@ -176,4 +188,7 @@ defmodule Angler.Media do
   defp ext_for("image/png"), do: "png"
   defp ext_for("image/webp"), do: "webp"
   defp ext_for("image/gif"), do: "gif"
+  defp ext_for("video/mp4"), do: "mp4"
+  defp ext_for("video/webm"), do: "webm"
+  defp ext_for("video/quicktime"), do: "mov"
 end

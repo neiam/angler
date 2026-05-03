@@ -7,6 +7,7 @@ defmodule Angler.MediaTest do
   alias Angler.Profiles
 
   @fixture Path.join([__DIR__, "..", "fixtures", "red.jpg"])
+  @video_fixture Path.join([__DIR__, "..", "fixtures", "red.mp4"])
 
   setup do
     root =
@@ -49,6 +50,26 @@ defmodule Angler.MediaTest do
       {:ok, a} = Media.upload(ctx.alice, upload_fixture())
       {:ok, b} = Media.upload(ctx.alice, upload_fixture())
       assert a.id == b.id
+    end
+
+    test "accepts MP4 video upload", ctx do
+      src = Path.join(System.tmp_dir!(), "ang-mp4-#{System.unique_integer([:positive])}.mp4")
+      File.cp!(@video_fixture, src)
+
+      upload = %Plug.Upload{path: src, filename: "red.mp4", content_type: "video/mp4"}
+
+      assert {:ok, %Asset{} = asset} = Media.upload(ctx.alice, upload)
+      assert asset.media_type == "video/mp4"
+
+      drain = Oban.drain_queue(queue: :media)
+      assert drain.failure == 0
+
+      reloaded = Repo.get!(Asset, asset.id)
+      assert reloaded.status == "ready"
+      assert reloaded.width == 64
+      assert reloaded.height == 48
+      assert reloaded.duration_ms in 900..1100
+      assert reloaded.path_preview =~ "_poster.jpg"
     end
 
     test "rejects non-image MIME", ctx do

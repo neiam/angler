@@ -120,6 +120,18 @@ defmodule AnglerWeb.Router do
     get "/blocks", AccountController, :blocks
     get "/mutes", AccountController, :mutes
     get "/follow_requests", AccountController, :follow_requests
+
+    get "/scheduled_statuses", ScheduledStatusController, :index
+    get "/scheduled_statuses/:id", ScheduledStatusController, :show
+
+    get "/polls/:id", PollController, :show
+
+    get "/conversations", ConversationController, :index
+    get "/timelines/direct", ConversationController, :direct_timeline
+
+    get "/trends/tags", TrendsController, :tags
+    get "/trends/statuses", TrendsController, :statuses
+    get "/trends/links", TrendsController, :links
   end
 
   scope "/api/v1", AnglerWeb.MastodonAPI do
@@ -153,6 +165,14 @@ defmodule AnglerWeb.Router do
     post "/follow_requests/:id/authorize", AccountController, :authorize_request
     post "/follow_requests/:id/reject", AccountController, :reject_request
 
+    put "/scheduled_statuses/:id", ScheduledStatusController, :update
+    delete "/scheduled_statuses/:id", ScheduledStatusController, :delete
+
+    post "/polls/:id/votes", PollController, :vote
+
+    post "/conversations/:id/read", ConversationController, :read
+    delete "/conversations/:id", ConversationController, :delete
+
     post "/notifications/clear", NotificationController, :clear
     post "/notifications/:id/dismiss", NotificationController, :dismiss
 
@@ -164,6 +184,12 @@ defmodule AnglerWeb.Router do
     pipe_through :authenticated_write
 
     post "/media", MediaController, :upload_v2
+  end
+
+  scope "/api/v2", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_read
+
+    get "/search", SearchController, :search
   end
 
   scope "/", AnglerWeb do

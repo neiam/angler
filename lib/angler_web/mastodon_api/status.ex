@@ -17,8 +17,10 @@ defmodule AnglerWeb.MastodonAPI.Status do
   alias Angler.Profiles.Profile
   alias Angler.Repo
   alias Angler.Media.Asset
+  alias Angler.Polls
   alias Angler.Statuses.{Mention, Status, StatusHashtag, ViewerOverlay}
   alias AnglerWeb.MastodonAPI.{Account, Media}
+  alias AnglerWeb.MastodonAPI.Poll, as: PollJSON
 
   @doc """
   Render a Status as Mastodon JSON.
@@ -95,7 +97,7 @@ defmodule AnglerWeb.MastodonAPI.Status do
       "mentions" => render_mentions(status.mentions),
       "emojis" => [],
       "card" => nil,
-      "poll" => nil,
+      "poll" => render_poll(status),
       "media_attachments" => render_media(status),
       "account" => Account.render(status.profile),
       "tags" => render_tags(status.status_hashtags)
@@ -164,5 +166,12 @@ defmodule AnglerWeb.MastodonAPI.Status do
 
   defp render_media(%Status{media_attachments: assets}) when is_list(assets) do
     Enum.map(assets, fn %Asset{} = a -> Media.render(a) end)
+  end
+
+  defp render_poll(%Status{id: status_id}) do
+    case Polls.get_for_status(status_id) do
+      nil -> nil
+      poll -> PollJSON.render(poll)
+    end
   end
 end
