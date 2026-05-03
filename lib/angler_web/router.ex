@@ -76,6 +76,9 @@ defmodule AnglerWeb.Router do
     post "/api/auth/onboarding", AuthController, :onboarding
 
     post "/api/v1/apps", MastodonAPI.AppController, :create
+    get "/api/v1/instance", MastodonAPI.InstanceController, :show_v1
+    get "/api/v1/instance/peers", MastodonAPI.InstanceController, :peers
+    get "/api/v2/instance", MastodonAPI.InstanceController, :show_v2
   end
 
   scope "/", AnglerWeb do
@@ -132,6 +135,27 @@ defmodule AnglerWeb.Router do
     get "/trends/tags", TrendsController, :tags
     get "/trends/statuses", TrendsController, :statuses
     get "/trends/links", TrendsController, :links
+
+    # Mobile bootstrap reads.
+    get "/preferences", PreferencesController, :show
+    get "/markers", MarkerController, :index
+    get "/favourites", AccountListsController, :favourites
+    get "/bookmarks", AccountListsController, :bookmarks
+
+    # Stubs the Mastodon mobile clients call but we don't yet implement.
+    get "/announcements", EmptyController, :empty_array
+    get "/lists", EmptyController, :empty_array
+    get "/endorsements", EmptyController, :empty_array
+    get "/suggestions", EmptyController, :empty_array
+    get "/filters", EmptyController, :empty_array
+    get "/custom_emojis", EmptyController, :empty_array
+  end
+
+  scope "/api/v2", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_read
+
+    get "/filters", EmptyController, :empty_array
+    get "/suggestions", EmptyController, :empty_array
   end
 
   scope "/api/v1", AnglerWeb.MastodonAPI do
@@ -172,6 +196,8 @@ defmodule AnglerWeb.Router do
 
     post "/conversations/:id/read", ConversationController, :read
     delete "/conversations/:id", ConversationController, :delete
+
+    post "/markers", MarkerController, :update
 
     post "/notifications/clear", NotificationController, :clear
     post "/notifications/:id/dismiss", NotificationController, :dismiss
