@@ -1,0 +1,212 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: angler
+---
+# RBAC for libcluster's Kubernetes strategy. The ServiceAccount on the
+# pod gets read-only access to its own namespace's pods so it can
+# discover peer node IPs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: angler
+  namespace: angler
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: angler-pod-reader
+  namespace: angler
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: angler-pod-reader
+  namespace: angler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: angler-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: angler
+    namespace: angler
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: angler
+  namespace: angler
+  labels:
+    name: angler
+    keel.sh/policy: force
+    keel.sh/trigger: poll
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      name: angler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        name: angler
+    spec:
+      serviceAccountName: angler
+      containers:
+        - image: r.g.gmp.io/neiam/angler:latest
+          imagePullPolicy: Always
+          name: angler
+          ports:
+            - containerPort: 4000
+          env:
+            - name: PHX_HOST
+              value: angler.neiam.org
+            - name: PORT
+              value: "4000"
+            - name: PHX_SERVER
+              value: "true"
+            - name: POOL_SIZE
+              value: "10"
+
+            # Cluster glue: every pod becomes angler@<pod-ip>.
+            # libcluster (Cluster.Strategy.Kubernetes) discovers peers
+            # via the K8s API (RBAC defined above) and Horde rides on
+            # top to keep the Authority registry coherent.
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # - name: RELEASE_COOKIE
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: elixir-args
+            #       key: erlang_cookie
+
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: elixir-args
+                  key: secret_key_base
+
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: elixir-args
+                  key: sentry_dsn
+                  optional: true
+
+            # Postgres creds come from the StackGres-managed auth secret
+            # (named after the SGCluster in pg.yml). runtime.exs reads
+            # these directly — no URL composition — so passwords with
+            # special characters don't get mangled by URL parsing.
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: angler
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: superuser-username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: superuser-password
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 4000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      imagePullSecrets:
+        - name: gitlabgmp
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: angler-svc
+  namespace: angler
+spec:
+  ports:
+    - port: 80
+      targetPort: 4000
+      protocol: TCP
+  selector:
+    name: angler
+---
+# Headless service so dns_cluster can resolve all pod IPs for clustering.
+# Pods discover siblings via SRV/A records on this name; epmd-less long-
+# name distribution does the actual node connection.
+apiVersion: v1
+kind: Service
+metadata:
+  name: angler-headless
+  namespace: angler
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - port: 4000
+      targetPort: 4000
+      protocol: TCP
+      name: http
+  selector:
+    name: angler
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: angler
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: angler-ingress
+  namespace: angler
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: "traefik"
+    # Listen on both Traefik entrypoints. The middleware below redirects
+    # http → https for the `web` (port 80) entrypoint, so the app itself
+    # never has to issue a 301 (which broke the LiveView WS handshake).
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.middlewares: angler-redirect-https@kubernetescrd
+spec:
+  tls:
+    - hosts:
+        - angler.neiam.org
+      secretName: angler-tls
+  rules:
+    - host: angler.neiam.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: angler-svc
+                port:
+                  number: 80

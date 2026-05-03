@@ -10,6 +10,7 @@ defmodule Angler.Relationships do
   import Ecto.Query, warn: false
 
   alias Angler.Follows.{FollowRequest, Follower}
+  alias Angler.Profiles.{Block, Mute}
   alias Angler.Repo
 
   @type t :: %{
@@ -46,10 +47,14 @@ defmodule Angler.Relationships do
       followers = follow_lookup(viewer_id, target_ids, :target_follows_viewer)
       requested = request_lookup(viewer_id, target_ids, :viewer_requests_target)
       requested_by = request_lookup(viewer_id, target_ids, :target_requests_viewer)
+      blocking = block_lookup(viewer_id, target_ids, :viewer_blocks_target)
+      blocked_by = block_lookup(viewer_id, target_ids, :target_blocks_viewer)
+      muting = mute_lookup(viewer_id, target_ids)
 
       Map.new(target_ids, fn tid ->
         following_row = Map.get(followings, tid)
         follower_row = Map.get(followers, tid)
+        mute_row = Map.get(muting, tid)
 
         {tid,
          %{
@@ -60,10 +65,10 @@ defmodule Angler.Relationships do
            requested_by: MapSet.member?(requested_by, tid),
            showing_reblogs: showing_reblogs(following_row),
            notifying: notifying(following_row),
-           blocking: false,
-           blocked_by: false,
-           muting: false,
-           muting_notifications: false,
+           blocking: MapSet.member?(blocking, tid),
+           blocked_by: MapSet.member?(blocked_by, tid),
+           muting: not is_nil(mute_row),
+           muting_notifications: mute_row && mute_row.hide_notifications,
            domain_blocking: false,
            endorsed: false,
            note: ""
@@ -132,4 +137,31 @@ defmodule Angler.Relationships do
 
   defp notifying(nil), do: false
   defp notifying(%{notify: v}), do: v
+
+  defp block_lookup(viewer_id, target_ids, :viewer_blocks_target) do
+    from(b in Block,
+      where: b.profile_id == ^viewer_id and b.target_id in ^target_ids,
+      select: b.target_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  defp block_lookup(viewer_id, target_ids, :target_blocks_viewer) do
+    from(b in Block,
+      where: b.target_id == ^viewer_id and b.profile_id in ^target_ids,
+      select: b.profile_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  defp mute_lookup(viewer_id, target_ids) do
+    from(m in Mute,
+      where: m.profile_id == ^viewer_id and m.target_id in ^target_ids,
+      select: %{target_id: m.target_id, hide_notifications: m.hide_notifications}
+    )
+    |> Repo.all()
+    |> Map.new(fn r -> {r.target_id, r} end)
+  end
 end

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Authorize {@ctx.client.name} · Angler</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.5rem; }
+      .scopes { background: #f4f4f4; padding: 0.75rem 1rem; border-radius: 0.5rem; }
+      .scopes li { font-family: ui-monospace, monospace; font-size: 0.875rem; }
+      .actions { margin-top: 1.5rem; display: flex; gap: 0.5rem; }
+      button { padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+      button.approve { background: #2563eb; color: white; border: 0; }
+      button.deny    { background: #e5e5e5; border: 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Authorize <strong>{@ctx.client.name}</strong>?</h1>
+    <%= if @current_user do %>
+      <p style="font-size: 0.875rem; color: #525252;">
+        Signed in as <strong>@{@current_user.email}</strong>.
+        <form method="post" action={~p"/session/logout"} style="display: inline;">
+          <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+          <button
+            type="submit"
+            style="background: none; border: 0; color: #2563eb; cursor: pointer; padding: 0;"
+          >
+            Sign out
+          </button>
+        </form>
+      </p>
+    <% end %>
+    <p>The application is requesting the following permissions:</p>
+
+    <ul class="scopes">
+      <%= for s <- @ctx.scopes do %>
+        <li>{s}</li>
+      <% end %>
+    </ul>
+
+    <form method="post" action={~p"/oauth/authorize"}>
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <input type="hidden" name="client_id" value={Integer.to_string(@ctx.client.id)} />
+      <input type="hidden" name="redirect_uri" value={@ctx.redirect_uri} />
+      <input type="hidden" name="response_type" value="code" />
+      <input type="hidden" name="scope" value={Enum.join(@ctx.scopes, " ")} />
+
+      <div class="actions">
+        <button type="submit" name="approve" value="true" class="approve">Approve</button>
+        <button type="submit" name="approve" value="false" class="deny">Deny</button>
+      </div>
+    </form>
+  </body>
+</html>

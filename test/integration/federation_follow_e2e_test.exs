@@ -169,6 +169,14 @@ defmodule Angler.Integration.FederationFollowE2ETest do
 
     assert :ok =
              HTTPSignature.verify(:post, accept_path, accept_headers, accept_body, resolver)
+
+    # Inbound Follow → "follow" notification for alice.
+    notifications = Repo.all(Angler.Notifications.Notification)
+
+    assert Enum.any?(
+             notifications,
+             &(&1.type == "follow" and &1.recipient_id == ctx.alice.id and &1.account_id == bob.id)
+           )
   end
 
   defp get_req_header_str(conn, name) do

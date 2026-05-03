@@ -42,7 +42,7 @@ if config_env() == :prod do
         password:
           System.get_env("POSTGRES_PASSWORD") ||
             raise("POSTGRES_PASSWORD is required when POSTGRES_HOST is set"),
-        database: System.get_env("POSTGRES_DB") || "diogramos",
+        database: System.get_env("POSTGRES_DB") || "angler",
         pool_size: pool_size,
         socket_options: maybe_ipv6
 
@@ -210,5 +210,9 @@ config :angler, Oban,
     cleanup: 5
   ],
   plugins: [
-    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"15 3 * * *", Angler.OAuth.Workers.PruneExpired}
+     ]}
   ]

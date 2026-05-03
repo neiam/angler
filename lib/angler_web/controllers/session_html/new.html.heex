@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <title>Sign in · Angler</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 24rem; margin: 4rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.5rem; }
+      label { display: block; font-size: 0.875rem; margin: 0.75rem 0 0.25rem; }
+      input { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
+      button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+      .error { color: #b91c1c; margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Sign in</h1>
+
+    <%= if @error do %>
+      <p class="error">{@error}</p>
+    <% end %>
+
+    <form method="post" action={~p"/session/login"}>
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <input type="hidden" name="next" value={@next} />
+
+      <label for="username">Username or email</label>
+      <input
+        id="username"
+        name="username"
+        type="text"
+        value={@username}
+        autocomplete="username"
+        required
+      />
+
+      <label for="password">Password</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        autocomplete="current-password"
+        required
+      />
+
+      <button type="submit">Sign in</button>
+    </form>
+  </body>
+</html>

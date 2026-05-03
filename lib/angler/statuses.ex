@@ -131,6 +131,8 @@ defmodule Angler.Statuses do
   ## Local interactions (favourite / reblog / bookmark)
 
   alias Angler.Likes
+  alias Angler.Media
+  alias Angler.Notifications
   alias Angler.Reblogs
   alias Angler.Statuses.Workers.InteractionDeliver
 
@@ -156,6 +158,13 @@ defmodule Angler.Statuses do
         if like.remote_url == activity_id do
           inc_counter(status.id, :likes_count, 1)
           maybe_deliver_interaction(:like, actor, status, activity_id)
+
+          Notifications.notify(%{
+            recipient_id: status.profile_id,
+            account_id: actor.id,
+            type: "favourite",
+            status_id: status.id
+          })
         end
 
         {:ok, get!(status.id)}
@@ -207,6 +216,13 @@ defmodule Angler.Statuses do
           if reblog.remote_url == activity_id do
             inc_counter(status.id, :reblogs_count, 1)
             maybe_deliver_interaction(:announce, actor, status, activity_id)
+
+            Notifications.notify(%{
+              recipient_id: status.profile_id,
+              account_id: actor.id,
+              type: "reblog",
+              status_id: status.id
+            })
           end
 
           {:ok, get!(status.id)}
@@ -309,16 +325,31 @@ defmodule Angler.Statuses do
           {:ok, Status.t()} | {:error, atom() | Ecto.Changeset.t()}
   def create_local(%Profile{domain: nil} = profile, attrs) when is_map(attrs) do
     attrs = stringify(attrs)
+    media_ids = parse_media_ids(attrs["media_ids"])
 
-    with {:ok, caption} <- fetch_caption(attrs),
+    with {:ok, caption} <- fetch_caption(attrs, media_ids),
          {:ok, visibility} <- parse_visibility(attrs["visibility"]),
          {:ok, parent} <- resolve_reply_parent(attrs["in_reply_to_id"], profile.id) do
       lex = Lexer.render(caption)
       sensitive? = truthy?(attrs["sensitive"])
 
       Repo.transaction(fn ->
-        case insert_status(profile, caption, lex, visibility, sensitive?, attrs, parent) do
+        case insert_status(
+               profile,
+               caption,
+               lex,
+               visibility,
+               sensitive?,
+               attrs,
+               parent,
+               media_ids
+             ) do
           {:ok, status} ->
+            case Media.attach_to_status(media_ids, status.id, profile.id) do
+              {:ok, _} -> :ok
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
             insert_mentions(status, lex.mention_profile_ids)
             insert_hashtags(status, lex.hashtag_names, visibility)
             bump_author!(profile.id)
@@ -337,13 +368,35 @@ defmodule Angler.Statuses do
 
   ## Internals — local create
 
-  defp fetch_caption(attrs) do
+  defp fetch_caption(attrs, media_ids) do
     case Map.get(attrs, "status", "") do
+      "" when media_ids != [] -> {:ok, ""}
       "" -> {:error, :empty_status}
       s when is_binary(s) -> {:ok, s}
       _ -> {:error, :bad_caption}
     end
   end
+
+  defp parse_media_ids(nil), do: []
+  defp parse_media_ids([]), do: []
+
+  defp parse_media_ids(ids) when is_list(ids) do
+    Enum.flat_map(ids, fn
+      n when is_integer(n) ->
+        [n]
+
+      s when is_binary(s) ->
+        case Integer.parse(s) do
+          {n, ""} -> [n]
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp parse_media_ids(_), do: []
 
   defp parse_visibility(nil), do: {:ok, :public}
 
@@ -374,10 +427,11 @@ defmodule Angler.Statuses do
     end
   end
 
-  defp insert_status(profile, caption, lex, visibility, sensitive?, attrs, parent) do
+  defp insert_status(profile, caption, lex, visibility, sensitive?, attrs, parent, media_ids) do
     snowflake = Angler.Snowflake.next()
     base = AnglerWeb.Endpoint.url()
     canonical = base <> "/p/" <> profile.username <> "/" <> Integer.to_string(snowflake)
+    type = type_for(media_ids)
 
     %{
       id: snowflake,
@@ -388,8 +442,8 @@ defmodule Angler.Statuses do
       cw_summary: attrs["spoiler_text"],
       visibility: visibility,
       scope: Atom.to_string(visibility),
-      type: "text",
-      pf_type: "text",
+      type: type,
+      pf_type: type,
       local: true,
       uri: canonical,
       url: canonical,
@@ -401,9 +455,13 @@ defmodule Angler.Statuses do
     |> Repo.insert()
   end
 
+  defp type_for([]), do: "text"
+  defp type_for([_]), do: "photo"
+  defp type_for(_), do: "photo:album"
+
   defp insert_mentions(_status, []), do: :ok
 
-  defp insert_mentions(%Status{id: status_id}, profile_ids) do
+  defp insert_mentions(%Status{id: status_id, profile_id: author_id}, profile_ids) do
     rows =
       for pid <- profile_ids, pid != nil do
         %{status_id: status_id, profile_id: pid, silent: false, inserted_at: DateTime.utc_now()}
@@ -414,6 +472,15 @@ defmodule Angler.Statuses do
         on_conflict: :nothing,
         conflict_target: [:status_id, :profile_id]
       )
+
+      for pid <- profile_ids, pid != nil and pid != author_id do
+        Notifications.notify(%{
+          recipient_id: pid,
+          account_id: author_id,
+          type: "mention",
+          status_id: status_id
+        })
+      end
     end
 
     :ok

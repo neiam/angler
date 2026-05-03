@@ -12,6 +12,7 @@ defmodule Angler.Timelines do
   import Ecto.Query, warn: false
 
   alias Angler.Pagination.MastodonCursor
+  alias Angler.Profiles.BlocksMutes
   alias Angler.Repo
   alias Angler.Statuses.{Status, StatusHashtag}
   alias Angler.Timelines.HomeFeedEntry
@@ -61,6 +62,7 @@ defmodule Angler.Timelines do
 
     base = filter_local(base, opts)
     base = filter_only_media(base, opts)
+    base = exclude_authors(base, hidden_author_ids(opts[:viewer_id]))
 
     statuses =
       base
@@ -93,6 +95,7 @@ defmodule Angler.Timelines do
 
     base = filter_local(base, opts)
     base = filter_only_media(base, opts)
+    base = exclude_authors(base, hidden_author_ids(opts[:viewer_id]))
 
     statuses =
       base
@@ -124,7 +127,25 @@ defmodule Angler.Timelines do
     end
   end
 
-  # Stub for mute / block / user_domain_block filtering. Once those tables
-  # exist this is where we'll plug them in. Today: pass-through.
-  defp apply_viewer_filters(rows, _viewer_id), do: rows
+  defp apply_viewer_filters(rows, viewer_id) do
+    hidden = hidden_author_ids(viewer_id) |> MapSet.new()
+
+    if MapSet.size(hidden) == 0 do
+      rows
+    else
+      Enum.reject(rows, fn %{status: s} -> MapSet.member?(hidden, s.profile_id) end)
+    end
+  end
+
+  defp hidden_author_ids(nil), do: []
+
+  defp hidden_author_ids(viewer_id) when is_integer(viewer_id) do
+    Enum.uniq(BlocksMutes.block_ids_for(viewer_id) ++ BlocksMutes.mute_ids_for(viewer_id))
+  end
+
+  defp exclude_authors(query, []), do: query
+
+  defp exclude_authors(query, ids) when is_list(ids) do
+    from [s] in query, where: s.profile_id not in ^ids
+  end
 end

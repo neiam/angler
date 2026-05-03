@@ -2,6 +2,7 @@ defmodule Angler.Reblogs.Federation do
   @moduledoc "Inbound `Announce` (reblog) and `Undo Announce` handling."
 
   alias Angler.Federation.Actor
+  alias Angler.Notifications
   alias Angler.Reblogs
   alias Angler.Statuses
   alias Angler.Statuses.Status
@@ -18,6 +19,14 @@ defmodule Angler.Reblogs.Federation do
              remote_url: activity_id
            }) do
       Statuses.inc_counter(status.id, :reblogs_count)
+
+      Notifications.notify(%{
+        recipient_id: status.profile_id,
+        account_id: profile.id,
+        type: "reblog",
+        status_id: status.id
+      })
+
       :ok
     else
       nil -> {:error, :unknown_target}

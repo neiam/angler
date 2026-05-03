@@ -82,4 +82,71 @@ defmodule Angler.Profiles.Profile do
     do: %{profile | id: Angler.Snowflake.next()}
 
   defp maybe_assign_id(profile), do: profile
+
+  @update_credentials_fields ~w(
+    display_name note locked bot discoverable indexable website avatar_path header_path
+  )
+
+  @doc """
+  Changeset for `PATCH /api/v1/accounts/update_credentials`. Maps Mastodon
+  field names onto our schema. Strips HTML from `note` (Mastodon expects
+  raw text in; we render HTML on the way out).
+  """
+  def update_credentials_changeset(profile, attrs) when is_map(attrs) do
+    mapped =
+      attrs
+      |> Map.take(@update_credentials_fields)
+      |> Map.new(fn {k, v} -> {schema_key(k), v} end)
+
+    profile
+    |> cast(mapped, [
+      :name,
+      :bio,
+      :bio_text,
+      :is_private,
+      :is_bot,
+      :discoverable,
+      :indexable_search,
+      :website,
+      :avatar_path,
+      :header_path
+    ])
+    |> validate_length(:name, max: 30)
+    |> validate_length(:bio_text, max: 200)
+    |> validate_length(:website, max: 120)
+    |> render_bio()
+  end
+
+  defp render_bio(changeset) do
+    case get_change(changeset, :bio_text) do
+      nil ->
+        changeset
+
+      raw ->
+        put_change(changeset, :bio, render_text_to_html(raw))
+    end
+  end
+
+  defp render_text_to_html(""), do: ""
+
+  defp render_text_to_html(raw) when is_binary(raw) do
+    raw
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+    |> String.replace("\"", "&quot;")
+    |> String.replace("'", "&#39;")
+    |> String.replace("\n", "<br>")
+  end
+
+  defp schema_key("display_name"), do: :name
+  defp schema_key("note"), do: :bio_text
+  defp schema_key("locked"), do: :is_private
+  defp schema_key("bot"), do: :is_bot
+  defp schema_key("discoverable"), do: :discoverable
+  defp schema_key("indexable"), do: :indexable_search
+  defp schema_key("website"), do: :website
+  defp schema_key("avatar_path"), do: :avatar_path
+  defp schema_key("header_path"), do: :header_path
+  defp schema_key(other), do: other
 end

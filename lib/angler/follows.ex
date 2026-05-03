@@ -23,6 +23,7 @@ defmodule Angler.Follows do
 
   alias Angler.Federation.Workers.FollowDeliver
   alias Angler.Follows.{FollowRequest, Follower}
+  alias Angler.Notifications
   alias Angler.Profiles.Profile
   alias Angler.Repo
 
@@ -98,9 +99,20 @@ defmodule Angler.Follows do
     |> FollowRequest.changeset()
     |> Repo.insert(on_conflict: :nothing, conflict_target: [:profile_id, :following_id])
     |> case do
-      {:ok, %FollowRequest{id: nil}} -> {:ok, :pending, get_request(target.id, actor.id)}
-      {:ok, fr} -> {:ok, :pending, fr}
-      err -> err
+      {:ok, %FollowRequest{id: nil}} ->
+        {:ok, :pending, get_request(target.id, actor.id)}
+
+      {:ok, fr} ->
+        Notifications.notify(%{
+          recipient_id: target.id,
+          account_id: actor.id,
+          type: "follow_request"
+        })
+
+        {:ok, :pending, fr}
+
+      err ->
+        err
     end
   end
 
@@ -131,8 +143,17 @@ defmodule Angler.Follows do
       end
     end)
     |> case do
-      {:ok, follower} -> {:ok, :accepted, follower}
-      err -> err
+      {:ok, follower} ->
+        Notifications.notify(%{
+          recipient_id: follower.profile_id,
+          account_id: follower.following_id,
+          type: "follow"
+        })
+
+        {:ok, :accepted, follower}
+
+      err ->
+        err
     end
   end
 
@@ -312,6 +333,113 @@ defmodule Angler.Follows do
     )
 
     :ok
+  end
+
+  ## Follow requests (authorize / reject — locked-account flow)
+
+  @doc """
+  List follow requests pending against `target_id`. Newest first.
+  """
+  @spec list_requests(integer(), pos_integer()) :: [
+          %{request: FollowRequest.t(), follower: Profile.t()}
+        ]
+  def list_requests(target_id, limit \\ 40) do
+    Repo.all(
+      from r in FollowRequest,
+        join: p in Profile,
+        on: p.id == r.following_id,
+        where: r.profile_id == ^target_id and is_nil(p.status),
+        order_by: [desc: r.id],
+        limit: ^limit,
+        select: %{request: r, follower: p}
+    )
+  end
+
+  @doc """
+  Authorize a follow request from `follower` against `target`. Promotes the
+  pending row into an accepted `Follower`, bumps counters, generates a
+  "follow" notification, and — if the follower is remote — enqueues an
+  outbound `Accept Follow`.
+  """
+  @spec authorize_request(Profile.t(), Profile.t()) ::
+          {:ok, Follower.t()} | {:error, :not_found}
+  def authorize_request(%Profile{} = target, %Profile{} = follower) do
+    case get_request(target.id, follower.id) do
+      nil ->
+        {:error, :not_found}
+
+      %FollowRequest{} = request ->
+        result =
+          Repo.transaction(fn ->
+            Repo.delete!(request)
+
+            {:ok, follower_row} =
+              %{
+                profile_id: target.id,
+                following_id: follower.id,
+                remote_url: request.remote_url,
+                accepted_at: DateTime.utc_now()
+              }
+              |> Follower.changeset()
+              |> Repo.insert(on_conflict: :nothing, conflict_target: [:profile_id, :following_id])
+
+            row = follower_row || get_follower(target.id, follower.id)
+
+            inc_counters!(target.id, :followers_count, 1)
+            inc_counters!(follower.id, :following_count, 1)
+
+            row
+          end)
+
+        case result do
+          {:ok, %Follower{} = row} ->
+            Notifications.notify(%{
+              recipient_id: target.id,
+              account_id: follower.id,
+              type: "follow"
+            })
+
+            if not is_nil(follower.domain) and is_binary(request.remote_url) do
+              FollowDeliver.enqueue(:accept, %{
+                local_actor_id: target.id,
+                inbox_url: follower.shared_inbox_url || follower.inbox_url,
+                follow_activity_id: request.remote_url,
+                follow_actor_url: follower.remote_url
+              })
+            end
+
+            {:ok, row}
+
+          err ->
+            err
+        end
+    end
+  end
+
+  @doc """
+  Reject a follow request from `follower` against `target`. Idempotent. For
+  remote followers we additionally enqueue an outbound `Reject Follow`.
+  """
+  @spec reject_request(Profile.t(), Profile.t()) :: :ok
+  def reject_request(%Profile{} = target, %Profile{} = follower) do
+    case get_request(target.id, follower.id) do
+      nil ->
+        :ok
+
+      %FollowRequest{} = request ->
+        Repo.delete!(request)
+
+        if not is_nil(follower.domain) and is_binary(request.remote_url) do
+          FollowDeliver.enqueue(:reject, %{
+            local_actor_id: target.id,
+            inbox_url: follower.shared_inbox_url || follower.inbox_url,
+            follow_activity_id: request.remote_url,
+            follow_actor_url: follower.remote_url
+          })
+        end
+
+        :ok
+    end
   end
 
   ## Counter helper

@@ -84,6 +84,50 @@ defmodule Angler.Profiles do
     AnglerWeb.Endpoint.url() <> "/@" <> username
   end
 
+  @doc """
+  Resolve a profile by `acct` (`username` or `username@domain`). For remote
+  acct strings we fall back to the local cache only — federation discovery
+  via WebFinger is callable via `Angler.Federation.Webfinger.resolve/1` if
+  the caller wants it.
+  """
+  @spec lookup_acct(String.t()) :: Profile.t() | nil
+  def lookup_acct(acct) when is_binary(acct) do
+    acct = String.trim_leading(acct, "@")
+
+    case String.split(acct, "@", parts: 2) do
+      [username] ->
+        get_local_by_username(username)
+
+      [username, domain] ->
+        Repo.one(
+          from p in Profile,
+            where:
+              p.username == ^username and p.domain == ^String.downcase(domain) and
+                is_nil(p.status)
+        )
+    end
+  end
+
+  def lookup_acct(_), do: nil
+
+  @doc """
+  Prefix-search local profiles by username or display name.
+  """
+  @spec search(String.t(), keyword()) :: [Profile.t()]
+  def search(query, opts \\ []) when is_binary(query) do
+    limit = Keyword.get(opts, :limit, 20)
+    pattern = String.trim_leading(query, "@") <> "%"
+
+    Repo.all(
+      from p in Profile,
+        where:
+          is_nil(p.status) and
+            (ilike(p.username, ^pattern) or ilike(p.name, ^pattern)),
+        order_by: [desc: p.followers_count, asc: p.username],
+        limit: ^limit
+    )
+  end
+
   @doc "ActivityPub `id` for a local profile."
   @spec actor_url(Profile.t()) :: String.t()
   def actor_url(%Profile{remote_url: remote, domain: domain})
@@ -92,5 +136,45 @@ defmodule Angler.Profiles do
 
   def actor_url(%Profile{username: username}) do
     AnglerWeb.Endpoint.url() <> "/users/" <> username
+  end
+
+  @doc """
+  Update the authenticated user's profile (PATCH /accounts/update_credentials).
+
+  Accepts a string-keyed map of fields. `avatar` and `header` may be a
+  `Plug.Upload` (or compatible) — uploaded via `Angler.Media`, then the
+  preview path is saved on the profile.
+  """
+  @spec update_credentials(Profile.t(), map()) ::
+          {:ok, Profile.t()} | {:error, Ecto.Changeset.t() | atom()}
+  def update_credentials(%Profile{domain: nil} = profile, attrs) do
+    with {:ok, attrs} <- maybe_upload_avatar(profile, attrs, "avatar", :avatar_path),
+         {:ok, attrs} <- maybe_upload_avatar(profile, attrs, "header", :header_path) do
+      profile
+      |> Profile.update_credentials_changeset(attrs)
+      |> Repo.update()
+    end
+  end
+
+  def update_credentials(_, _), do: {:error, :not_local_profile}
+
+  defp maybe_upload_avatar(profile, attrs, key, target_field) do
+    case Map.get(attrs, key) do
+      %{path: _, content_type: _} = upload ->
+        case Angler.Media.upload(profile, upload) do
+          {:ok, asset} ->
+            url =
+              Angler.Media.Storage.url(asset, :preview) ||
+                Angler.Media.Storage.url(asset, :original)
+
+            {:ok, attrs |> Map.delete(key) |> Map.put(Atom.to_string(target_field), url)}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      _ ->
+        {:ok, attrs}
+    end
   end
 end

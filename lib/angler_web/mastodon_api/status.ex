@@ -16,8 +16,9 @@ defmodule AnglerWeb.MastodonAPI.Status do
   alias Angler.Profiles
   alias Angler.Profiles.Profile
   alias Angler.Repo
+  alias Angler.Media.Asset
   alias Angler.Statuses.{Mention, Status, StatusHashtag, ViewerOverlay}
-  alias AnglerWeb.MastodonAPI.Account
+  alias AnglerWeb.MastodonAPI.{Account, Media}
 
   @doc """
   Render a Status as Mastodon JSON.
@@ -29,7 +30,14 @@ defmodule AnglerWeb.MastodonAPI.Status do
   """
   @spec render(Status.t(), integer() | nil) :: map()
   def render(%Status{} = status, viewer_id \\ nil) do
-    status = Repo.preload(status, [:profile, mentions: :profile, status_hashtags: :hashtag])
+    status =
+      Repo.preload(status,
+        profile: [],
+        mentions: :profile,
+        status_hashtags: :hashtag,
+        media_attachments: []
+      )
+
     base = render_base(status)
 
     if viewer_id do
@@ -88,7 +96,7 @@ defmodule AnglerWeb.MastodonAPI.Status do
       "emojis" => [],
       "card" => nil,
       "poll" => nil,
-      "media_attachments" => [],
+      "media_attachments" => render_media(status),
       "account" => Account.render(status.profile),
       "tags" => render_tags(status.status_hashtags)
     }
@@ -150,4 +158,11 @@ defmodule AnglerWeb.MastodonAPI.Status do
   end
 
   defp render_tags(_), do: []
+
+  defp render_media(%Status{media_attachments: %Ecto.Association.NotLoaded{}}), do: []
+  defp render_media(%Status{media_attachments: nil}), do: []
+
+  defp render_media(%Status{media_attachments: assets}) when is_list(assets) do
+    Enum.map(assets, fn %Asset{} = a -> Media.render(a) end)
+  end
 end

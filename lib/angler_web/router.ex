@@ -10,6 +10,14 @@ defmodule AnglerWeb.Router do
     plug :put_secure_browser_headers
   end
 
+  pipeline :browser_session do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+    plug AnglerWeb.Plugs.SessionAuth
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
   end
@@ -66,6 +74,8 @@ defmodule AnglerWeb.Router do
 
     post "/api/auth/app-code-verify", AuthController, :app_code_verify
     post "/api/auth/onboarding", AuthController, :onboarding
+
+    post "/api/v1/apps", MastodonAPI.AppController, :create
   end
 
   scope "/", AnglerWeb do
@@ -89,17 +99,42 @@ defmodule AnglerWeb.Router do
 
     get "/accounts/verify_credentials", AccountController, :verify_credentials
     get "/accounts/relationships", AccountController, :relationships
+    get "/accounts/lookup", AccountController, :lookup
+    get "/accounts/search", AccountController, :search
+    get "/accounts/:id", AccountController, :show
+    get "/accounts/:id/statuses", AccountController, :statuses
+    get "/accounts/:id/followers", AccountController, :followers
+    get "/accounts/:id/following", AccountController, :following
+
     get "/statuses/:id", StatusController, :show
 
     get "/timelines/home", TimelineController, :home
     get "/timelines/public", TimelineController, :public
     get "/timelines/tag/:hashtag", TimelineController, :hashtag
+
+    get "/notifications", NotificationController, :index
+    get "/notifications/:id", NotificationController, :show
+
+    get "/media/:id", MediaController, :show
+
+    get "/blocks", AccountController, :blocks
+    get "/mutes", AccountController, :mutes
+    get "/follow_requests", AccountController, :follow_requests
+  end
+
+  scope "/api/v1", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated
+
+    get "/apps/verify_credentials", AppController, :verify
   end
 
   scope "/api/v1", AnglerWeb.MastodonAPI do
     pipe_through :authenticated_write
 
     post "/statuses", StatusController, :create
+
+    patch "/accounts/update_credentials", AccountController, :update_credentials
+    post "/accounts/update_credentials", AccountController, :update_credentials
 
     post "/statuses/:id/favourite", StatusController, :favourite
     post "/statuses/:id/unfavourite", StatusController, :unfavourite
@@ -110,6 +145,45 @@ defmodule AnglerWeb.Router do
 
     post "/accounts/:id/follow", AccountController, :follow
     post "/accounts/:id/unfollow", AccountController, :unfollow
+    post "/accounts/:id/block", AccountController, :block
+    post "/accounts/:id/unblock", AccountController, :unblock
+    post "/accounts/:id/mute", AccountController, :mute
+    post "/accounts/:id/unmute", AccountController, :unmute
+
+    post "/follow_requests/:id/authorize", AccountController, :authorize_request
+    post "/follow_requests/:id/reject", AccountController, :reject_request
+
+    post "/notifications/clear", NotificationController, :clear
+    post "/notifications/:id/dismiss", NotificationController, :dismiss
+
+    post "/media", MediaController, :upload_v1
+    put "/media/:id", MediaController, :update
+  end
+
+  scope "/api/v2", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_write
+
+    post "/media", MediaController, :upload_v2
+  end
+
+  scope "/", AnglerWeb do
+    pipe_through :api
+
+    get "/storage/*path", MediaController, :serve
+
+    post "/oauth/token", OAuth.TokenController, :token
+    post "/oauth/revoke", OAuth.RevokeController, :revoke
+  end
+
+  scope "/", AnglerWeb do
+    pipe_through :browser_session
+
+    get "/session/login", SessionController, :new
+    post "/session/login", SessionController, :create
+    post "/session/logout", SessionController, :delete
+
+    get "/oauth/authorize", OAuth.AuthorizeController, :show
+    post "/oauth/authorize", OAuth.AuthorizeController, :authorize
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

@@ -13,6 +13,7 @@ defmodule Angler.Statuses.Federation do
 
   alias Angler.Federation.Actor
   alias Angler.Hashtags
+  alias Angler.Notifications
   alias Angler.Profiles
   alias Angler.Profiles.Profile
   alias Angler.Repo
@@ -222,8 +223,18 @@ defmodule Angler.Statuses.Federation do
           username = String.trim_leading(href, base_users)
 
           case Profiles.get_local_by_username(username) do
-            %Profile{id: pid} -> insert_mention(status.id, pid)
-            _ -> :ok
+            %Profile{id: pid} ->
+              insert_mention(status.id, pid)
+
+              Notifications.notify(%{
+                recipient_id: pid,
+                account_id: status.profile_id,
+                type: "mention",
+                status_id: status.id
+              })
+
+            _ ->
+              :ok
           end
 
         true ->

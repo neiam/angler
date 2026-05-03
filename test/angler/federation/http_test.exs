@@ -19,16 +19,7 @@ defmodule Angler.Federation.HTTPTest do
     assert {:error, :bad_url} = HTTP.fetch("not a url")
   end
 
-  test "rejects banned domain" do
-    Angler.Repo.checkout(fn ->
-      Angler.Federation.Bans.bust()
-    end)
-
-    # We can't easily seed the bans table here without DataCase, so just
-    # confirm the function runs and returns *some* error rather than blowing up.
-    # Real banned-domain testing happens in BansTest with a sandboxed DB.
-    assert {:error, _} = HTTP.fetch("https://nonexistent.invalid/")
-  rescue
-    _ -> :ok
-  end
+  # Banned-domain behaviour is exercised end-to-end in BansTest (which has a
+  # sandboxed DB). We don't need to repeat it here — this module is for the
+  # DB-free guards (scheme + URL parsing).
 end

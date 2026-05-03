@@ -33,7 +33,8 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
     opts = [
       local_only: truthy?(params["local"]),
       remote_only: truthy?(params["remote"]),
-      only_media: truthy?(params["only_media"])
+      only_media: truthy?(params["only_media"]),
+      viewer_id: viewer_id(conn)
     ]
 
     {statuses, cursor_rows} = Timelines.public(cursor, opts)
@@ -48,7 +49,8 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
     opts = [
       local_only: truthy?(params["local"]),
       remote_only: truthy?(params["remote"]),
-      only_media: truthy?(params["only_media"])
+      only_media: truthy?(params["only_media"]),
+      viewer_id: viewer_id(conn)
     ]
 
     {statuses, cursor_rows} = Timelines.hashtag(name, cursor, opts)

@@ -160,5 +160,9 @@ defmodule Angler.Integration.FederationCreateNoteE2ETest do
     assert body["account"]["acct"] == "bob@remote.test"
     assert Enum.any?(body["mentions"], &(&1["username"] == "alice"))
     assert Enum.any?(body["tags"], &(&1["name"] == "hello"))
+
+    # Mention notification was created for alice.
+    notifications = Repo.all(Angler.Notifications.Notification)
+    assert Enum.any?(notifications, &(&1.type == "mention" and &1.recipient_id == alice_id))
   end
 end

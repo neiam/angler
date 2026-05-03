@@ -3,6 +3,7 @@ defmodule Angler.Likes.Federation do
 
   alias Angler.Federation.Actor
   alias Angler.Likes
+  alias Angler.Notifications
   alias Angler.Statuses
   alias Angler.Statuses.Status
 
@@ -19,6 +20,14 @@ defmodule Angler.Likes.Federation do
              remote_url: activity_id
            }) do
       Statuses.inc_counter(status.id, :likes_count)
+
+      Notifications.notify(%{
+        recipient_id: status.profile_id,
+        account_id: profile.id,
+        type: "favourite",
+        status_id: status.id
+      })
+
       :ok
     else
       nil -> {:error, :unknown_target}

@@ -1,0 +1,18 @@
+apiVersion: stackgres.io/v1
+kind: SGCluster
+metadata:
+  name: postgres
+  namespace: angler
+spec:
+  instances: 1
+  postgres:
+    version: '16.3'
+    # Diogramos uses :citext on users.email and canvases.slug. The first
+    # migration runs `CREATE EXTENSION IF NOT EXISTS citext` but
+    # StackGres will only let it succeed if the extension binaries are
+    # made available to the cluster, which is what this list does.
+    extensions:
+      - name: citext
+  pods:
+    persistentVolume:
+      size: '50Gi'

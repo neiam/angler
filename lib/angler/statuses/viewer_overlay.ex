@@ -37,7 +37,10 @@ defmodule Angler.Statuses.ViewerOverlay do
     ids = Enum.uniq(status_ids)
 
     favs =
-      from(l in Like, where: l.profile_id == ^viewer_id and l.status_id in ^ids, select: l.status_id)
+      from(l in Like,
+        where: l.profile_id == ^viewer_id and l.status_id in ^ids,
+        select: l.status_id
+      )
       |> Repo.all()
       |> MapSet.new()
 

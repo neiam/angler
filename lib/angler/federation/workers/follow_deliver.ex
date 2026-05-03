@@ -53,6 +53,10 @@ defmodule Angler.Federation.Workers.FollowDeliver do
     deliver_undo(args)
   end
 
+  def perform(%Oban.Job{args: %{"verb" => "reject"} = args}) do
+    deliver_reject(args)
+  end
+
   def perform(%Oban.Job{args: %{"verb" => verb} = args}) do
     Logger.warning("FollowDeliver verb=#{verb} not yet implemented; args=#{inspect(args)}")
     :ok
@@ -90,6 +94,37 @@ defmodule Angler.Federation.Workers.FollowDeliver do
         "object" => actor_url
       }
     }
+  end
+
+  ## Reject (outbound)
+
+  defp deliver_reject(%{
+         "local_actor_id" => local_actor_id,
+         "inbox_url" => inbox_url,
+         "follow_activity_id" => follow_activity_id,
+         "follow_actor_url" => follow_actor_url
+       }) do
+    actor = Repo.get!(Profile, local_actor_id)
+    actor_url = Profiles.actor_url(actor)
+
+    reject_id =
+      actor_url <> "/rejects/" <> Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
+
+    activity = %{
+      "@context" => "https://www.w3.org/ns/activitystreams",
+      "id" => reject_id,
+      "type" => "Reject",
+      "actor" => actor_url,
+      "object" => %{
+        "id" => follow_activity_id,
+        "type" => "Follow",
+        "actor" => follow_actor_url,
+        "object" => actor_url
+      }
+    }
+
+    body = Jason.encode!(activity)
+    deliver(actor, inbox_url, body, activity["id"], "Reject")
   end
 
   ## Follow (outbound)
