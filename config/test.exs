@@ -32,6 +32,17 @@ config :angler, :env, :test
 # Oban runs in :manual mode in test so jobs only execute when the test drains them.
 config :angler, Oban, testing: :manual
 
+# WebPush in tests: the test sender accumulates payloads in :persistent_term
+# instead of hitting an HTTP endpoint. VAPID is set to a fixed-but-valid keypair
+# so `Vapid.enabled?/0` returns true and the worker actually fires.
+config :angler, :push_sender, Angler.Push.Sender.Test
+
+config :web_push_encryption, :vapid_details,
+  subject: "mailto:test@angler.local",
+  public_key:
+    "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U",
+  private_key: "vG7C3fb6_OpgL1Kx3p5kJI0nSCwTUKlGqrHL8pV3SWE"
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

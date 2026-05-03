@@ -43,9 +43,16 @@ defmodule Angler.Notifications do
           conflict_target: [:recipient_id, :type, :account_id, :status_id]
         )
         |> case do
-          {:ok, %Notification{id: nil}} -> :noop
-          {:ok, n} -> {:ok, n}
-          err -> err
+          {:ok, %Notification{id: nil}} ->
+            :noop
+
+          {:ok, n} ->
+            Angler.Push.Workers.PushDeliver.fan_out(n.id)
+            Angler.Streaming.broadcast_notification(n)
+            {:ok, n}
+
+          err ->
+            err
         end
 
       _ ->

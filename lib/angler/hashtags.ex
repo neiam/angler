@@ -11,6 +11,12 @@ defmodule Angler.Hashtags do
   alias Angler.Hashtags.Hashtag
   alias Angler.Repo
 
+  @doc "Get a hashtag by name (case-insensitive). Returns nil if missing."
+  @spec get_by_name(String.t()) :: Hashtag.t() | nil
+  def get_by_name(name) when is_binary(name) do
+    Repo.get_by(Hashtag, name: String.downcase(name))
+  end
+
   @doc "Find or create a hashtag by name (case-insensitive)."
   @spec ensure!(String.t()) :: Hashtag.t()
   def ensure!(name) when is_binary(name) do

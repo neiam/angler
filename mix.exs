@@ -70,7 +70,8 @@ defmodule Angler.MixProject do
       {:argon2_elixir, "~> 4.0"},
       {:oban, "~> 2.18"},
       {:mogrify, "~> 0.9"},
-      {:blurhash, "~> 2.0"}
+      {:blurhash, "~> 2.0"},
+      {:web_push_encryption, "~> 0.3"}
     ]
   end
 

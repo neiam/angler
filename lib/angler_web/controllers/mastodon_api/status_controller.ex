@@ -9,14 +9,60 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
 
   use AnglerWeb, :controller
 
+  import Ecto.Query, only: [from: 2]
+
   alias Angler.Bookmarks
+  alias Angler.Repo
   alias Angler.Statuses
   alias Angler.Statuses.{Pinning, Scheduled, Scheduling, Status}
   alias Angler.Statuses.Workers.StatusDeliver
   alias Angler.Timelines.Workers.FeedInsert
+  alias AnglerWeb.MastodonAPI.Account
   alias AnglerWeb.MastodonAPI.ScheduledStatus, as: ScheduledStatusJSON
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
   alias AnglerWeb.Plugs.BearerAuth
+
+  ## GET /api/v1/statuses/:id/{reblogged_by,favourited_by}
+
+  def reblogged_by(conn, %{"id" => id}), do: engagement_list(conn, id, :reblog)
+  def favourited_by(conn, %{"id" => id}), do: engagement_list(conn, id, :like)
+
+  defp engagement_list(conn, id, kind) do
+    viewer_id = viewer_id(conn)
+
+    with {:ok, snowflake} <- parse_id(id),
+         %Status{} = status <- Statuses.get(snowflake),
+         true <- Statuses.visible_to?(status, viewer_id) || :forbidden do
+      profiles = engagement_profiles(status.id, kind)
+      json(conn, Enum.map(profiles, &Account.render/1))
+    else
+      _ -> not_found(conn)
+    end
+  end
+
+  defp engagement_profiles(status_id, :like) do
+    Repo.all(
+      from l in Angler.Likes.Like,
+        join: p in Angler.Profiles.Profile,
+        on: p.id == l.profile_id and is_nil(p.status),
+        where: l.status_id == ^status_id,
+        order_by: [desc: l.id],
+        limit: 80,
+        select: p
+    )
+  end
+
+  defp engagement_profiles(status_id, :reblog) do
+    Repo.all(
+      from r in Angler.Reblogs.Reblog,
+        join: p in Angler.Profiles.Profile,
+        on: p.id == r.profile_id and is_nil(p.status),
+        where: r.status_id == ^status_id,
+        order_by: [desc: r.id],
+        limit: 80,
+        select: p
+    )
+  end
 
   ## GET /api/v1/statuses/:id
 
@@ -42,6 +88,92 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
       json(conn, StatusJSON.render(deleted, profile.id))
     else
       {:error, :forbidden} -> conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+      _ -> not_found(conn)
+    end
+  end
+
+  ## PUT /api/v1/statuses/:id
+
+  def update(conn, %{"id" => id} = params) do
+    %{profile: profile} = BearerAuth.current_scope(conn)
+
+    with {:ok, snowflake} <- parse_id(id),
+         {:ok, updated} <- Statuses.update_local(snowflake, profile, params) do
+      Angler.Statuses.Workers.StatusUpdateDeliver.enqueue_for(updated)
+      json(conn, StatusJSON.render(updated, profile.id))
+    else
+      {:error, :forbidden} ->
+        conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+
+      {:error, :not_found} ->
+        not_found(conn)
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{"error" => "Validation failed", "errors" => format_changeset(cs)})
+
+      _ ->
+        not_found(conn)
+    end
+  end
+
+  ## GET /api/v1/statuses/:id/history
+
+  def history(conn, %{"id" => id}) do
+    viewer_id = viewer_id(conn)
+
+    with {:ok, snowflake} <- parse_id(id),
+         %Status{} = status <- Statuses.get(snowflake),
+         true <- Statuses.visible_to?(status, viewer_id) || :forbidden do
+      edits = Statuses.edit_history(status.id)
+      account = AnglerWeb.MastodonAPI.Account.render(status.profile)
+
+      # Include the live row as the most recent edit if there are any prior
+      # snapshots — Mastodon includes the current state in /history.
+      live = %{
+        "content" => status.rendered || "",
+        "spoiler_text" => status.cw_summary || "",
+        "sensitive" => status.is_nsfw,
+        "created_at" => DateTime.to_iso8601(status.edited_at || status.inserted_at),
+        "account" => account,
+        "media_attachments" => [],
+        "emojis" => []
+      }
+
+      historical =
+        Enum.map(edits, fn e ->
+          %{
+            "content" => e.rendered || "",
+            "spoiler_text" => e.spoiler_text || "",
+            "sensitive" => e.is_nsfw,
+            "created_at" => DateTime.to_iso8601(e.inserted_at),
+            "account" => account,
+            "media_attachments" => [],
+            "emojis" => []
+          }
+        end)
+
+      json(conn, historical ++ if(historical == [], do: [], else: [live]))
+    else
+      _ -> not_found(conn)
+    end
+  end
+
+  ## GET /api/v1/statuses/:id/source
+
+  def source(conn, %{"id" => id}) do
+    viewer_id = viewer_id(conn)
+
+    with {:ok, snowflake} <- parse_id(id),
+         %Status{} = status <- Statuses.get(snowflake),
+         true <- Statuses.visible_to?(status, viewer_id) || :forbidden do
+      json(conn, %{
+        "id" => Integer.to_string(status.id),
+        "text" => status.caption || "",
+        "spoiler_text" => status.cw_summary || ""
+      })
+    else
       _ -> not_found(conn)
     end
   end

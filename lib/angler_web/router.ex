@@ -115,6 +115,10 @@ defmodule AnglerWeb.Router do
 
     get "/statuses/:id", StatusController, :show
     get "/statuses/:id/context", StatusController, :context
+    get "/statuses/:id/history", StatusController, :history
+    get "/statuses/:id/source", StatusController, :source
+    get "/statuses/:id/reblogged_by", StatusController, :reblogged_by
+    get "/statuses/:id/favourited_by", StatusController, :favourited_by
 
     get "/timelines/home", TimelineController, :home
     get "/timelines/public", TimelineController, :public
@@ -147,20 +151,42 @@ defmodule AnglerWeb.Router do
     get "/favourites", AccountListsController, :favourites
     get "/bookmarks", AccountListsController, :bookmarks
 
+    get "/lists", ListController, :index
+    get "/lists/:id", ListController, :show
+    get "/lists/:id/accounts", ListController, :accounts
+    get "/timelines/list/:id", ListController, :timeline
+
+    get "/followed_tags", TagController, :followed
+    get "/tags/:id", TagController, :show
+
+    get "/domain_blocks", DomainBlockController, :index
+    get "/announcements", AnnouncementController, :index
+    get "/featured_tags", FeaturedTagController, :index
+    get "/accounts/:id/featured_tags", FeaturedTagController, :for_account
+
+    # v1 legacy filter endpoint (flattened shape).
+    get "/filters", FilterController, :index_v1
+
     # Stubs the Mastodon mobile clients call but we don't yet implement.
-    get "/announcements", EmptyController, :empty_array
-    get "/lists", EmptyController, :empty_array
     get "/endorsements", EmptyController, :empty_array
     get "/suggestions", EmptyController, :empty_array
-    get "/filters", EmptyController, :empty_array
     get "/custom_emojis", EmptyController, :empty_array
   end
 
   scope "/api/v2", AnglerWeb.MastodonAPI do
     pipe_through :authenticated_read
 
-    get "/filters", EmptyController, :empty_array
+    get "/filters", FilterController, :index
+    get "/filters/:id", FilterController, :show
     get "/suggestions", EmptyController, :empty_array
+  end
+
+  scope "/api/v2", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_write
+
+    post "/filters", FilterController, :create
+    put "/filters/:id", FilterController, :update
+    delete "/filters/:id", FilterController, :delete
   end
 
   # Pixelfed v1.1 namespace — bootstrap reads + a few user-initiated actions.
@@ -206,6 +232,7 @@ defmodule AnglerWeb.Router do
     post "/accounts/update_credentials", AccountController, :update_credentials
 
     delete "/statuses/:id", StatusController, :delete
+    put "/statuses/:id", StatusController, :update
 
     post "/statuses/:id/pin", StatusController, :pin
     post "/statuses/:id/unpin", StatusController, :unpin
@@ -242,6 +269,25 @@ defmodule AnglerWeb.Router do
 
     post "/media", MediaController, :upload_v1
     put "/media/:id", MediaController, :update
+
+    post "/lists", ListController, :create
+    put "/lists/:id", ListController, :update
+    delete "/lists/:id", ListController, :delete
+    post "/lists/:id/accounts", ListController, :add_accounts
+    delete "/lists/:id/accounts", ListController, :remove_accounts
+
+    post "/tags/:id/follow", TagController, :follow
+    post "/tags/:id/unfollow", TagController, :unfollow
+
+    post "/domain_blocks", DomainBlockController, :create
+    delete "/domain_blocks", DomainBlockController, :delete
+
+    post "/announcements/:id/dismiss", AnnouncementController, :dismiss
+
+    post "/featured_tags", FeaturedTagController, :create
+    delete "/featured_tags/:id", FeaturedTagController, :delete
+
+    post "/reports", ReportController, :create
   end
 
   scope "/api/v2", AnglerWeb.MastodonAPI do
@@ -263,6 +309,10 @@ defmodule AnglerWeb.Router do
 
     post "/oauth/token", OAuth.TokenController, :token
     post "/oauth/revoke", OAuth.RevokeController, :revoke
+
+    # Mastodon-shape streaming (raw WebSocket, not Phoenix.Channel).
+    get "/api/v1/streaming", StreamingController, :upgrade
+    get "/api/v1/streaming/:type", StreamingController, :upgrade
   end
 
   scope "/", AnglerWeb do

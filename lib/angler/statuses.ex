@@ -149,6 +149,100 @@ defmodule Angler.Statuses do
     )
   end
 
+  ## Local edit
+
+  @doc """
+  Update a local status: caption, spoiler, sensitive, language. Snapshots
+  the prior version into `status_edits` so `GET /:id/history` can render
+  it back later. Bumps `edited_at`. Caller (controller) is responsible for
+  enqueueing the outbound `Update Note` delivery.
+
+  Returns `{:ok, status}` (preloaded) or `{:error, reason}`.
+  """
+  @spec update_local(integer(), Angler.Profiles.Profile.t(), map()) ::
+          {:ok, Status.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def update_local(status_id, %Angler.Profiles.Profile{id: profile_id}, attrs)
+      when is_integer(status_id) and is_map(attrs) do
+    attrs = stringify(attrs)
+
+    case Repo.get(Status, status_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Status{deleted_at: %DateTime{}} ->
+        {:error, :not_found}
+
+      %Status{profile_id: pid} when pid != profile_id ->
+        {:error, :forbidden}
+
+      %Status{local: false} ->
+        {:error, :forbidden}
+
+      %Status{} = status ->
+        do_update(status, attrs)
+    end
+  end
+
+  defp do_update(%Status{} = status, attrs) do
+    caption =
+      case attrs["status"] do
+        s when is_binary(s) -> s
+        _ -> status.caption
+      end
+
+    sensitive? =
+      if Map.has_key?(attrs, "sensitive"), do: truthy?(attrs["sensitive"]), else: status.is_nsfw
+
+    spoiler = Map.get(attrs, "spoiler_text", status.cw_summary)
+    lang = Map.get(attrs, "language", status.language)
+
+    lex = Angler.Content.Lexer.render(caption)
+
+    Repo.transaction(fn ->
+      snapshot_edit!(status)
+
+      {:ok, updated} =
+        status
+        |> Status.changeset(%{
+          caption: caption,
+          rendered: lex.html,
+          is_nsfw: sensitive?,
+          cw_summary: spoiler,
+          language: lang,
+          edited_at: DateTime.utc_now()
+        })
+        |> Repo.update()
+
+      loaded = preload_local(updated)
+      Angler.Streaming.broadcast_status_edit(loaded)
+      loaded
+    end)
+  end
+
+  defp snapshot_edit!(%Status{} = status) do
+    %{
+      status_id: status.id,
+      caption: status.caption,
+      rendered: status.rendered,
+      spoiler_text: status.cw_summary,
+      is_nsfw: status.is_nsfw,
+      media_attachments: %{},
+      poll: nil
+    }
+    |> Angler.Statuses.StatusEdit.changeset()
+    |> Repo.insert!()
+  end
+
+  @doc "All historical edits for a status, oldest-first."
+  @spec edit_history(integer()) :: [Angler.Statuses.StatusEdit.t()]
+  def edit_history(status_id) when is_integer(status_id) do
+    Repo.all(
+      from e in Angler.Statuses.StatusEdit,
+        where: e.status_id == ^status_id,
+        order_by: [asc: e.id]
+    )
+  end
+
   ## Local delete
 
   @doc """
@@ -186,6 +280,7 @@ defmodule Angler.Statuses do
       Angler.Statuses.Workers.StatusDeleteDeliver.enqueue(deleted.id, inbox_url)
     end)
 
+    Angler.Streaming.broadcast_status_delete(deleted.id, deleted)
     {:ok, deleted}
   end
 
@@ -488,6 +583,7 @@ defmodule Angler.Statuses do
 
             loaded = preload_local(status)
             if visibility == :direct, do: Conversations.record(loaded)
+            Angler.Streaming.broadcast_status_update(loaded)
 
             loaded
 
