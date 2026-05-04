@@ -47,6 +47,16 @@ defmodule Angler.Accounts do
           {:ok, %{user: User.t(), profile: Profile.t()}}
           | {:error, atom() | Ecto.Changeset.t()}
   def register(attrs) do
+    email = attrs[:email] || attrs["email"]
+
+    if is_binary(email) and Angler.Admin.email_blocked?(email) do
+      {:error, :email_domain_blocked}
+    else
+      do_register(attrs)
+    end
+  end
+
+  defp do_register(attrs) do
     Repo.transaction(fn ->
       profile_attrs = %{
         username: attrs[:username] || attrs["username"],

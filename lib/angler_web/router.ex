@@ -39,6 +39,18 @@ defmodule AnglerWeb.Router do
     plug AnglerWeb.Plugs.BearerAuth, scopes: ["write"]
   end
 
+  pipeline :admin_read do
+    plug :accepts, ["json"]
+    plug AnglerWeb.Plugs.BearerAuth
+    plug AnglerWeb.Plugs.AdminAuth, role: :moderator
+  end
+
+  pipeline :admin_write do
+    plug :accepts, ["json"]
+    plug AnglerWeb.Plugs.BearerAuth
+    plug AnglerWeb.Plugs.AdminAuth, role: :admin
+  end
+
   pipeline :federation do
     # No :accepts plug — federation peers' Accept headers are inconsistent
     # (some send `*/*`, some send `application/activity+json`, some omit it).
@@ -311,6 +323,51 @@ defmodule AnglerWeb.Router do
     # Mastodon-shape streaming (raw WebSocket, not Phoenix.Channel).
     get "/api/v1/streaming", StreamingController, :upgrade
     get "/api/v1/streaming/:type", StreamingController, :upgrade
+  end
+
+  ## Admin namespace — moderator+ for read endpoints, admin for writes.
+
+  scope "/api/v1/admin", AnglerWeb.Admin do
+    pipe_through :admin_read
+
+    get "/reports", ReportController, :index
+    get "/reports/:id", ReportController, :show
+
+    get "/accounts", AccountController, :index
+    get "/accounts/:id", AccountController, :show
+
+    get "/domain_blocks", DomainBlockController, :index
+    get "/domain_blocks/:id", DomainBlockController, :show
+
+    get "/email_domain_blocks", EmailDomainBlockController, :index
+
+    get "/announcements", AnnouncementController, :index
+  end
+
+  scope "/api/v1/admin", AnglerWeb.Admin do
+    pipe_through :admin_write
+
+    post "/reports/:id/assign_to_self", ReportController, :assign_to_self
+    post "/reports/:id/unassign", ReportController, :unassign
+    post "/reports/:id/resolve", ReportController, :resolve
+    post "/reports/:id/reopen", ReportController, :reopen
+
+    post "/accounts/:id/action", AccountController, :act
+    post "/accounts/:id/unsuspend", AccountController, :unsuspend
+    post "/accounts/:id/unsilence", AccountController, :unsilence
+    post "/accounts/:id/enable", AccountController, :enable
+    delete "/accounts/:id", AccountController, :delete
+
+    post "/domain_blocks", DomainBlockController, :create
+    put "/domain_blocks/:id", DomainBlockController, :update
+    delete "/domain_blocks/:id", DomainBlockController, :delete
+
+    post "/email_domain_blocks", EmailDomainBlockController, :create
+    delete "/email_domain_blocks/:id", EmailDomainBlockController, :delete
+
+    post "/announcements", AnnouncementController, :create
+    put "/announcements/:id", AnnouncementController, :update
+    delete "/announcements/:id", AnnouncementController, :delete
   end
 
   scope "/", AnglerWeb do

@@ -18,6 +18,12 @@ defmodule Angler.Reports.Report do
     field :type, :string
     field :resolved_at, :utc_datetime_usec
 
+    field :assigned_account_id, :integer
+    field :action_taken, :boolean, default: false
+    field :action_taken_at, :utc_datetime_usec
+    field :action_taken_by_account_id, :integer
+    field :moderator_comment, :string
+
     belongs_to :profile, Profile, type: :integer
     belongs_to :user, User, type: :integer
 
@@ -34,7 +40,12 @@ defmodule Angler.Reports.Report do
       :object_type,
       :reported_profile_id,
       :type,
-      :resolved_at
+      :resolved_at,
+      :assigned_account_id,
+      :action_taken,
+      :action_taken_at,
+      :action_taken_by_account_id,
+      :moderator_comment
     ])
     |> validate_required([:profile_id, :user_id, :object_id, :object_type, :type])
     |> validate_inclusion(:type, @types)

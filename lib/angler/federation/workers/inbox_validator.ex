@@ -50,12 +50,17 @@ defmodule Angler.Federation.Workers.InboxValidator do
     raw_body = Base.decode64!(raw_b64)
     actor_url = Map.get(payload, "actor")
 
+    host = (is_binary(actor_url) && URI.parse(actor_url).host) || ""
+
     cond do
       not is_binary(actor_url) ->
         log_rejected(payload, actor_url, :missing_actor)
 
-      Bans.banned?(URI.parse(actor_url).host || "") ->
+      Bans.banned?(host) ->
         log_rejected(payload, actor_url, :banned)
+
+      Angler.Admin.instance_suspended?(host) ->
+        log_rejected(payload, actor_url, :defederated)
 
       true ->
         verify_and_dispatch(headers, raw_body, payload, actor_url, path, args["recipient_id"])
