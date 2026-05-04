@@ -110,8 +110,6 @@ defmodule AnglerWeb.Router do
     get "/accounts/:id/following", AccountController, :following
     get "/accounts/:id/pinned", AccountController, :pinned
     get "/accounts/:id/identity_proofs", EmptyController, :empty_array
-    get "/accounts/:id/featured_tags", EmptyController, :empty_array
-    get "/featured_tags", EmptyController, :empty_array
 
     get "/statuses/:id", StatusController, :show
     get "/statuses/:id/context", StatusController, :context

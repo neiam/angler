@@ -120,17 +120,24 @@ defmodule Angler.Lists do
   def timeline(%List{id: list_id}, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
 
+    visibilities = ["public", "unlisted", "private"]
+
     Repo.all(
       from la in ListAccount,
         join: s in Status,
         on:
           s.profile_id == la.profile_id and is_nil(s.deleted_at) and
-            s.visibility in [:public, :unlisted, :private],
+            fragment("?::text", s.visibility) in ^visibilities,
         where: la.list_id == ^list_id,
         order_by: [desc: s.id],
         limit: ^limit,
-        preload: [:profile, mentions: :profile, status_hashtags: :hashtag, media_attachments: []],
         select: s
     )
+    |> Repo.preload([
+      :profile,
+      mentions: :profile,
+      status_hashtags: :hashtag,
+      media_attachments: []
+    ])
   end
 end

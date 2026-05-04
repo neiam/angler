@@ -131,14 +131,17 @@ defmodule AnglerWeb.MastodonAPI.ListController do
 
   defp parse_account_ids(list) when is_list(list) do
     Enum.flat_map(list, fn
-      n when is_integer(n) -> [n]
+      n when is_integer(n) ->
+        [n]
+
       s when is_binary(s) ->
         case Integer.parse(s) do
           {n, ""} -> [n]
           _ -> []
         end
 
-      _ -> []
+      _ ->
+        []
     end)
   end
 
@@ -154,7 +157,8 @@ defmodule AnglerWeb.MastodonAPI.ListController do
   defp parse_id(id) when is_integer(id), do: {:ok, id}
   defp parse_id(_), do: :error
 
-  defp not_found(conn), do: conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+  defp not_found(conn),
+    do: conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
 
   defp validation_error(conn, cs) do
     errors =

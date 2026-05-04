@@ -136,7 +136,8 @@ defmodule AnglerWeb.MastodonAPI.FilterController do
   defp parse_id(id) when is_integer(id), do: {:ok, id}
   defp parse_id(_), do: :error
 
-  defp not_found(conn), do: conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+  defp not_found(conn),
+    do: conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
 
   defp validation_error(conn, cs) do
     errors =

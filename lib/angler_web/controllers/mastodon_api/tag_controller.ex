@@ -58,5 +58,6 @@ defmodule AnglerWeb.MastodonAPI.TagController do
 
   defp canon(name), do: name |> String.trim_leading("#") |> String.downcase()
 
-  defp not_found(conn), do: conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+  defp not_found(conn),
+    do: conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
 end

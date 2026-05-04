@@ -21,7 +21,8 @@ defmodule AnglerWeb.MastodonAPI.DomainBlockController do
     json(conn, %{})
   end
 
-  def create(conn, _), do: conn |> put_status(:bad_request) |> json(%{"error" => "domain required"})
+  def create(conn, _),
+    do: conn |> put_status(:bad_request) |> json(%{"error" => "domain required"})
 
   def delete(conn, %{"domain" => domain}) when is_binary(domain) do
     %{profile: profile} = BearerAuth.current_scope(conn)
@@ -29,5 +30,6 @@ defmodule AnglerWeb.MastodonAPI.DomainBlockController do
     json(conn, %{})
   end
 
-  def delete(conn, _), do: conn |> put_status(:bad_request) |> json(%{"error" => "domain required"})
+  def delete(conn, _),
+    do: conn |> put_status(:bad_request) |> json(%{"error" => "domain required"})
 end
