@@ -243,6 +243,98 @@ defmodule Angler.Statuses do
     )
   end
 
+  ## Archive
+
+  @doc """
+  Archive a top-level local status. Stores the prior visibility on the
+  status row's `scope` so `unarchive_local/2` can restore it. Top-level
+  only — replies and reblogs can't be archived (Pixelfed rule).
+  """
+  @spec archive_local(integer(), Angler.Profiles.Profile.t()) ::
+          {:ok, Status.t()} | {:error, atom()}
+  def archive_local(status_id, %Angler.Profiles.Profile{id: profile_id})
+      when is_integer(status_id) do
+    case Repo.get(Status, status_id) do
+      nil -> {:error, :not_found}
+      %Status{deleted_at: %DateTime{}} -> {:error, :not_found}
+      %Status{profile_id: pid} when pid != profile_id -> {:error, :forbidden}
+      %Status{local: false} -> {:error, :forbidden}
+      %Status{in_reply_to_id: id} when not is_nil(id) -> {:error, :unarchivable}
+      %Status{reblog_of_id: id} when not is_nil(id) -> {:error, :unarchivable}
+      %Status{scope: "archived"} = s -> {:ok, s}
+      %Status{} = status -> do_archive(status)
+    end
+  end
+
+  defp do_archive(%Status{visibility: vis} = status) do
+    {:ok, archived} =
+      status
+      |> Ecto.Changeset.change(scope: "archived", visibility: :direct)
+      |> Repo.update()
+
+    Repo.update_all(
+      from(p in Angler.Profiles.Profile, where: p.id == ^status.profile_id),
+      inc: [statuses_count: -1]
+    )
+
+    %{status_id: status.id, original_scope: Atom.to_string(vis)}
+    |> Angler.Statuses.ArchivedSnapshot.changeset()
+    |> Repo.insert(on_conflict: :nothing, conflict_target: :status_id)
+
+    {:ok, archived}
+  end
+
+  @doc "Restore an archived status to its prior visibility."
+  @spec unarchive_local(integer(), Angler.Profiles.Profile.t()) ::
+          {:ok, Status.t()} | {:error, atom()}
+  def unarchive_local(status_id, %Angler.Profiles.Profile{id: profile_id})
+      when is_integer(status_id) do
+    case Repo.get(Status, status_id) do
+      nil -> {:error, :not_found}
+      %Status{profile_id: pid} when pid != profile_id -> {:error, :forbidden}
+      %Status{scope: "archived"} = s -> do_unarchive(s)
+      %Status{} = s -> {:ok, s}
+    end
+  end
+
+  defp do_unarchive(%Status{} = status) do
+    snap = Repo.get_by(Angler.Statuses.ArchivedSnapshot, status_id: status.id)
+
+    visibility =
+      case snap && snap.original_scope do
+        "public" -> :public
+        "unlisted" -> :unlisted
+        "private" -> :private
+        "direct" -> :direct
+        _ -> :public
+      end
+
+    {:ok, restored} =
+      status
+      |> Ecto.Changeset.change(scope: Atom.to_string(visibility), visibility: visibility)
+      |> Repo.update()
+
+    Repo.update_all(
+      from(p in Angler.Profiles.Profile, where: p.id == ^status.profile_id),
+      inc: [statuses_count: 1]
+    )
+
+    if snap, do: Repo.delete(snap)
+    {:ok, restored}
+  end
+
+  @doc "List archived statuses for `profile_id`, newest-first."
+  @spec list_archived(integer(), pos_integer()) :: [Status.t()]
+  def list_archived(profile_id, limit \\ 20) do
+    Repo.all(
+      from s in Status,
+        where: s.profile_id == ^profile_id and s.scope == "archived" and is_nil(s.deleted_at),
+        order_by: [desc: s.id],
+        limit: ^limit
+    )
+    |> preload_for_render()
+  end
+
   ## Local delete
 
   @doc """

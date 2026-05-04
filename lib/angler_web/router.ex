@@ -174,6 +174,8 @@ defmodule AnglerWeb.Router do
     get "/featured_tags", FeaturedTagController, :index
     get "/accounts/:id/featured_tags", FeaturedTagController, :for_account
 
+    get "/discover/posts", DiscoverController, :for_you
+
     # v1 legacy filter endpoint (flattened shape).
     get "/filters", FilterController, :index_v1
 
@@ -210,6 +212,26 @@ defmodule AnglerWeb.Router do
     get "/accounts/mutuals/:id", ApiV1Dot1Controller, :mutuals
     get "/accounts/username/:username", ApiV1Dot1Controller, :username_to_id
     get "/accounts/:id/posts", ApiV1Dot1Controller, :posts
+
+    get "/discover/accounts/popular", DiscoverController, :accounts_popular
+    get "/discover/posts/trending", DiscoverController, :trending_posts
+    get "/discover/posts/hashtags", DiscoverController, :trending_hashtags
+    get "/discover/posts/network/trending", DiscoverController, :network_trending
+
+    get "/web/settings", SettingsController, :get_web
+    get "/app/settings", SettingsController, :get_app
+    get "/compose/settings", SettingsController, :compose
+
+    get "/archive/list", ApiV1Dot1Controller, :archive_list
+
+    get "/direct/compose/mutuals", DirectComposeController, :mutuals
+  end
+
+  # Anonymous landing directory.
+  scope "/api/v1.1", AnglerWeb.MastodonAPI do
+    pipe_through :api
+
+    get "/landing/v1/directory", DirectoryController, :index
   end
 
   scope "/api/v1.1", AnglerWeb.MastodonAPI do
@@ -218,6 +240,14 @@ defmodule AnglerWeb.Router do
     delete "/accounts/avatar", ApiV1Dot1Controller, :delete_avatar
     post "/accounts/change-password", ApiV1Dot1Controller, :change_password
     post "/report", ApiV1Dot1Controller, :report
+
+    post "/web/settings", SettingsController, :set_web
+    post "/app/settings", SettingsController, :set_app
+
+    post "/archive/add/:id", ApiV1Dot1Controller, :archive_add
+    post "/archive/remove/:id", ApiV1Dot1Controller, :archive_remove
+
+    post "/direct/lookup", DirectComposeController, :lookup
   end
 
   scope "/api/v1", AnglerWeb.MastodonAPI do

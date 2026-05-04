@@ -202,6 +202,47 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
     end
   end
 
+  ## Archive
+
+  def archive_add(conn, %{"id" => id}) do
+    %{profile: profile} = BearerAuth.current_scope(conn)
+
+    with {:ok, int_id} <- parse_id(id),
+         {:ok, _} <- Angler.Statuses.archive_local(int_id, profile) do
+      json(conn, [200])
+    else
+      {:error, :forbidden} ->
+        conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+
+      {:error, :unarchivable} ->
+        validation_error(conn, %{"id" => ["cannot archive replies or reblogs"]})
+
+      _ ->
+        conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+    end
+  end
+
+  def archive_remove(conn, %{"id" => id}) do
+    %{profile: profile} = BearerAuth.current_scope(conn)
+
+    with {:ok, int_id} <- parse_id(id),
+         {:ok, _} <- Angler.Statuses.unarchive_local(int_id, profile) do
+      json(conn, [200])
+    else
+      {:error, :forbidden} ->
+        conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+
+      _ ->
+        conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+    end
+  end
+
+  def archive_list(conn, _params) do
+    %{profile: profile} = BearerAuth.current_scope(conn)
+    statuses = Angler.Statuses.list_archived(profile.id)
+    json(conn, StatusJSON.render_many(statuses, profile.id))
+  end
+
   ## POST /api/v1.1/report
   def report(conn, params) do
     %{user: user} = BearerAuth.current_scope(conn)
