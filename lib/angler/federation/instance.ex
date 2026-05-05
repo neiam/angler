@@ -26,6 +26,10 @@ defmodule Angler.Federation.Instance do
     field :public_comments, :string
     field :private_comments, :string
 
+    # Softer admin moderation flags driven by the Pixelfed admin UI.
+    field :unlisted, :boolean, default: false
+    field :auto_cw, :boolean, default: false
+
     field :last_fetched_at, :utc_datetime_usec
     field :unreachable_since, :utc_datetime_usec
 
@@ -61,7 +65,9 @@ defmodule Angler.Federation.Instance do
       :reject_media,
       :reject_reports,
       :public_comments,
-      :private_comments
+      :private_comments,
+      :unlisted,
+      :auto_cw
     ])
   end
 end

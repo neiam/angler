@@ -54,6 +54,12 @@ defmodule Angler.Profiles.Profile do
     field :moved_to_id, :id
     field :also_known_as, {:array, :string}, default: []
 
+    # Pixelfed-shape per-profile admin moderation flags. Distinct from the
+    # auth/user-facing `is_suspended` and `status` fields.
+    field :unlisted, :boolean, default: false
+    field :cw, :boolean, default: false
+    field :no_autolink, :boolean, default: false
+
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -65,6 +71,7 @@ defmodule Angler.Profiles.Profile do
     inbox_url outbox_url shared_inbox_url followers_url following_url remote_url
     last_status_at last_fetched_at last_active_at
     moved_to_id also_known_as
+    unlisted cw no_autolink
   )a
 
   @doc false

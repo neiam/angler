@@ -586,6 +586,42 @@ defmodule AnglerWeb.Router do
     delete "/announcements/:id", AnnouncementController, :delete
   end
 
+  ## Pixelfed-shape admin namespace at `/api/admin/*`. Distinct from the
+  ## Mastodon-shape admin under `/api/v1/admin/*`. Both use the same
+  ## auth pipelines (`:admin_read` for moderator+, `:admin_write` for
+  ## admin) but expose different response shapes for different consumers.
+
+  scope "/api/admin", AnglerWeb.PixelfedAdmin do
+    pipe_through :admin_read
+
+    get "/supported", AdminController, :supported
+    get "/stats", AdminController, :stats
+    get "/instance/stats", AdminController, :all_stats
+
+    get "/autospam/list", AdminController, :autospam_list
+    get "/mod-reports/list", AdminController, :mod_reports_list
+    get "/config", AdminController, :config_get
+
+    get "/users/list", AdminController, :users_list
+    get "/users/get", AdminController, :users_get
+
+    get "/instances/list", AdminController, :instances_list
+    get "/instances/get", AdminController, :instances_get
+  end
+
+  scope "/api/admin", AnglerWeb.PixelfedAdmin do
+    pipe_through :admin_write
+
+    post "/autospam/handle", AdminController, :autospam_handle
+    post "/mod-reports/handle", AdminController, :mod_reports_handle
+    post "/config/update", AdminController, :config_update
+
+    post "/users/action", AdminController, :users_action
+    post "/instances/moderate", AdminController, :instances_moderate
+    post "/instances/refresh-stats", AdminController, :instances_refresh_stats
+    post "/moderate/post/:id", AdminController, :moderate_post
+  end
+
   scope "/", AnglerWeb do
     pipe_through :browser_session
 
