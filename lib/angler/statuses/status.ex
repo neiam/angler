@@ -44,6 +44,7 @@ defmodule Angler.Statuses.Status do
     field :edited_at, :utc_datetime_usec
     field :deleted_at, :utc_datetime_usec
     field :scheduled_at, :utc_datetime_usec
+    field :place_id, :id
 
     has_many :mentions, Angler.Statuses.Mention
     has_many :status_hashtags, Angler.Statuses.StatusHashtag
@@ -59,6 +60,7 @@ defmodule Angler.Statuses.Status do
     language comments_disabled
     reply_count reblogs_count likes_count
     edited_at deleted_at scheduled_at
+    place_id
   )a
 
   @doc false

@@ -214,6 +214,7 @@ config :angler, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"15 3 * * *", Angler.OAuth.Workers.PruneExpired},
-       {"* * * * *", Angler.Statuses.Workers.ScheduledFire}
+       {"* * * * *", Angler.Statuses.Workers.ScheduledFire},
+       {"* * * * *", Angler.Stories.Workers.Expire}
      ]}
   ]

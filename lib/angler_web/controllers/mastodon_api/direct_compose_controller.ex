@@ -27,7 +27,8 @@ defmodule AnglerWeb.MastodonAPI.DirectComposeController do
     end
   end
 
-  def lookup(conn, _), do: conn |> put_status(:bad_request) |> json(%{"error" => "username required"})
+  def lookup(conn, _),
+    do: conn |> put_status(:bad_request) |> json(%{"error" => "username required"})
 
   def mutuals(conn, _params) do
     %{profile: viewer} = BearerAuth.current_scope(conn)

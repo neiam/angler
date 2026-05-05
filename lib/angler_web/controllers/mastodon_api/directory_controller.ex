@@ -1,9 +1,14 @@
 defmodule AnglerWeb.MastodonAPI.DirectoryController do
   @moduledoc """
-  GET /api/v1.1/landing/v1/directory — public profile directory listing.
+  Anonymous landing-page endpoints used by the unauthenticated splash UI.
 
-  Returns local profiles flagged `discoverable` and not suspended/locked.
-  Anonymous endpoint; rate-limit at the reverse proxy if needed.
+    * GET /api/v1.1/landing/v1/directory — public profile directory listing.
+    * GET /api/v1.1/landing/v1/explore   — recent public photo posts grid.
+
+  Both gated by their own config flags so operators can hide them:
+
+      config :angler, :landing_directory_enabled, true
+      config :angler, :landing_explore_enabled, true
   """
 
   use AnglerWeb, :controller
@@ -13,8 +18,18 @@ defmodule AnglerWeb.MastodonAPI.DirectoryController do
   alias Angler.Profiles
   alias Angler.Profiles.Profile
   alias Angler.Repo
+  alias Angler.Statuses.Status
+  alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
 
   def index(conn, params) do
+    if directory_enabled?() do
+      do_index(conn, params)
+    else
+      not_found(conn)
+    end
+  end
+
+  defp do_index(conn, params) do
     limit =
       case params["limit"] do
         s when is_binary(s) ->
@@ -58,4 +73,100 @@ defmodule AnglerWeb.MastodonAPI.DirectoryController do
 
     json(conn, body)
   end
+
+  ## GET /landing/v1/explore — recent public photo/video posts grid.
+
+  def explore(conn, params) do
+    cond do
+      not explore_enabled?() ->
+        not_found(conn)
+
+      true ->
+        limit =
+          case params["limit"] do
+            s when is_binary(s) ->
+              case Integer.parse(s) do
+                {n, ""} -> n |> max(1) |> min(40)
+                _ -> 24
+              end
+
+            _ ->
+              24
+          end
+
+        statuses =
+          Repo.all(
+            from s in Status,
+              where:
+                s.visibility == :public and is_nil(s.deleted_at) and
+                  s.is_nsfw == false and
+                  s.type in ["photo", "photo:album", "video", "video:album"],
+              order_by: [desc: s.id],
+              limit: ^limit
+          )
+          |> Repo.preload([
+            :profile,
+            mentions: :profile,
+            status_hashtags: :hashtag,
+            media_attachments: []
+          ])
+
+        json(conn, StatusJSON.render_many(statuses, nil))
+    end
+  end
+
+  ## GET /directory/listing?sk=...
+  ##
+  ## Pixelfed federation directory submission endpoint. Only enabled when
+  ## the operator has set `:pixelfed_directory_sk`; the caller must pass
+  ## a matching `sk` to receive the instance metadata. Used by the central
+  ## pixelfed.org directory crawler — local clients don't hit this.
+  def listing(conn, params) do
+    case Application.get_env(:angler, :pixelfed_directory_sk) do
+      sk when is_binary(sk) and sk != "" ->
+        case params["sk"] do
+          nil ->
+            not_found(conn)
+
+          provided when is_binary(provided) ->
+            if Plug.Crypto.secure_compare(provided, sk) do
+              json(conn, build_listing(sk))
+            else
+              conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+            end
+        end
+
+      _ ->
+        not_found(conn)
+    end
+  end
+
+  defp build_listing(sk) do
+    cfg = Application.get_env(:angler, :pixelfed_directory, %{})
+
+    base =
+      cfg
+      |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+    endpoint_cfg = Application.get_env(:angler, AnglerWeb.Endpoint, [])
+    url_cfg = endpoint_cfg[:url] || []
+    host = url_cfg[:host] || "localhost"
+
+    Map.merge(base, %{
+      "_domain" => host,
+      "_sk" => sk,
+      "_ts" => DateTime.to_iso8601(DateTime.utc_now()),
+      "version" => Application.spec(:angler, :vsn) |> to_string()
+    })
+  end
+
+  ## Internals
+
+  defp directory_enabled?,
+    do: Application.get_env(:angler, :landing_directory_enabled, true) == true
+
+  defp explore_enabled?,
+    do: Application.get_env(:angler, :landing_explore_enabled, true) == true
+
+  defp not_found(conn), do: conn |> put_status(:not_found) |> json(%{"error" => "Not found"})
 end

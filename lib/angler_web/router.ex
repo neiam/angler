@@ -225,6 +225,20 @@ defmodule AnglerWeb.Router do
     get "/archive/list", ApiV1Dot1Controller, :archive_list
 
     get "/direct/compose/mutuals", DirectComposeController, :mutuals
+
+    get "/places/posts/:id/:slug", PlacesController, :show
+    get "/compose/search/location", PlacesController, :search_location
+
+    get "/collections/accounts/:id", CollectionController, :for_account
+    get "/collections/items/:id", CollectionController, :items
+    get "/collections/view/:id", CollectionController, :view
+    get "/collections/self", CollectionController, :for_self
+
+    get "/direct/thread", DirectThreadController, :thread
+
+    get "/stories/carousel", StoriesController, :carousel
+    get "/stories/self-carousel", StoriesController, :self_carousel
+    get "/stories/viewers", StoriesController, :viewers
   end
 
   # Anonymous landing directory.
@@ -232,6 +246,19 @@ defmodule AnglerWeb.Router do
     pipe_through :api
 
     get "/landing/v1/directory", DirectoryController, :index
+    get "/landing/v1/explore", DirectoryController, :explore
+
+    # Pixelfed federation directory submission. Unauthenticated; gated by
+    # an operator-set submission key (`sk`) compared in constant time.
+    get "/directory/listing", DirectoryController, :listing
+
+    # In-app registration (anonymous; requires X-PIXELFED-APP header on
+    # POSTs). Operators must set both `:open_registration` and
+    # `:in_app_registration_enabled` to allow the flow.
+    get "/auth/iarpfc", IarController, :preflight
+    post "/auth/iar", IarController, :initiate
+    get "/auth/iarer", IarController, :email_redirect
+    post "/auth/iarc", IarController, :confirm
   end
 
   scope "/api/v1.1", AnglerWeb.MastodonAPI do
@@ -248,6 +275,106 @@ defmodule AnglerWeb.Router do
     post "/archive/remove/:id", ApiV1Dot1Controller, :archive_remove
 
     post "/direct/lookup", DirectComposeController, :lookup
+
+    post "/collections/add", CollectionController, :add
+    post "/collections/update/:id", CollectionController, :update
+    delete "/collections/delete/:id", CollectionController, :delete
+    post "/collections/store_id", CollectionController, :store_id
+    post "/collections/remove", CollectionController, :delete_id
+
+    post "/direct/thread/send", DirectThreadController, :send
+    delete "/direct/thread/message", DirectThreadController, :delete_message
+    post "/direct/thread/read", DirectThreadController, :read
+    post "/direct/thread/mute", DirectThreadController, :mute
+    post "/direct/thread/unmute", DirectThreadController, :unmute
+    post "/direct/thread/media", DirectThreadController, :upload_media
+
+    post "/stories/add", StoriesController, :add
+    post "/stories/publish", StoriesController, :publish
+    post "/stories/seen", StoriesController, :seen
+    post "/stories/self-expire/:id", StoriesController, :self_expire
+    post "/stories/comment", StoriesController, :comment
+  end
+
+  # `pixelfed/v1` — legacy Pixelfed prefix. The mobile clients hit either
+  # this or `v1.1`; same controllers, same behaviour. Endpoints exclusive
+  # to one namespace in upstream Pixelfed (e.g. iar/auth, push/*, mutuals,
+  # network/trending) are NOT mirrored — those stay v1.1-only.
+  scope "/api/pixelfed/v1", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_read
+
+    get "/accounts/timelines/home", TimelineController, :home
+    get "/accounts/login-activity", ApiV1Dot1Controller, :login_activity
+    get "/accounts/two-factor", ApiV1Dot1Controller, :two_factor
+    get "/accounts/emails-from-pixelfed", ApiV1Dot1Controller, :emails_from_pixelfed
+    get "/accounts/apps-and-applications", ApiV1Dot1Controller, :apps_and_applications
+    get "/accounts/:id/posts", ApiV1Dot1Controller, :posts
+
+    get "/archive/list", ApiV1Dot1Controller, :archive_list
+
+    get "/collections/accounts/:id", CollectionController, :for_account
+    get "/collections/items/:id", CollectionController, :items
+    get "/collections/view/:id", CollectionController, :view
+    get "/collections/self", CollectionController, :for_self
+
+    get "/compose/search/location", PlacesController, :search_location
+    get "/compose/settings", SettingsController, :compose
+
+    get "/direct/thread", DirectThreadController, :thread
+
+    get "/discover/accounts/popular", DiscoverController, :accounts_popular
+    get "/discover/posts/trending", DiscoverController, :trending_posts
+    get "/discover/posts/hashtags", DiscoverController, :trending_hashtags
+
+    get "/places/posts/:id/:slug", PlacesController, :show
+
+    get "/web/settings", SettingsController, :get_web
+    get "/app/settings", SettingsController, :get_app
+
+    get "/stories/carousel", StoriesController, :carousel
+    get "/stories/self-carousel", StoriesController, :self_carousel
+    get "/stories/viewers", StoriesController, :viewers
+  end
+
+  scope "/api/pixelfed/v1", AnglerWeb.MastodonAPI do
+    pipe_through :api
+
+    get "/directory/listing", DirectoryController, :listing
+  end
+
+  scope "/api/pixelfed/v1", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_write
+
+    post "/report", ApiV1Dot1Controller, :report
+
+    delete "/accounts/avatar", ApiV1Dot1Controller, :delete_avatar
+    post "/accounts/change-password", ApiV1Dot1Controller, :change_password
+
+    post "/archive/add/:id", ApiV1Dot1Controller, :archive_add
+    post "/archive/remove/:id", ApiV1Dot1Controller, :archive_remove
+
+    post "/collections/add", CollectionController, :add
+    post "/collections/update/:id", CollectionController, :update
+    delete "/collections/delete/:id", CollectionController, :delete
+    post "/collections/store_id", CollectionController, :store_id
+    post "/collections/remove", CollectionController, :delete_id
+
+    post "/direct/lookup", DirectComposeController, :lookup
+    post "/direct/thread/send", DirectThreadController, :send
+    delete "/direct/thread/message", DirectThreadController, :delete_message
+    post "/direct/thread/read", DirectThreadController, :read
+    post "/direct/thread/mute", DirectThreadController, :mute
+    post "/direct/thread/unmute", DirectThreadController, :unmute
+    post "/direct/thread/media", DirectThreadController, :upload_media
+
+    post "/web/settings", SettingsController, :set_web
+    post "/app/settings", SettingsController, :set_app
+
+    post "/stories/add", StoriesController, :add
+    post "/stories/publish", StoriesController, :publish
+    post "/stories/seen", StoriesController, :seen
+    post "/stories/self-expire/:id", StoriesController, :self_expire
+    post "/stories/comment", StoriesController, :comment
   end
 
   scope "/api/v1", AnglerWeb.MastodonAPI do

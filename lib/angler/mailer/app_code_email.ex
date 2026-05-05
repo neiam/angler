@@ -29,4 +29,34 @@ defmodule Angler.Mailer.AppCodeEmail do
     has been created.
     """)
   end
+
+  @doc """
+  Build the in-app-registration confirmation email — uses the deep-link
+  variant Pixelfed mobile follows. Caller delivers via `Angler.Mailer`.
+  """
+  @spec send_iar_confirmation(String.t(), String.t()) :: :ok | {:error, term()}
+  def send_iar_confirmation(to, deep_link) when is_binary(to) and is_binary(deep_link) do
+    from = Application.fetch_env!(:angler, :mail_from)
+
+    email =
+      new()
+      |> to(to)
+      |> from({Keyword.fetch!(from, :name), Keyword.fetch!(from, :address)})
+      |> subject("Confirm your Pixelfed account")
+      |> text_body("""
+      Hi,
+
+      Tap the link below to finish creating your Pixelfed account:
+
+          #{deep_link}
+
+      The link expires in 24 hours. If you didn't request this, you can
+      safely ignore this email.
+      """)
+
+    case Angler.Mailer.deliver(email) do
+      {:ok, _} -> :ok
+      err -> err
+    end
+  end
 end
