@@ -44,6 +44,13 @@ defmodule AnglerWeb.MastodonAPI.TagController do
     json(conn, Enum.map(HashtagFollows.list(profile.id), &render_tag(&1, true)))
   end
 
+  ## GET /tags/:id/related — co-occurring hashtags
+  ##
+  ## Pixelfed has a HashtagRelatedService that mines tag co-occurrence
+  ## from posts. We don't run that pipeline yet; mirror the empty-list
+  ## response so clients that ask don't see a 404.
+  def related(conn, _params), do: json(conn, [])
+
   ## Internals
 
   defp render_tag(%{name: name} = tag, following?) do

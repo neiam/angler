@@ -384,6 +384,91 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
     end)
   end
 
+  ## POST /accounts/:id/remove_from_followers
+  ##
+  ## Yank a follower without notifying them — the inverse of an unfollow.
+  ## Pixelfed exposes this as a mute-and-block-light: the relationship goes
+  ## back to "neither follows the other".
+
+  def remove_from_followers(conn, %{"id" => id}) do
+    %{profile: actor} = BearerAuth.current_scope(conn)
+
+    with {:ok, target_id} <- parse_id(id),
+         true <- target_id != actor.id || {:error, :self} do
+      :ok = Follows.remove_inbound_follow(actor.id, target_id)
+      respond_relationship(conn, actor.id, target_id)
+    else
+      {:error, :self} ->
+        conn |> put_status(:unprocessable_entity) |> json(%{"error" => "target_id == self"})
+
+      _ ->
+        conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+    end
+  end
+
+  ## POST /accounts/:id/{pin,unpin} — Pixelfed endorsements
+  ##
+  ## We don't ship an endorsements table yet; both routes succeed as a no-op
+  ## and return the current relationship so the mobile UI doesn't error.
+
+  def endorse(conn, %{"id" => id}), do: noop_relationship(conn, id)
+  def unendorse(conn, %{"id" => id}), do: noop_relationship(conn, id)
+
+  defp noop_relationship(conn, id) do
+    %{profile: actor} = BearerAuth.current_scope(conn)
+
+    with {:ok, target_id} <- parse_id(id),
+         %Profile{} <- Profiles.get_profile(target_id) do
+      respond_relationship(conn, actor.id, target_id)
+    else
+      _ -> conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+    end
+  end
+
+  ## GET /accounts/:id/lists — which lists this account is on
+  ##
+  ## Pixelfed's stub returns []; lists-membership is a list-side query that
+  ## the mobile UI doesn't actually depend on. Keep parity.
+
+  def account_lists(conn, _params), do: json(conn, [])
+
+  ## POST /avatar/update
+  ##
+  ## Pixelfed-only direct avatar upload: a single multipart `avatar` field.
+  ## We funnel it through the same `Profiles.update_credentials/2` path that
+  ## handles `PATCH /accounts/update_credentials`.
+
+  def avatar_update(conn, params) do
+    %{user: user, profile: profile} = BearerAuth.current_scope(conn)
+    upload = params["avatar"] || params["file"]
+
+    cond do
+      is_nil(upload) ->
+        conn |> put_status(:unprocessable_entity) |> json(%{"error" => "avatar is required"})
+
+      true ->
+        case Profiles.update_credentials(profile, %{"avatar" => upload}) do
+          {:ok, updated} ->
+            body =
+              Account.render(updated)
+              |> Map.put("source", source_block(user, updated))
+
+            json(conn, body)
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{"error" => "Validation failed", "errors" => translate_errors(cs)})
+
+          {:error, :not_local_profile} ->
+            conn |> put_status(:forbidden) |> json(%{"error" => "Not a local profile"})
+
+          {:error, reason} ->
+            conn |> put_status(:unprocessable_entity) |> json(%{"error" => to_string(reason)})
+        end
+    end
+  end
+
   ## POST /accounts/:id/follow
 
   def follow(conn, %{"id" => id}) do

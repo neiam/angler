@@ -243,6 +243,77 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
     json(conn, StatusJSON.render_many(statuses, profile.id))
   end
 
+  ## POST /api/v1.1/status/create
+  ##
+  ## Pixelfed-shape one-shot status creation: a single multipart `file`
+  ## plus optional caption + visibility. Internally we still go through
+  ## `Media.upload/3` then `Statuses.create_local/2` so feed-fanout and
+  ## federation behave exactly the same as the standard Mastodon path.
+  def status_create_pixelfed(conn, params) do
+    %{profile: profile} = BearerAuth.current_scope(conn)
+    upload = params["file"]
+
+    cond do
+      is_nil(upload) ->
+        validation_error(conn, %{"file" => ["is required"]})
+
+      true ->
+        case Angler.Media.upload(profile, upload, %{}) do
+          {:ok, asset} ->
+            create_local_with_media(conn, profile, params, asset.id)
+
+          {:error, reason} ->
+            validation_error(conn, %{"file" => [to_string(reason)]})
+        end
+    end
+  end
+
+  defp create_local_with_media(conn, profile, params, media_id) do
+    visibility =
+      case params["visibility"] do
+        v when v in ["public", "unlisted", "private"] -> v
+        _ -> "public"
+      end
+
+    attrs = %{
+      "status" => to_string(params["status"] || ""),
+      "media_ids" => [Integer.to_string(media_id)],
+      "sensitive" => params["sensitive"] || false,
+      "spoiler_text" => params["spoiler_text"],
+      "visibility" => visibility
+    }
+
+    case Angler.Statuses.create_local(profile, attrs) do
+      {:ok, status} ->
+        Angler.Timelines.Workers.FeedInsert.enqueue(status.id)
+        Angler.Statuses.Workers.StatusDeliver.enqueue_for(status)
+
+        body =
+          StatusJSON.render(status, profile.id)
+          |> Map.put("favourited", false)
+          |> Map.put("bookmarked", false)
+          |> Map.put("language", "en")
+          |> Map.put("card", nil)
+
+        json(conn, body)
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        validation_error(conn, translate_errors(cs))
+
+      {:error, reason} ->
+        validation_error(conn, %{"status" => [to_string(reason)]})
+    end
+  end
+
+  ## GET /api/v1.1/nag/state
+  ##
+  ## Pixelfed shows a soft-nag in the mobile UI when push notifications
+  ## are available but the user hasn't opted in. We expose the same
+  ## boolean shape; flips on when `:expo_push_enabled` is set.
+  def nag_state(conn, _params) do
+    json(conn, %{"active" => Angler.Push.Expo.enabled?()})
+  end
+
   ## POST /api/v1.1/report
   def report(conn, params) do
     %{user: user} = BearerAuth.current_scope(conn)

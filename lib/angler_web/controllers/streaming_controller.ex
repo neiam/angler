@@ -16,6 +16,14 @@ defmodule AnglerWeb.StreamingController do
   alias Angler.OAuth
   alias Angler.Streaming
 
+  ## GET /api/v2/streaming/config
+  ##
+  ## Pixelfed historically returned a Pusher config block here. We don't
+  ## use Pusher; clients should fall back to the `urls.streaming_api` field
+  ## in `GET /api/v2/instance` when this is empty. Empty object preserves
+  ## that fallback path without 404'ing.
+  def config(conn, _params), do: json(conn, %{})
+
   def upgrade(conn, params) do
     case authenticate(conn) do
       {:ok, token} ->

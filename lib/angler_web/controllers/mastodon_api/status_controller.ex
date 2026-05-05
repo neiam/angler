@@ -27,6 +27,13 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
   def reblogged_by(conn, %{"id" => id}), do: engagement_list(conn, id, :reblog)
   def favourited_by(conn, %{"id" => id}), do: engagement_list(conn, id, :like)
 
+  ## GET /statuses/:id/card — link preview card
+  ##
+  ## We don't crawl outbound URLs for OG metadata (Pixelfed dispatches
+  ## that asynchronously). Match Pixelfed's stubbed empty-object response
+  ## so clients that opportunistically request the card don't trip a 404.
+  def card(conn, _params), do: json(conn, %{})
+
   defp engagement_list(conn, id, kind) do
     viewer_id = viewer_id(conn)
 

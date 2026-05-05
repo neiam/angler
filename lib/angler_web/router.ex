@@ -91,6 +91,7 @@ defmodule AnglerWeb.Router do
     get "/api/v1/instance", MastodonAPI.InstanceController, :show_v1
     get "/api/v1/instance/peers", MastodonAPI.InstanceController, :peers
     get "/api/v2/instance", MastodonAPI.InstanceController, :show_v2
+    get "/api/v2/streaming/config", StreamingController, :config
   end
 
   scope "/", AnglerWeb do
@@ -121,12 +122,14 @@ defmodule AnglerWeb.Router do
     get "/accounts/:id/followers", AccountController, :followers
     get "/accounts/:id/following", AccountController, :following
     get "/accounts/:id/pinned", AccountController, :pinned
+    get "/accounts/:id/lists", AccountController, :account_lists
     get "/accounts/:id/identity_proofs", EmptyController, :empty_array
 
     get "/statuses/:id", StatusController, :show
     get "/statuses/:id/context", StatusController, :context
     get "/statuses/:id/history", StatusController, :history
     get "/statuses/:id/source", StatusController, :source
+    get "/statuses/:id/card", StatusController, :card
     get "/statuses/:id/reblogged_by", StatusController, :reblogged_by
     get "/statuses/:id/favourited_by", StatusController, :favourited_by
 
@@ -151,6 +154,7 @@ defmodule AnglerWeb.Router do
     get "/conversations", ConversationController, :index
     get "/timelines/direct", ConversationController, :direct_timeline
 
+    get "/trends", TrendsController, :unified
     get "/trends/tags", TrendsController, :tags
     get "/trends/statuses", TrendsController, :statuses
     get "/trends/links", TrendsController, :links
@@ -167,6 +171,7 @@ defmodule AnglerWeb.Router do
     get "/timelines/list/:id", ListController, :timeline
 
     get "/followed_tags", TagController, :followed
+    get "/tags/:id/related", TagController, :related
     get "/tags/:id", TagController, :show
 
     get "/domain_blocks", DomainBlockController, :index
@@ -239,6 +244,18 @@ defmodule AnglerWeb.Router do
     get "/stories/carousel", StoriesController, :carousel
     get "/stories/self-carousel", StoriesController, :self_carousel
     get "/stories/viewers", StoriesController, :viewers
+
+    # Pixelfed Expo push subscription. State endpoint is GET; the rest
+    # are POSTs and live in the write block below.
+    get "/push/state", PushExpoController, :state
+
+    # Soft-nag flag — mobile UI uses it to decide whether to surface the
+    # "enable notifications" prompt. Read-only.
+    get "/nag/state", ApiV1Dot1Controller, :nag_state
+
+    # Legacy alias used by older mobile builds — same as Mastodon
+    # `/api/v1/timelines/home`.
+    get "/accounts/timelines/home", TimelineController, :home
   end
 
   # Anonymous landing directory.
@@ -259,6 +276,13 @@ defmodule AnglerWeb.Router do
     post "/auth/iar", IarController, :initiate
     get "/auth/iarer", IarController, :email_redirect
     post "/auth/iarc", IarController, :confirm
+
+    # Pre-registration validation against admin-issued invite codes. All
+    # three endpoints are anonymous — they're called before the user has
+    # an account. Operators seed `admin_invites` rows out-of-band.
+    post "/auth/invite/admin/verify", AdminInviteController, :verify
+    post "/auth/invite/admin/uc", AdminInviteController, :username_check
+    post "/auth/invite/admin/ec", AdminInviteController, :email_check
   end
 
   scope "/api/v1.1", AnglerWeb.MastodonAPI do
@@ -294,6 +318,16 @@ defmodule AnglerWeb.Router do
     post "/stories/seen", StoriesController, :seen
     post "/stories/self-expire/:id", StoriesController, :self_expire
     post "/stories/comment", StoriesController, :comment
+
+    # Pixelfed Expo push subscription writes.
+    post "/push/compare", PushExpoController, :compare
+    post "/push/update", PushExpoController, :update
+    post "/push/disable", PushExpoController, :disable
+
+    # Pixelfed-shape one-shot status creation: file + caption in a single
+    # multipart POST. Mounts on top of `Statuses.create_local/2` so feed
+    # fanout and federation behave identically to the Mastodon path.
+    post "/status/create", ApiV1Dot1Controller, :status_create_pixelfed
   end
 
   # `pixelfed/v1` — legacy Pixelfed prefix. The mobile clients hit either
@@ -417,6 +451,13 @@ defmodule AnglerWeb.Router do
     post "/accounts/:id/unblock", AccountController, :unblock
     post "/accounts/:id/mute", AccountController, :mute
     post "/accounts/:id/unmute", AccountController, :unmute
+    post "/accounts/:id/remove_from_followers", AccountController, :remove_from_followers
+    post "/accounts/:id/pin", AccountController, :endorse
+    post "/accounts/:id/unpin", AccountController, :unendorse
+
+    # Pixelfed-only direct avatar upload (mobile clients use it instead
+    # of `PATCH /accounts/update_credentials` for solo avatar changes).
+    post "/avatar/update", AccountController, :avatar_update
 
     post "/follow_requests/:id/authorize", AccountController, :authorize_request
     post "/follow_requests/:id/reject", AccountController, :reject_request

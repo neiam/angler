@@ -51,6 +51,12 @@ defmodule AnglerWeb.MastodonAPI.TrendsController do
     json(conn, [])
   end
 
+  ## GET /trends — Pixelfed unified trends shape
+  ##
+  ## Pixelfed serves a flat empty array here; the per-kind endpoints
+  ## (`/trends/tags|statuses|links`) are the canonical ones clients use.
+  def unified(conn, _params), do: json(conn, [])
+
   defp parse_limit(nil, default, _max), do: default
 
   defp parse_limit(s, default, max) when is_binary(s) do

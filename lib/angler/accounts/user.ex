@@ -35,6 +35,16 @@ defmodule Angler.Accounts.User do
     field :register_source, :string
     field :register_ip, :string
 
+    # Pixelfed Expo push subscription (mobile FCM/APNs via Expo gateway).
+    # Stored on the user, not a token, since clients use this to drive
+    # outbound mobile notifications regardless of which OAuth token issued.
+    field :expo_token, :string
+    field :notify_enabled, :boolean, default: false
+    field :notify_like, :boolean, default: false
+    field :notify_follow, :boolean, default: false
+    field :notify_mention, :boolean, default: false
+    field :notify_comment, :boolean, default: false
+
     belongs_to :profile, Profile
 
     timestamps(type: :utc_datetime_usec)
