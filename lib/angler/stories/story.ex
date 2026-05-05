@@ -22,6 +22,11 @@ defmodule Angler.Stories.Story do
     field :remote_url, :string
     field :expires_at, :utc_datetime_usec
 
+    # v1.2 publishNext writes a list of positioned overlay objects (text /
+    # mention / hashtag / url). Stored opaque; rendering is the client's
+    # responsibility.
+    field :overlays, {:array, :map}, default: []
+
     belongs_to :profile, Profile, type: :integer
     timestamps(type: :utc_datetime_usec)
   end
@@ -41,6 +46,7 @@ defmodule Angler.Stories.Story do
       :view_count,
       :local,
       :remote_url,
+      :overlays,
       :expires_at
     ])
     |> validate_required([:profile_id, :type, :mime, :path, :expires_at])

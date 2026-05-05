@@ -330,6 +330,24 @@ defmodule AnglerWeb.Router do
     post "/status/create", ApiV1Dot1Controller, :status_create_pixelfed
   end
 
+  # `v1.2/stories/...` — newer story endpoints (overlays-aware composer
+  # flow + carousel `next` page + mention autocomplete). Pixelfed split
+  # these out from v1.1 so older clients aren't forced to learn the new
+  # publish shape; we mount them on the same controllers but a separate
+  # action namespace to keep that boundary clean.
+  scope "/api/v1.2", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_read
+
+    get "/stories/carousel", StoriesV12Controller, :carousel_next
+    get "/stories/mention-autocomplete", StoriesV12Controller, :mention_autocomplete
+  end
+
+  scope "/api/v1.2", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_write
+
+    post "/stories/publish", StoriesV12Controller, :publish_next
+  end
+
   # `pixelfed/v1` — legacy Pixelfed prefix. The mobile clients hit either
   # this or `v1.1`; same controllers, same behaviour. Endpoints exclusive
   # to one namespace in upstream Pixelfed (e.g. iar/auth, push/*, mutuals,

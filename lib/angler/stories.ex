@@ -283,6 +283,166 @@ defmodule Angler.Stories do
     end
   end
 
+  ## Mention autocomplete (v1.2 publishNext composer)
+
+  @doc """
+  Suggest up to 10 followers of `viewer` whose username starts with `prefix`.
+  Used by the v1.2 story composer to gate `@mention` overlays — Pixelfed
+  only lets you mention people who follow you.
+  """
+  @spec mention_autocomplete(Profile.t(), String.t()) :: [Profile.t()]
+  def mention_autocomplete(%Profile{id: viewer_id}, prefix) when is_binary(prefix) do
+    cleaned = prefix |> String.trim_leading("@") |> String.trim()
+
+    if cleaned == "" do
+      []
+    else
+      pattern = escape_like(cleaned) <> "%"
+
+      Repo.all(
+        from p in Profile,
+          join: f in Follower,
+          on: f.profile_id == p.id and f.following_id == ^viewer_id,
+          where: ilike(p.username, ^pattern) and not is_nil(f.accepted_at),
+          order_by: [asc: p.username],
+          limit: 10
+      )
+    end
+  end
+
+  defp escape_like(s) do
+    s
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
+  end
+
+  ## Combined add+publish with overlays (v1.2 publishNext)
+
+  @doc """
+  Newer "publish-in-one-shot" flow: upload, validate overlays, and flip
+  active in a single call. Pixelfed-style overlays are stored opaque on
+  the story for the client to render.
+
+  Mentions in `overlays` are validated as following the author (matches
+  Pixelfed's gate). Returns `{:error, {:invalid_overlay, index, reason}}`
+  on the first overlay that fails validation.
+  """
+  @spec publish_next(Profile.t(), map(), list()) ::
+          {:ok, Story.t()}
+          | {:error, atom()}
+          | {:error, {:invalid_overlay, non_neg_integer(), atom()}}
+  def publish_next(%Profile{} = author, upload, overlays) when is_list(overlays) do
+    cond do
+      not enabled?() ->
+        {:error, :disabled}
+
+      length(overlays) > 4 ->
+        {:error, :too_many_overlays}
+
+      active_today_count(author.id) >= @max_per_day ->
+        {:error, :limit_reached}
+
+      true ->
+        with {:ok, validated} <- validate_overlays(author, overlays),
+             {:ok, story} <- do_add(author, upload, %{}) do
+          story
+          |> Ecto.Changeset.change(
+            active: true,
+            overlays: validated,
+            expires_at: DateTime.add(DateTime.utc_now(), @ttl_seconds, :second)
+          )
+          |> Repo.update()
+        end
+    end
+  end
+
+  defp validate_overlays(author, overlays) do
+    overlays
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {ov, idx}, {:ok, acc} ->
+      case validate_overlay(author, ov) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+        {:error, reason} -> {:halt, {:error, {:invalid_overlay, idx, reason}}}
+      end
+    end)
+    |> case do
+      {:ok, list} -> {:ok, Enum.reverse(list)}
+      err -> err
+    end
+  end
+
+  @overlay_string_keys ~w(content type fontFamily backgroundColor color)
+  @overlay_numeric_keys ~w(absoluteScale absoluteX absoluteY fontSize rotation scale x y)
+
+  defp validate_overlay(author, %{} = ov) do
+    type = Map.get(ov, "type") || Map.get(ov, :type)
+    content = Map.get(ov, "content") || Map.get(ov, :content)
+
+    with :ok <- check_overlay_type(type),
+         {:ok, normalized_content} <- check_overlay_content(author, type, content) do
+      {:ok, ov |> sanitize_overlay() |> Map.put("content", normalized_content)}
+    end
+  end
+
+  defp validate_overlay(_, _), do: {:error, :not_a_map}
+
+  defp sanitize_overlay(ov) do
+    ov
+    |> Map.new(fn {k, v} -> {to_string(k), v} end)
+    |> Map.take(@overlay_string_keys ++ @overlay_numeric_keys)
+  end
+
+  defp check_overlay_type(t) when t in ["text", "mention", "hashtag", "url"], do: :ok
+  defp check_overlay_type(_), do: {:error, :bad_type}
+
+  defp check_overlay_content(_, "text", c) when is_binary(c) and byte_size(c) > 0 do
+    if Regex.match?(~r/^[\p{L}\p{N}\s\p{P}\p{S}]*$/u, c),
+      do: {:ok, c},
+      else: {:error, :bad_text}
+  end
+
+  defp check_overlay_content(_, "hashtag", c) when is_binary(c) do
+    if Regex.match?(~r/^#[A-Za-z0-9_]{1,29}$/, c),
+      do: {:ok, c},
+      else: {:error, :bad_hashtag}
+  end
+
+  defp check_overlay_content(_, "url", c) when is_binary(c) do
+    case URI.parse(c) do
+      %URI{scheme: "https", host: h} when is_binary(h) and h != "" -> {:ok, c}
+      _ -> {:error, :bad_url}
+    end
+  end
+
+  defp check_overlay_content(%Profile{} = author, "mention", c) when is_binary(c) do
+    username = c |> String.trim_leading("@") |> String.trim()
+
+    cond do
+      username == "" ->
+        {:error, :empty_mention}
+
+      mention_allowed?(author, username) ->
+        {:ok, username}
+
+      true ->
+        {:error, :unknown_mention}
+    end
+  end
+
+  defp check_overlay_content(_, _, _), do: {:error, :bad_content}
+
+  defp mention_allowed?(%Profile{id: viewer_id}, username) do
+    Repo.exists?(
+      from p in Profile,
+        join: f in Follower,
+        on: f.profile_id == p.id and f.following_id == ^viewer_id,
+        where:
+          fragment("lower(?)", p.username) == ^String.downcase(username) and
+            not is_nil(f.accepted_at)
+    )
+  end
+
   ## Viewers (author-only — list who has seen one of my own active stories)
 
   @doc """
@@ -421,6 +581,7 @@ defmodule Angler.Stories do
       "can_reply" => s.can_reply,
       "can_react" => s.can_react,
       "view_count" => s.view_count,
+      "overlays" => s.overlays || [],
       "created_at" => DateTime.to_iso8601(s.inserted_at),
       "expires_at" => DateTime.to_iso8601(s.expires_at)
     }
