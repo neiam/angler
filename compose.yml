@@ -1,0 +1,24 @@
+services:
+  pg:
+    image: docker.io/postgres:15-alpine
+    container_name: angler-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: angler_dev
+    ports:
+      # Override with `PG_HOST_PORT=5433 podman compose up -d` if 5432
+      # is taken by another project. dev/test config reads $POSTGRES_PORT
+      # (default 5432) so they line up.
+      - "127.0.0.1:${PG_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

@@ -782,11 +782,24 @@ defmodule Angler.Statuses do
       url: canonical,
       in_reply_to_id: parent && parent.id,
       in_reply_to_profile_id: parent && parent.profile_id,
-      language: attrs["language"] || "en"
+      language: attrs["language"] || "en",
+      group_id: parse_group_id(attrs["group_id"])
     }
     |> Status.changeset()
     |> Repo.insert()
   end
+
+  defp parse_group_id(nil), do: nil
+  defp parse_group_id(n) when is_integer(n), do: n
+
+  defp parse_group_id(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_group_id(_), do: nil
 
   defp type_for([]), do: "text"
   defp type_for([_]), do: "photo"

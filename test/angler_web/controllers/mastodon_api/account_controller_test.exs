@@ -47,6 +47,38 @@ defmodule AnglerWeb.MastodonAPI.AccountControllerTest do
       assert body["source"]["language"] == "en"
     end
 
+    test "200 with _pe=1 returns Pixelfed-extension fields", ctx do
+      conn =
+        ctx.conn
+        |> put_req_header("authorization", "Bearer " <> ctx.access)
+        |> get(~p"/api/v1/accounts/verify_credentials?_pe=1")
+
+      body = json_response(conn, 200)
+      assert body["username"] == "alice"
+      assert body["is_admin"] == false
+      assert body["local"] == true
+      assert body["pronouns"] == []
+      assert is_map(body["settings"])
+      assert is_boolean(body["settings"]["video_autoplay"])
+      assert Map.has_key?(body, "note_text")
+      assert Map.has_key?(body, "header_bg")
+      assert Map.has_key?(body, "last_fetched_at")
+      assert Map.has_key?(body, "location")
+      assert Map.has_key?(body, "website")
+    end
+
+    test "200 without _pe omits extension fields (back-compat)", ctx do
+      conn =
+        ctx.conn
+        |> put_req_header("authorization", "Bearer " <> ctx.access)
+        |> get(~p"/api/v1/accounts/verify_credentials")
+
+      body = json_response(conn, 200)
+      refute Map.has_key?(body, "is_admin")
+      refute Map.has_key?(body, "settings")
+      refute Map.has_key?(body, "pronouns")
+    end
+
     test "403 if scope is insufficient", ctx do
       %{client: client} = OAuth.first_party_client!()
       {:ok, %{access: narrow}} = OAuth.issue_token(ctx.user, client, scopes: ["write"])

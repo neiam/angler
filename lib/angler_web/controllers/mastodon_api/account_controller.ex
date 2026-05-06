@@ -26,9 +26,10 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
 
   ## GET /accounts/verify_credentials
 
-  def verify_credentials(conn, _params) do
+  def verify_credentials(conn, params) do
     %{user: user, profile: profile} = BearerAuth.current_scope(conn)
-    base = Account.render(profile)
+    opts = render_opts(params, user)
+    base = Account.render(profile, opts)
     json(conn, Map.put(base, "source", source_block(user, profile)))
   end
 
@@ -36,10 +37,11 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
 
   def update_credentials(conn, params) do
     %{user: user, profile: profile} = BearerAuth.current_scope(conn)
+    opts = render_opts(params, user)
 
     case Profiles.update_credentials(profile, params) do
       {:ok, updated} ->
-        body = Account.render(updated) |> Map.put("source", source_block(user, updated))
+        body = Account.render(updated, opts) |> Map.put("source", source_block(user, updated))
         json(conn, body)
 
       {:error, %Ecto.Changeset{} = cs} ->
@@ -559,5 +561,12 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
       "note" => profile.bio || "",
       "fields" => []
     }
+  end
+
+  defp render_opts(params, user) do
+    case Map.get(params, "_pe") do
+      v when v in ["1", "true", 1, true] -> [pe: true, user: user]
+      _ -> []
+    end
   end
 end

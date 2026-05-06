@@ -3,17 +3,24 @@ defmodule AnglerWeb.MastodonAPI.Account do
   Render an `Angler.Profiles.Profile` as a Mastodon `Account` JSON object.
 
   See `plans/_types/account.md` for the wire shape.
+
+  When `pe: true` is passed (Pixelfed mobile passes `?_pe=1`), the renderer
+  adds the Pixelfed-extension fields the mobile app's `LoginUserResponse`
+  type expects: `is_admin`, `local`, `location`, `website`, `pronouns`,
+  `note_text`, `header_bg`, `last_fetched_at`, plus a `settings` block.
+  Pass `user: %User{}` to surface `is_admin` correctly.
   """
 
+  alias Angler.Accounts.User
   alias Angler.Profiles
   alias Angler.Profiles.Profile
 
   @default_avatar ""
   @default_header ""
 
-  @spec render(Profile.t()) :: map()
-  def render(%Profile{} = p) do
-    %{
+  @spec render(Profile.t(), keyword()) :: map()
+  def render(%Profile{} = p, opts \\ []) do
+    base = %{
       "id" => Integer.to_string(p.id),
       "username" => p.username,
       "acct" => acct(p),
@@ -37,10 +44,16 @@ defmodule AnglerWeb.MastodonAPI.Account do
       "moved" => nil,
       "fields" => []
     }
+
+    if Keyword.get(opts, :pe, false) do
+      Map.merge(base, pe_fields(p, opts))
+    else
+      base
+    end
   end
 
-  @spec render_many([Profile.t()]) :: [map()]
-  def render_many(profiles), do: Enum.map(profiles, &render/1)
+  @spec render_many([Profile.t()], keyword()) :: [map()]
+  def render_many(profiles, opts \\ []), do: Enum.map(profiles, &render(&1, opts))
 
   ## Helpers
 
@@ -52,4 +65,45 @@ defmodule AnglerWeb.MastodonAPI.Account do
 
   defp format_ts(nil), do: nil
   defp format_ts(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+
+  defp pe_fields(%Profile{} = p, opts) do
+    %{
+      "is_admin" => is_admin?(opts),
+      "local" => is_nil(p.domain),
+      "location" => p.location,
+      "website" => p.website,
+      "pronouns" => [],
+      "note_text" => p.bio_text || strip_tags(p.bio || ""),
+      "header_bg" => p.header_path || @default_header,
+      "last_fetched_at" => format_ts(p.last_fetched_at),
+      "settings" => settings(p)
+    }
+  end
+
+  defp is_admin?(opts) do
+    case Keyword.get(opts, :user) do
+      %User{is_admin: true} -> true
+      _ -> false
+    end
+  end
+
+  defp settings(%Profile{} = p) do
+    %{
+      "crawlable" => p.indexable_search,
+      "disable_embeds" => false,
+      "high_contrast_mode" => false,
+      "indexable" => p.indexable_search,
+      "is_suggestable" => p.discoverable,
+      "media_descriptions" => false,
+      "public_dm" => false,
+      "reduce_motion" => false,
+      "show_atom" => false,
+      "show_profile_follower_count" => true,
+      "show_profile_following_count" => true,
+      "video_autoplay" => true
+    }
+  end
+
+  defp strip_tags(s) when is_binary(s),
+    do: s |> String.replace(~r/<[^>]*>/, "") |> String.trim()
 end

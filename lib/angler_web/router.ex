@@ -107,6 +107,9 @@ defmodule AnglerWeb.Router do
 
     # Shared inbox for activities addressed to multiple local users.
     post "/f/inbox", Federation.InboxController, :shared
+
+    # AP object representation of a published story; bearer-cap gated.
+    get "/stories/:username/:id", Federation.StoryObjectController, :show
   end
 
   # Authenticated Mastodon-API surface. Filled out incrementally per grouping.
@@ -531,6 +534,11 @@ defmodule AnglerWeb.Router do
   scope "/", AnglerWeb do
     pipe_through :api
 
+    # Legacy Pixelfed media URL fallback redirect — older clients still
+    # use this shape. Maps to the standard `/storage/...` serve route.
+    # Must come BEFORE the catch-all `/storage/*path` route below.
+    get "/storage/m/_v2/:pid/:mhash/:uhash/:f", MediaController, :fallback_redirect
+
     get "/storage/*path", MediaController, :serve
 
     post "/oauth/token", OAuth.TokenController, :token
@@ -584,6 +592,108 @@ defmodule AnglerWeb.Router do
     post "/announcements", AnnouncementController, :create
     put "/announcements/:id", AnnouncementController, :update
     delete "/announcements/:id", AnnouncementController, :delete
+  end
+
+  ## Pixelfed `/api/v0/groups/...` — community groups. Whole feature is
+  ## gated by the `:groups_enabled` config flag (default false → every
+  ## endpoint 404s). Read endpoints are split across four controllers
+  ## by theme; writes live in the matching write blocks below.
+
+  scope "/api/v0/groups", AnglerWeb.GroupsAPI do
+    pipe_through :authenticated_read
+
+    # Capability + lifecycle reads
+    get "/config", GroupsController, :config
+    get "/categories/list", GroupsController, :categories_list
+    get "/category/list", GroupsController, :category_groups
+    get "/discover/popular", GroupsController, :discover_popular
+    get "/discover/new", GroupsController, :discover_new
+    get "/self/list", GroupsController, :self_list
+    get "/self/recommended/list", GroupsController, :self_recommended
+
+    # Members + admin reads
+    get "/members/list", GroupsMemberController, :members_list
+    get "/members/get", GroupsMemberController, :members_get
+    get "/members/requests", GroupsMemberController, :members_requests
+    get "/member/intersect/common", GroupsMemberController, :member_intersect_common
+    get "/accounts/:gid/:pid", GroupsMemberController, :account_in_group
+
+    # Topics + posts reads
+    get "/topics/list", GroupsFeedController, :topics_list
+    get "/topics/tag", GroupsFeedController, :topic_tag
+    get "/comments", GroupsPostController, :comments_list
+    get "/status", GroupsPostController, :get_status
+    get "/media/list", GroupsPostController, :media_list
+
+    # Self feeds
+    get "/self/feed", GroupsFeedController, :self_feed
+    get "/self/notifications", GroupsFeedController, :self_notifications
+
+    # Per-group reads + admin
+    get "/search/getrec", GroupsSearchController, :search_getrec
+    get "/:id/feed", GroupsFeedController, :group_feed
+    get "/:id/user/:pid/feed", GroupsFeedController, :group_profile_feed
+    get "/:id/atabs", GroupsAdminController, :admin_tabs
+    get "/:id/admin/interactions", GroupsAdminController, :admin_interactions
+    get "/:id/admin/blocks", GroupsAdminController, :admin_blocks
+    get "/:id/reports/list", GroupsAdminController, :reports_list
+    get "/:id/members/interaction-limits", GroupsMemberController, :get_interaction_limits
+    get "/:id/likes/:sid", GroupsPostController, :show_status_likes
+    get "/:id", GroupsController, :show
+  end
+
+  scope "/api/v0/groups", AnglerWeb.GroupsAPI do
+    pipe_through :authenticated_write
+
+    # Capability probe + lifecycle
+    post "/permission/create", GroupsController, :can_create?
+    post "/create", GroupsController, :create
+    post "/delete", GroupsController, :delete
+
+    # Search variants
+    post "/search/invite/friends/send", GroupsMemberController, :search_invite_send
+    post "/search/invite/friends", GroupsMemberController, :search_invite_friends
+    post "/search/global", GroupsSearchController, :search_global
+    post "/search/lac", GroupsSearchController, :search_lac
+    post "/search/addrec", GroupsSearchController, :search_addrec
+
+    # Comments
+    post "/comment", GroupsPostController, :store_comment
+    post "/comment/photo", GroupsPostController, :store_comment_photo
+    post "/comment/delete", GroupsPostController, :delete_comment
+    post "/comment/like", GroupsPostController, :comment_like
+    post "/comment/unlike", GroupsPostController, :comment_unlike
+
+    # Posts
+    post "/status/new", GroupsPostController, :store_post
+    post "/status/delete", GroupsPostController, :delete_post
+    post "/status/like", GroupsPostController, :like_post
+    post "/status/unlike", GroupsPostController, :unlike_post
+    post "/like", GroupsPostController, :like_post
+
+    # Members ops
+    post "/members/request", GroupsMemberController, :members_request_handle
+
+    # Per-group writes
+    post "/:id/invite/check", GroupsMemberController, :invite_check
+    post "/:id/invite/accept", GroupsMemberController, :invite_accept
+    post "/:id/invite/decline", GroupsMemberController, :invite_decline
+
+    post "/:id/members/interaction-limits",
+         GroupsMemberController,
+         :update_interaction_limits
+
+    post "/:id/admin/blocks/add", GroupsAdminController, :admin_blocks_add
+    post "/:id/admin/blocks/undo", GroupsAdminController, :admin_blocks_undo
+    post "/:id/admin/blocks/export", GroupsAdminController, :admin_blocks_export
+    post "/:id/admin/mbs", GroupsAdminController, :admin_mbs
+
+    post "/:id/report/action", GroupsAdminController, :report_action
+    post "/:id/report/create", GroupsAdminController, :report_create
+    post "/:id/join", GroupsMemberController, :join
+    post "/:id/cjr", GroupsMemberController, :cancel_join_request
+    post "/:id/leave", GroupsMemberController, :leave
+    post "/:id/settings", GroupsController, :update
   end
 
   ## Pixelfed-shape admin namespace at `/api/admin/*`. Distinct from the

@@ -12,6 +12,25 @@ defmodule AnglerWeb.MediaController do
 
   alias Angler.Media.Storage.Local
 
+  ## GET /storage/m/_v2/:pid/:mhash/:uhash/:f
+  ##
+  ## Legacy Pixelfed media URL format (`storage/m/_v2/...`). Older clients
+  ## and some federated links still use it. We resolve to the standard
+  ## `/storage/...` path via the existing serve/1 action; if no file is
+  ## present, redirect to a placeholder so the response shape matches
+  ## upstream (browsers see an image, not a 404).
+  def fallback_redirect(conn, %{"pid" => pid, "mhash" => mhash, "uhash" => uhash, "f" => f}) do
+    rel = Path.join(["m", "_v2", pid, mhash, uhash, f])
+    abs = Path.expand(Path.join(Local.root(), rel))
+    safe? = String.starts_with?(abs, Path.expand(Local.root()))
+
+    cond do
+      not safe? -> send_resp(conn, 403, "")
+      File.exists?(abs) -> Phoenix.Controller.redirect(conn, to: "/storage/" <> rel)
+      true -> Phoenix.Controller.redirect(conn, to: "/storage/no-preview.png")
+    end
+  end
+
   def serve(conn, %{"path" => parts}) do
     rel = Path.join(parts)
     abs = Path.expand(Path.join(Local.root(), rel))

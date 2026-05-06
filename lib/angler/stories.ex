@@ -114,10 +114,15 @@ defmodule Angler.Stories do
           can_reply: truthy?(params["can_reply"], story.can_reply),
           can_react: truthy?(params["can_react"], story.can_react),
           duration_ms: parse_duration_ms(params["duration"], story.duration_ms),
+          bearcap_token: story.bearcap_token || mint_bearcap(),
           expires_at: DateTime.add(DateTime.utc_now(), @ttl_seconds, :second)
         )
         |> Repo.update()
     end
+  end
+
+  defp mint_bearcap do
+    :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
   end
 
   ## Carousel reads
@@ -350,6 +355,7 @@ defmodule Angler.Stories do
           |> Ecto.Changeset.change(
             active: true,
             overlays: validated,
+            bearcap_token: mint_bearcap(),
             expires_at: DateTime.add(DateTime.utc_now(), @ttl_seconds, :second)
           )
           |> Repo.update()

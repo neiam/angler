@@ -27,6 +27,12 @@ defmodule Angler.Stories.Story do
     # responsibility.
     field :overlays, {:array, :map}, default: []
 
+    # Bearer-capability token. Generated at publish time so a remote AP
+    # actor can fetch the story object from `GET /stories/:username/:id`
+    # by presenting `Authorization: Bearer <token>`. Capabilities-based:
+    # possession of the token implies authorization.
+    field :bearcap_token, :string
+
     belongs_to :profile, Profile, type: :integer
     timestamps(type: :utc_datetime_usec)
   end
@@ -47,6 +53,7 @@ defmodule Angler.Stories.Story do
       :local,
       :remote_url,
       :overlays,
+      :bearcap_token,
       :expires_at
     ])
     |> validate_required([:profile_id, :type, :mime, :path, :expires_at])
