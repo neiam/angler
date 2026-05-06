@@ -57,27 +57,103 @@ mix precommit        # compile --warnings-as-errors, format, deps.unlock --unuse
 
 ## Configuration
 
-Runtime config lives in `config/runtime.exs`. Key flags:
+Runtime config lives in `config/runtime.exs` and is driven by environment
+variables. Operator-facing features (stories, groups, push, directory
+submission) ship disabled — opt in per instance.
 
-| Key | Default | Effect |
+### Database
+
+| Var | Default | Effect |
 | --- | --- | --- |
-| `:stories_enabled` | `false` | Enables the `v1.2/stories` namespace + AP story objects |
-| `:groups_enabled` | `false` | Enables the `/api/v0/groups/*` namespace |
-| `:open_registration` | `true` | Allow `/auth/register` without invite |
-| `:registration_approval_required` | `false` | New accounts land in pending state |
-| `:in_app_registration_enabled` | `true` | Mobile in-app signup |
-| `:account_deletion_enabled` | `true` | `/api/v1/accounts/delete` |
-| `:landing_directory_enabled` | `false` | Public profile directory |
-| `:landing_explore_enabled` | `true` | Explore feed on landing page |
-| `:expo_push_enabled` | `false` | Accept Expo push tokens for mobile |
-| `:push_vapid_public_key` | — | Web Push VAPID public key |
-| `:media_storage` | `:local` | `:local` or `:s3` |
-| `:media_root` | `priv/static/storage` | Local media path |
-| `:pixelfed_directory` | `false` | Submit to upstream directory |
-| `:instance_title`, `:instance_description`, `:instance_rules`, `:instance_contact_email` | — | Instance metadata surfaced via `/api/v1/instance` |
+| `POSTGRES_HOST` | — | When set, prod uses discrete `POSTGRES_*` vars |
+| `POSTGRES_PORT` | `5432` | dev / test / prod |
+| `POSTGRES_USER` | `postgres` (dev) | Required in prod when `POSTGRES_HOST` is set |
+| `POSTGRES_PASSWORD` | `postgres` (dev) | Required in prod when `POSTGRES_HOST` is set |
+| `POSTGRES_DB` | `angler_dev` (dev), `angler` (prod) | Database name |
+| `DATABASE_URL` | — | Fallback when `POSTGRES_HOST` is unset (`ecto://USER:PASS@HOST/DB`) |
+| `POOL_SIZE` | `10` | Ecto pool size (prod) |
 
-Operator-facing features (stories, groups, push, directory submission) ship
-disabled — opt in per instance.
+### Endpoint
+
+| Var | Default | Effect |
+| --- | --- | --- |
+| `PHX_SERVER` | unset | Set truthy to start the HTTP server in releases |
+| `PORT` | `4000` | HTTP listen port |
+| `PHX_HOST` | `example.com` | Public hostname (prod URL generation) |
+| `SECRET_KEY_BASE` | — | Required in prod (`mix phx.gen.secret`) |
+| `DNS_CLUSTER_QUERY` | — | DNSCluster discovery query |
+| `ECTO_IPV6` | `false` | Set truthy for IPv6 DB sockets |
+
+### Feature toggles
+
+| Var | Default | Config key | Effect |
+| --- | --- | --- | --- |
+| `STORIES_ENABLED` | `false` | `:stories_enabled` | Enables the `v1.2/stories` namespace + AP story objects |
+| `GROUPS_ENABLED` | `false` | `:groups_enabled` | Enables the `/api/v0/groups/*` namespace |
+| `OPEN_REGISTRATION` | `true` | `:open_registration` | Allow `/auth/register` without invite |
+| `REGISTRATION_APPROVAL_REQUIRED` | `false` | `:registration_approval_required` | New accounts land in pending state |
+| `IN_APP_REGISTRATION_ENABLED` | `true` | `:in_app_registration_enabled` | Mobile in-app signup |
+| `ACCOUNT_DELETION_ENABLED` | `true` | `:account_deletion_enabled` | `/api/v1/accounts/delete` |
+| `LANDING_DIRECTORY_ENABLED` | `false` | `:landing_directory_enabled` | Public profile directory |
+| `LANDING_EXPLORE_ENABLED` | `true` | `:landing_explore_enabled` | Explore feed on landing page |
+| `EXPO_PUSH_ENABLED` | `false` | `:expo_push_enabled` | Accept Expo push tokens for mobile |
+| `OAUTH_REFRESH_TOKENS` | `true` | `:oauth_refresh_tokens` | Issue refresh tokens on `/oauth/token` |
+
+Booleans accept `true`/`1`/`yes` (case-insensitive); anything else takes the default.
+
+### Instance metadata
+
+Surfaced via `/api/v1/instance` and `/nodeinfo`.
+
+| Var | Effect |
+| --- | --- |
+| `INSTANCE_TITLE` | Display name (default `"Angler"`) |
+| `INSTANCE_SHORT_DESCRIPTION` | One-liner |
+| `INSTANCE_DESCRIPTION` | Long description / about |
+| `INSTANCE_BANNER_URL` | Banner image URL |
+| `INSTANCE_CONTACT_EMAIL` | Admin contact email |
+| `INSTANCE_CONTACT_USERNAME` | Admin contact handle |
+| `INSTANCE_RULES` | Pipe- or newline-separated list (`"No spam\|Be kind"`) |
+
+### Media storage
+
+| Var | Default | Effect |
+| --- | --- | --- |
+| `MEDIA_STORAGE` | `local` | `local` or `s3` |
+| `MEDIA_ROOT` | `priv/static/storage` | Local media path |
+
+### Push (Web Push / VAPID)
+
+Set both keys to enable. Without them push delivery is a no-op.
+
+| Var | Effect |
+| --- | --- |
+| `PUSH_VAPID_PUBLIC_KEY` | Surfaced to FE for subscription |
+| `PUSH_VAPID_PRIVATE_KEY` | Used for delivery signing |
+| `PUSH_VAPID_SUBJECT` | `mailto:` URI (default `mailto:admin@localhost`) |
+
+### Pixelfed directory
+
+| Var | Default | Effect |
+| --- | --- | --- |
+| `PIXELFED_DIRECTORY_ENABLED` | `false` | Submit to upstream directory |
+| `PIXELFED_DIRECTORY_SK` | — | Submission secret key |
+
+### Mail
+
+| Var | Default | Effect |
+| --- | --- | --- |
+| `MAIL_DRIVER` | `local` | `local` (Swoosh dev mailbox) or `smtp` |
+| `SMTP_RELAY` | — | Required when `MAIL_DRIVER=smtp` |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | — | Optional auth |
+| `SMTP_TLS` | `if_available` | `always` / `if_available` / `never` |
+| `SMTP_AUTH` | `always` | `always` / `if_available` / `never` |
+| `SMTP_SSL` | `false` | Set truthy for SMTPS port 465 |
+| `SMTP_RETRIES` | `2` | Connection retry count |
+| `SMTP_NO_MX_LOOKUPS` | `false` | Skip MX lookup |
+| `MAIL_FROM` | `noreply@<host>` | From: address |
+| `MAIL_FROM_NAME` | `Pixelfed` | From: display name |
 
 ## Layout
 

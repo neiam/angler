@@ -194,6 +194,104 @@ if config_env() != :test do
     name: System.get_env("MAIL_FROM_NAME", "Pixelfed")
 end
 
+# --------------------------------------------------------------------
+# Instance / feature flags
+#
+# Read at runtime in dev, prod, and any deployed environment. Skipped in
+# :test so suite defaults stay deterministic. Tests that need to flip a
+# flag use `Application.put_env/3` in their setup.
+#
+# Boolean env vars accept "true"/"1"/"yes" (case-insensitive); anything
+# else parses as the documented default.
+# --------------------------------------------------------------------
+
+if config_env() != :test do
+  bool = fn key, default ->
+    case System.get_env(key) do
+      nil -> default
+      v -> String.downcase(v) in ["true", "1", "yes"]
+    end
+  end
+
+  str = fn key, default ->
+    case System.get_env(key) do
+      nil -> default
+      "" -> default
+      v -> v
+    end
+  end
+
+  list = fn key ->
+    case System.get_env(key) do
+      nil -> []
+      "" -> []
+      v -> v |> String.split(~r/\s*\|\s*|\n/) |> Enum.reject(&(&1 == ""))
+    end
+  end
+
+  ## Feature toggles
+  config :angler,
+    stories_enabled: bool.("STORIES_ENABLED", false),
+    groups_enabled: bool.("GROUPS_ENABLED", false),
+    open_registration: bool.("OPEN_REGISTRATION", true),
+    registration_approval_required: bool.("REGISTRATION_APPROVAL_REQUIRED", true),
+    in_app_registration_enabled: bool.("IN_APP_REGISTRATION_ENABLED", true),
+    account_deletion_enabled: bool.("ACCOUNT_DELETION_ENABLED", true),
+    landing_directory_enabled: bool.("LANDING_DIRECTORY_ENABLED", false),
+    landing_explore_enabled: bool.("LANDING_EXPLORE_ENABLED", true),
+    expo_push_enabled: bool.("EXPO_PUSH_ENABLED", false),
+    oauth_refresh_tokens: bool.("OAUTH_REFRESH_TOKENS", true)
+
+  ## Instance metadata (surfaced via /api/v1/instance, /nodeinfo, etc.)
+  config :angler,
+    instance_title: str.("INSTANCE_TITLE", "Angler"),
+    instance_short_description: str.("INSTANCE_SHORT_DESCRIPTION", nil),
+    instance_description: str.("INSTANCE_DESCRIPTION", nil),
+    instance_banner_url: str.("INSTANCE_BANNER_URL", nil),
+    instance_contact_email: str.("INSTANCE_CONTACT_EMAIL", nil),
+    instance_contact_username: str.("INSTANCE_CONTACT_USERNAME", nil),
+    instance_rules: list.("INSTANCE_RULES")
+
+  ## Media storage
+  storage =
+    case String.downcase(System.get_env("MEDIA_STORAGE", "local")) do
+      "local" ->
+        :local
+
+      "s3" ->
+        :s3
+
+      other ->
+        raise "Unknown MEDIA_STORAGE=#{inspect(other)}; expected \"local\" or \"s3\""
+    end
+
+  config :angler,
+    media_storage: storage,
+    media_root: str.("MEDIA_ROOT", "priv/static/storage")
+
+  ## Pixelfed directory submission (off by default)
+  config :angler,
+    pixelfed_directory: bool.("PIXELFED_DIRECTORY_ENABLED", false),
+    pixelfed_directory_sk: System.get_env("PIXELFED_DIRECTORY_SK")
+
+  ## Web Push (VAPID). Public key is surfaced to the FE so it can build
+  ## the subscription. Both keys + subject are passed to web_push_encryption
+  ## for actual delivery. If no VAPID is configured, push delivery is a
+  ## no-op (config/test.exs configures a fixed test keypair).
+  case {System.get_env("PUSH_VAPID_PUBLIC_KEY"), System.get_env("PUSH_VAPID_PRIVATE_KEY")} do
+    {pub, priv} when is_binary(pub) and is_binary(priv) and pub != "" and priv != "" ->
+      config :angler, push_vapid_public_key: pub
+
+      config :web_push_encryption, :vapid_details,
+        subject: System.get_env("PUSH_VAPID_SUBJECT", "mailto:admin@localhost"),
+        public_key: pub,
+        private_key: priv
+
+    _ ->
+      :ok
+  end
+end
+
 # Oban configuration. The DB-backed adapter uses our existing Repo.
 config :angler, Oban,
   repo: Angler.Repo,
