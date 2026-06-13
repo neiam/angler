@@ -21,6 +21,7 @@ defmodule Angler.Profiles.Profile do
     field :bio_text, :string
     field :website, :string
     field :location, :string
+    field :pronouns, {:array, :string}, default: []
 
     field :is_private, :boolean, default: false
     field :discoverable, :boolean, default: true
@@ -64,7 +65,7 @@ defmodule Angler.Profiles.Profile do
   end
 
   @cast_fields ~w(
-    username domain name bio bio_text website location
+    username domain name bio bio_text website location pronouns
     is_private discoverable indexable_search directory_opt_in is_bot is_suspended status
     avatar_path header_path
     public_key_pem private_key_pem
@@ -91,7 +92,8 @@ defmodule Angler.Profiles.Profile do
   defp maybe_assign_id(profile), do: profile
 
   @update_credentials_fields ~w(
-    display_name note locked bot discoverable indexable website avatar_path header_path
+    display_name note bio locked bot discoverable is_suggestable indexable
+    website location pronouns avatar_path header_path
   )
 
   @doc """
@@ -115,13 +117,32 @@ defmodule Angler.Profiles.Profile do
       :discoverable,
       :indexable_search,
       :website,
+      :location,
+      :pronouns,
       :avatar_path,
       :header_path
     ])
     |> validate_length(:name, max: 30)
     |> validate_length(:bio_text, max: 200)
     |> validate_length(:website, max: 120)
+    |> validate_length(:location, max: 60)
+    |> normalize_pronouns()
     |> render_bio()
+  end
+
+  # Pixelfed caps pronouns at 4 non-empty entries.
+  defp normalize_pronouns(changeset) do
+    case get_change(changeset, :pronouns) do
+      nil ->
+        changeset
+
+      list when is_list(list) ->
+        cleaned = list |> Enum.map(&to_string/1) |> Enum.reject(&(&1 == "")) |> Enum.take(4)
+        put_change(changeset, :pronouns, cleaned)
+
+      _ ->
+        put_change(changeset, :pronouns, [])
+    end
   end
 
   defp render_bio(changeset) do
@@ -148,11 +169,16 @@ defmodule Angler.Profiles.Profile do
 
   defp schema_key("display_name"), do: :name
   defp schema_key("note"), do: :bio_text
+  defp schema_key("bio"), do: :bio_text
   defp schema_key("locked"), do: :is_private
   defp schema_key("bot"), do: :is_bot
   defp schema_key("discoverable"), do: :discoverable
+  # Pixelfed's alias for discoverable (profile directory suggestions).
+  defp schema_key("is_suggestable"), do: :discoverable
   defp schema_key("indexable"), do: :indexable_search
   defp schema_key("website"), do: :website
+  defp schema_key("location"), do: :location
+  defp schema_key("pronouns"), do: :pronouns
   defp schema_key("avatar_path"), do: :avatar_path
   defp schema_key("header_path"), do: :header_path
   defp schema_key(other), do: other

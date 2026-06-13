@@ -70,13 +70,15 @@ defmodule AnglerWeb.MastodonAPI.Account do
     %{
       "is_admin" => is_admin?(opts),
       "local" => is_nil(p.domain),
-      "location" => p.location,
-      "website" => p.website,
-      "pronouns" => [],
+      # Pixelfed-rn types these as `string`; send "" rather than null so the
+      # app's `LoginUserResponse` never sees a null where it expects a string.
+      "location" => p.location || "",
+      "website" => p.website || "",
+      "pronouns" => p.pronouns || [],
       "note_text" => p.bio_text || strip_tags(p.bio || ""),
       "header_bg" => p.header_path || @default_header,
       "last_fetched_at" => format_ts(p.last_fetched_at),
-      "settings" => settings(p)
+      "settings" => settings(p, opts)
     }
   end
 
@@ -87,22 +89,31 @@ defmodule AnglerWeb.MastodonAPI.Account do
     end
   end
 
-  defp settings(%Profile{} = p) do
+  # The stored account settings are passed in via `opts[:settings]` for self
+  # renders (verify_credentials / update_credentials). For other accounts no
+  # settings are loaded (no N+1), so defaults apply. `indexable` and
+  # `is_suggestable` always come from profile columns.
+  defp settings(%Profile{} = p, opts) do
+    s = Keyword.get(opts, :settings, %{})
+
     %{
-      "crawlable" => p.indexable_search,
-      "disable_embeds" => false,
-      "high_contrast_mode" => false,
+      "crawlable" => sget(s, "crawlable", true),
+      "disable_embeds" => sget(s, "disable_embeds", false),
+      "high_contrast_mode" => sget(s, "high_contrast_mode", false),
       "indexable" => p.indexable_search,
       "is_suggestable" => p.discoverable,
-      "media_descriptions" => false,
-      "public_dm" => false,
-      "reduce_motion" => false,
-      "show_atom" => false,
-      "show_profile_follower_count" => true,
-      "show_profile_following_count" => true,
-      "video_autoplay" => true
+      "media_descriptions" => sget(s, "media_descriptions", false),
+      "public_dm" => sget(s, "public_dm", false),
+      "reduce_motion" => sget(s, "reduce_motion", false),
+      "show_atom" => sget(s, "show_atom", false),
+      "show_profile_follower_count" => sget(s, "show_profile_follower_count", true),
+      "show_profile_following_count" => sget(s, "show_profile_following_count", true),
+      "video_autoplay" => sget(s, "video_autoplay", true)
     }
   end
+
+  defp sget(s, key, default) when is_map(s), do: Map.get(s, key, default)
+  defp sget(_, _, default), do: default
 
   defp strip_tags(s) when is_binary(s),
     do: s |> String.replace(~r/<[^>]*>/, "") |> String.trim()

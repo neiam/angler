@@ -49,6 +49,13 @@ defmodule AnglerWeb.OAuth.TokenControllerTest do
       assert is_binary(body["access_token"])
       assert body["scope"] == "read write"
 
+      # Pixelfed/Passport shape — the mobile app stores these unconditionally
+      # (a missing/undefined value throws in react-native-mmkv mid-login), so
+      # they must be present and correctly typed.
+      assert is_binary(body["refresh_token"])
+      assert is_integer(body["expires_in"]) and body["expires_in"] > 0
+      assert is_integer(body["created_at"])
+
       # RFC 6749 §5.1 — token responses must not be cached.
       assert get_resp_header(resp, "cache-control") == ["no-store"]
       assert get_resp_header(resp, "pragma") == ["no-cache"]
@@ -139,6 +146,10 @@ defmodule AnglerWeb.OAuth.TokenControllerTest do
 
       body = json_response(resp, 200)
       assert is_binary(body["access_token"])
+      # The grant the Pixelfed mobile app uses — must return a usable
+      # refresh_token + expires_in so the app's token storage doesn't choke.
+      assert is_binary(body["refresh_token"])
+      assert is_integer(body["expires_in"]) and body["expires_in"] > 0
     end
 
     test "second redemption fails with invalid_grant", %{conn: conn} do

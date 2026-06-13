@@ -9,23 +9,37 @@ defmodule AnglerWeb.Plugs.RawBodyReader do
   the controller reads it.
 
   Configured in `endpoint.ex`'s `Plug.Parsers` invocation. Adds a small
-  per-request memory cost (one extra copy of the body); fine at 1 MiB cap.
+  per-request memory cost (one extra copy of the body); fine at the 1 MiB
+  JSON cap. Multipart uploads (up to 100 MiB) are NOT cached — they only need
+  to stream to temp files and signatures aren't verified over them — so we
+  pass those straight through to avoid doubling upload memory.
   """
 
   @spec read_body(Plug.Conn.t(), keyword()) ::
           {:ok, binary(), Plug.Conn.t()} | {:more, binary(), Plug.Conn.t()} | {:error, term()}
   def read_body(conn, opts) do
-    case Plug.Conn.read_body(conn, opts) do
-      {:ok, body, conn} ->
-        conn = put_assign(conn, body)
-        {:ok, body, conn}
+    if multipart?(conn) do
+      Plug.Conn.read_body(conn, opts)
+    else
+      case Plug.Conn.read_body(conn, opts) do
+        {:ok, body, conn} ->
+          conn = put_assign(conn, body)
+          {:ok, body, conn}
 
-      {:more, partial, conn} ->
-        conn = put_assign(conn, partial)
-        {:more, partial, conn}
+        {:more, partial, conn} ->
+          conn = put_assign(conn, partial)
+          {:more, partial, conn}
 
-      {:error, _} = err ->
-        err
+        {:error, _} = err ->
+          err
+      end
+    end
+  end
+
+  defp multipart?(conn) do
+    case Plug.Conn.get_req_header(conn, "content-type") do
+      [ct | _] -> String.starts_with?(ct, "multipart/")
+      _ -> false
     end
   end
 

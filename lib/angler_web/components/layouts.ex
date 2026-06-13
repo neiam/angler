@@ -72,6 +72,16 @@ defmodule AnglerWeb.Layouts do
                     </.link>
                   </li>
                   <li>
+                    <.link navigate={~p"/settings/profile"}>
+                      <.icon name="hero-pencil-square-micro" class="size-4" /> Edit profile
+                    </.link>
+                  </li>
+                  <li :if={@current_user.is_admin}>
+                    <.link navigate={~p"/admin"}>
+                      <.icon name="hero-cog-6-tooth-micro" class="size-4" /> Admin settings
+                    </.link>
+                  </li>
+                  <li>
                     <.link href={~p"/session/logout"} method="post">
                       <.icon name="hero-arrow-right-on-rectangle-micro" class="size-4" /> Log out
                     </.link>

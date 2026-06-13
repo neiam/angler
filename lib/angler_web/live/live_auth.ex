@@ -27,4 +27,15 @@ defmodule AnglerWeb.LiveAuth do
      |> assign(:current_user, user)
      |> assign(:current_profile, profile)}
   end
+
+  @doc "Gate a LiveView to admins; non-admins are bounced home (or to login)."
+  def on_mount(:require_admin, params, session, socket) do
+    {:cont, socket} = on_mount(:mount_current_user, params, session, socket)
+
+    case socket.assigns.current_user do
+      %{is_admin: true} -> {:cont, socket}
+      %{} -> {:halt, Phoenix.LiveView.redirect(socket, to: "/")}
+      _ -> {:halt, Phoenix.LiveView.redirect(socket, to: "/login?next=/admin")}
+    end
+  end
 end

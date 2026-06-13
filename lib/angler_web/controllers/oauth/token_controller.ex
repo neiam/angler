@@ -29,9 +29,9 @@ defmodule AnglerWeb.OAuth.TokenController do
     with {:ok, client} <- authenticate_client(params, allow_public: true),
          {:ok, code} <- fetch_required(params, "code"),
          {:ok, redirect_uri} <- fetch_required(params, "redirect_uri"),
-         {:ok, %{token: token, access: access}} <-
+         {:ok, %{token: token, access: access, refresh: refresh}} <-
            OAuth.redeem_authorization_code(code, client, redirect_uri, params["code_verifier"]) do
-      send_token(conn, token, access)
+      send_token(conn, token, access, refresh)
     else
       {:error, reason} -> send_error(conn, reason)
     end
@@ -44,8 +44,11 @@ defmodule AnglerWeb.OAuth.TokenController do
       scopes = parse_scopes(params["scope"], client.scopes)
 
       case OAuth.issue_password_token(username, password, client, scopes) do
-        {:ok, %{token: token, access: access}} -> send_token(conn, token, access)
-        {:error, reason} -> send_error(conn, reason)
+        {:ok, %{token: token, access: access, refresh: refresh}} ->
+          send_token(conn, token, access, refresh)
+
+        {:error, reason} ->
+          send_error(conn, reason)
       end
     else
       {:error, reason} -> send_error(conn, reason)
@@ -58,7 +61,7 @@ defmodule AnglerWeb.OAuth.TokenController do
         scopes = parse_scopes(params["scope"], ["read"])
 
         case OAuth.issue_client_credentials_token(client, scopes) do
-          {:ok, %{token: token, access: access}} -> send_token(conn, token, access)
+          {:ok, %{token: token, access: access}} -> send_token(conn, token, access, nil)
           _ -> send_error(conn, "server_error")
         end
 
@@ -70,8 +73,9 @@ defmodule AnglerWeb.OAuth.TokenController do
   defp refresh(conn, params) do
     with {:ok, client} <- authenticate_client(params, allow_public: false),
          {:ok, refresh_raw} <- fetch_required(params, "refresh_token"),
-         {:ok, %{token: token, access: access}} <- OAuth.refresh_access_token(refresh_raw, client) do
-      send_token(conn, token, access)
+         {:ok, %{token: token, access: access, refresh: refresh}} <-
+           OAuth.refresh_access_token(refresh_raw, client) do
+      send_token(conn, token, access, refresh)
     else
       {:error, :unsupported} -> send_error(conn, "unsupported_grant_type")
       {:error, reason} -> send_error(conn, reason)
@@ -109,20 +113,37 @@ defmodule AnglerWeb.OAuth.TokenController do
   defp parse_scopes("", default), do: default
   defp parse_scopes(s, _default) when is_binary(s), do: String.split(s, [" ", ","], trim: true)
 
-  defp send_token(conn, token, access) do
+  defp send_token(conn, token, access, refresh) do
     conn
     |> put_no_store_headers()
-    |> json(render_token(token, access))
+    |> json(render_token(token, access, refresh))
   end
 
-  defp render_token(token, access) do
+  # Pixelfed (Laravel Passport) returns `refresh_token` + `expires_in`, and the
+  # Pixelfed mobile app stores both unconditionally — omitting them makes the
+  # app's MMKV `set(key, undefined)` throw mid-login, leaving an unusable
+  # half-logged-in state. So we always include `expires_in`, and `refresh_token`
+  # whenever the grant issued one.
+  defp render_token(token, access, refresh) do
     %{
       "access_token" => access,
       "token_type" => "Bearer",
       "scope" => Enum.join(token.scopes, " "),
-      "created_at" => DateTime.to_unix(token.inserted_at)
+      "created_at" => DateTime.to_unix(token.inserted_at),
+      "expires_in" => expires_in(token)
     }
+    |> maybe_put_refresh(refresh)
   end
+
+  defp maybe_put_refresh(body, refresh) when is_binary(refresh),
+    do: Map.put(body, "refresh_token", refresh)
+
+  defp maybe_put_refresh(body, _), do: body
+
+  defp expires_in(%{expires_at: %DateTime{} = exp}),
+    do: max(DateTime.diff(exp, DateTime.utc_now(), :second), 0)
+
+  defp expires_in(_), do: nil
 
   defp send_error(conn, code) do
     code = if is_atom(code), do: Atom.to_string(code), else: code

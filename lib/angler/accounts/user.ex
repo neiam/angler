@@ -123,6 +123,20 @@ defmodule Angler.Accounts.User do
     |> hash_password()
   end
 
+  @doc """
+  Changeset for changing the account email. Re-validates shape/uniqueness and
+  resets `email_verified_at` so the new address must be re-verified. The
+  controller verifies the current password first.
+  """
+  def email_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:email])
+    |> validate_required([:email])
+    |> validate_email()
+    |> unique_constraint(:email)
+    |> put_change(:email_verified_at, nil)
+  end
+
   @doc "Constant-time check of a candidate password against a user's stored hash."
   def valid_password?(%__MODULE__{password_hash: hash}, password)
       when is_binary(hash) and is_binary(password) and byte_size(password) > 0 do

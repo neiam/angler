@@ -24,7 +24,16 @@ defmodule Angler.Media.Storage do
 
   ## Convenience proxies — delegate to the configured backend.
 
-  def backend, do: Application.get_env(:angler, :media_storage, Angler.Media.Storage.Local)
+  # `media_storage` may be configured either as a short name (`:local` / `:s3`,
+  # as `config/runtime.exs` sets from MEDIA_STORAGE) or as an explicit backend
+  # module. Normalize both to a module so `backend().put(...)` always resolves.
+  def backend do
+    case Application.get_env(:angler, :media_storage, Angler.Media.Storage.Local) do
+      :local -> Angler.Media.Storage.Local
+      :s3 -> Angler.Media.Storage.S3
+      module when is_atom(module) -> module
+    end
+  end
 
   def put(profile_id, variant, filename, source),
     do: backend().put(profile_id, variant, filename, source)

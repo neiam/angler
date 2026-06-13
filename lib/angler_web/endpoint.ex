@@ -45,10 +45,14 @@ defmodule AnglerWeb.Endpoint do
 
   # `body_reader` caches the byte-exact request body in `conn.assigns.raw_body`
   # so federation inbox handlers can verify HTTP signatures over it. See
-  # AnglerWeb.Plugs.RawBodyReader. The 1 MiB length cap is the federation
-  # max — Mastodon, Pixelfed, and Akkoma all reject larger inbox payloads.
+  # AnglerWeb.Plugs.RawBodyReader. The top-level 1 MiB length cap is the
+  # federation max — Mastodon, Pixelfed, and Akkoma all reject larger inbox
+  # payloads — and applies to urlencoded/JSON bodies. Multipart (media uploads)
+  # gets its own larger cap: the media pipeline enforces 100 MiB
+  # (`Angler.Media`), and the instance API advertises 25 MiB images / 100 MiB
+  # video, so allow 105 MiB here to cover the body + multipart envelope.
   plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json],
+    parsers: [:urlencoded, {:multipart, length: 105 * 1_048_576}, :json],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library(),
     body_reader: {AnglerWeb.Plugs.RawBodyReader, :read_body, []},

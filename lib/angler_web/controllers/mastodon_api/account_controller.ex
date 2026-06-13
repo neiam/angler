@@ -11,6 +11,7 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
 
   import Ecto.Query, only: [from: 2]
 
+  alias Angler.Accounts.Settings
   alias Angler.Follows
   alias Angler.Pagination.MastodonCursor
   alias Angler.Profiles
@@ -37,10 +38,12 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
 
   def update_credentials(conn, params) do
     %{user: user, profile: profile} = BearerAuth.current_scope(conn)
-    opts = render_opts(params, user)
 
     case Profiles.update_credentials(profile, params) do
       {:ok, updated} ->
+        {:ok, settings} = Settings.apply_account_params(user.id, params)
+        user = maybe_update_language(user, params)
+        opts = [pe: true, user: user, settings: settings]
         body = Account.render(updated, opts) |> Map.put("source", source_block(user, updated))
         json(conn, body)
 
@@ -59,12 +62,31 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
 
   ## GET /accounts/:id
 
-  def show(conn, %{"id" => id}) do
+  def show(conn, %{"id" => id} = params) do
     with {:ok, int_id} <- parse_id(id),
          %Profile{} = profile <- Profiles.get_profile(int_id) do
-      json(conn, Account.render(profile))
+      json(conn, Account.render(profile, show_render_opts(conn, params, profile)))
     else
       _ -> conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+    end
+  end
+
+  # The Pixelfed app fetches its own profile via `GET /accounts/:id?_pe=1`, so
+  # `show` must honor `_pe` like `verify_credentials` does — otherwise
+  # website/location/pronouns/settings are missing and the app's profile +
+  # edit screens render empty. Private settings are only attached for one's
+  # own profile; other accounts get the public `_pe` fields only.
+  defp show_render_opts(conn, params, profile) do
+    if Map.get(params, "_pe") in ["1", "true", 1, true] do
+      case BearerAuth.current_scope(conn) do
+        %{user: %{} = user, profile: %{id: pid}} when pid == profile.id ->
+          [pe: true, user: user, settings: Settings.account_settings(user.id)]
+
+        _ ->
+          [pe: true]
+      end
+    else
+      []
     end
   end
 
@@ -440,6 +462,33 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
   ## We funnel it through the same `Profiles.update_credentials/2` path that
   ## handles `PATCH /accounts/update_credentials`.
 
+  def header_update(conn, params) do
+    %{user: user, profile: profile} = BearerAuth.current_scope(conn)
+    upload = params["header"] || params["file"]
+
+    cond do
+      is_nil(upload) ->
+        conn |> put_status(:unprocessable_entity) |> json(%{"error" => "header is required"})
+
+      true ->
+        case Profiles.update_credentials(profile, %{"header" => upload}) do
+          {:ok, updated} ->
+            json(conn, Account.render(updated) |> Map.put("source", source_block(user, updated)))
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{"error" => "Validation failed", "errors" => translate_errors(cs)})
+
+          {:error, :not_local_profile} ->
+            conn |> put_status(:forbidden) |> json(%{"error" => "Not a local profile"})
+
+          {:error, reason} ->
+            conn |> put_status(:unprocessable_entity) |> json(%{"error" => to_string(reason)})
+        end
+    end
+  end
+
   def avatar_update(conn, params) do
     %{user: user, profile: profile} = BearerAuth.current_scope(conn)
     upload = params["avatar"] || params["file"]
@@ -554,19 +603,39 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
   defp parse_id(_), do: :error
 
   defp source_block(user, profile) do
+    settings = Settings.account_settings(user.id)
+
     %{
-      "privacy" => if(profile.is_private, do: "private", else: "public"),
+      "privacy" =>
+        Map.get(settings, "default_scope", if(profile.is_private, do: "private", else: "public")),
       "sensitive" => false,
       "language" => user.language || "en",
-      "note" => profile.bio || "",
+      "note" => profile.bio_text || "",
       "fields" => []
     }
   end
 
+  # `source[language]` updates the user's default post language.
+  defp maybe_update_language(user, params) do
+    case get_in(params, ["source", "language"]) do
+      lang when is_binary(lang) and lang != "" ->
+        case user |> Ecto.Changeset.change(language: lang) |> Repo.update() do
+          {:ok, updated} -> updated
+          _ -> user
+        end
+
+      _ ->
+        user
+    end
+  end
+
   defp render_opts(params, user) do
     case Map.get(params, "_pe") do
-      v when v in ["1", "true", 1, true] -> [pe: true, user: user]
-      _ -> []
+      v when v in ["1", "true", 1, true] ->
+        [pe: true, user: user, settings: Settings.account_settings(user.id)]
+
+      _ ->
+        []
     end
   end
 end

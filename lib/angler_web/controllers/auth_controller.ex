@@ -49,34 +49,25 @@ defmodule AnglerWeb.AuthController do
          :ok <- ensure_email_unused(attrs.email),
          :ok <- ensure_username_available(attrs.username),
          :ok <- Auth.verify_code(attrs.email, attrs.verify_code),
-         {:ok, %{user: user, profile: profile}} <- Accounts.register(attrs),
-         %{client: client} <- OAuth.first_party_client!(),
-         {:ok, %{access: access, refresh: refresh, token: token}} <-
-           OAuth.issue_token(user, client,
-             ip: client_ip(conn),
-             user_agent: List.first(get_req_header(conn, "user-agent"))
-           ) do
+         {:ok, %{user: user, profile: profile}} <- Accounts.register(attrs) do
       Auth.consume!(attrs.email)
 
-      json(conn, %{
-        "status" => "success",
-        "token_type" => "Bearer",
-        "domain" => URI.parse(AnglerWeb.Endpoint.url()).host,
-        "expires_in" => seconds_until(token.expires_at),
-        "access_token" => access,
-        "refresh_token" => refresh,
-        "client_id" => Integer.to_string(client.id),
-        # Pixelfed includes the client secret here; for our hashed-secret design
-        # the secret is generated once at first_party_client! creation and is
-        # not retrievable thereafter — we return null and document the change.
-        "client_secret" => nil,
-        "scope" => token.scopes,
-        "user" => %{
-          "pid" => Integer.to_string(profile.id),
-          "username" => profile.username
-        },
-        "account" => render_account(profile)
-      })
+      # When approval is required the account is created pending and can't hold
+      # a usable token yet, so we return a pending acknowledgement instead.
+      if Accounts.pending?(user) do
+        conn
+        |> put_status(:accepted)
+        |> json(%{
+          "status" => "pending",
+          "message" => "Your account was created and is awaiting operator approval.",
+          "user" => %{
+            "pid" => Integer.to_string(profile.id),
+            "username" => profile.username
+          }
+        })
+      else
+        issue_onboarding_token(conn, user, profile)
+      end
     else
       :error ->
         json(conn, %{
@@ -112,6 +103,41 @@ defmodule AnglerWeb.AuthController do
   end
 
   ## Helpers
+
+  defp issue_onboarding_token(conn, user, profile) do
+    %{client: client} = OAuth.first_party_client!()
+
+    case OAuth.issue_token(user, client,
+           ip: client_ip(conn),
+           user_agent: List.first(get_req_header(conn, "user-agent"))
+         ) do
+      {:ok, %{access: access, refresh: refresh, token: token}} ->
+        json(conn, %{
+          "status" => "success",
+          "token_type" => "Bearer",
+          "domain" => URI.parse(AnglerWeb.Endpoint.url()).host,
+          "expires_in" => seconds_until(token.expires_at),
+          "access_token" => access,
+          "refresh_token" => refresh,
+          "client_id" => Integer.to_string(client.id),
+          # Pixelfed includes the client secret here; for our hashed-secret design
+          # the secret is generated once at first_party_client! creation and is
+          # not retrievable thereafter — we return null and document the change.
+          "client_secret" => nil,
+          "scope" => token.scopes,
+          "user" => %{
+            "pid" => Integer.to_string(profile.id),
+            "username" => profile.username
+          },
+          "account" => render_account(profile)
+        })
+
+      _ ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{"status" => "error", "message" => "Could not issue a token."})
+    end
+  end
 
   defp ensure_email_unused(email) do
     if Accounts.get_by_email(email), do: {:error, :email_taken}, else: :ok

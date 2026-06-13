@@ -1,11 +1,13 @@
 defmodule AnglerWeb.IndexLive do
   @moduledoc """
-  Public landing page: instance description + stats + contact, with a live
-  feed of the latest local public posts.
+  Public landing page: instance summary + stats, with a switchable live feed.
 
-  The feed seeds from `Timelines.public/2` (local only) and stays current by
-  subscribing to the `"public:local"` streaming topic — the same bus the
-  Mastodon WebSocket handler uses, so new posts appear without a refresh.
+    * **Local** — local public posts (`public:local` stream)
+    * **Known Network** — all public posts, local + federated (`public` stream)
+    * **Trending** — `Trends.statuses/1` (static snapshot, no live updates)
+
+  Local/Network seed from `Timelines.public/2` and stay current by subscribing
+  to the matching streaming topic; switching feeds re-subscribes.
   """
   use AnglerWeb, :live_view
 
@@ -13,18 +15,22 @@ defmodule AnglerWeb.IndexLive do
 
   alias Angler.Instance
   alias Angler.Pagination.MastodonCursor
+  alias Angler.Streaming
   alias Angler.Timelines
+  alias Angler.Trends
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
 
   @feed_limit 30
-  @topic "public:local"
+
+  @feeds [
+    {:local, "Local", "public:local"},
+    {:network, "Known Network", "public"},
+    {:trending, "Trending", nil}
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Angler.Streaming.subscribe(@topic)
-
-    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), local_only: true)
-    rendered = StatusJSON.render_many(posts, nil)
+    {socket, rendered} = load_feed(socket, :local, connected?(socket))
 
     {:ok,
      socket
@@ -32,38 +38,84 @@ defmodule AnglerWeb.IndexLive do
      |> assign(:stats, Instance.stats())
      |> assign(:instance, instance_meta())
      |> assign(:registration, registration_state())
-     |> assign(:post_count, length(rendered))
+     |> assign(:feeds, @feeds)
      |> stream(:posts, rendered, dom_id: &dom_id/1)}
   end
 
   @impl true
-  def handle_info({:streaming, @topic, "update", payload}, socket) do
-    case Jason.decode(payload) do
-      {:ok, status} ->
-        {:noreply,
-         socket
-         |> stream_insert(:posts, status, at: 0, dom_id: &dom_id/1)
-         |> update(:post_count, &(&1 + 1))}
+  def handle_event("switch_feed", %{"feed" => feed}, socket) do
+    feed = String.to_existing_atom(feed)
 
-      _ ->
-        {:noreply, socket}
+    if feed == socket.assigns.feed do
+      {:noreply, socket}
+    else
+      # Drop the previous live subscription before loading the new feed.
+      if socket.assigns.feed_topic, do: Streaming.unsubscribe(socket.assigns.feed_topic)
+      {socket, rendered} = load_feed(socket, feed, connected?(socket))
+      {:noreply, stream(socket, :posts, rendered, reset: true, dom_id: &dom_id/1)}
     end
   end
 
-  def handle_info({:streaming, @topic, "delete", payload}, socket) do
-    case Jason.decode(payload) do
-      {:ok, id} when is_binary(id) ->
-        {:noreply,
-         socket
-         |> stream_delete_by_dom_id(:posts, "post-" <> id)
-         |> update(:post_count, &max(&1 - 1, 0))}
+  @impl true
+  def handle_info({:streaming, topic, "update", payload}, socket) do
+    if topic == socket.assigns.feed_topic do
+      case Jason.decode(payload) do
+        {:ok, status} ->
+          {:noreply,
+           socket
+           |> stream_insert(:posts, status, at: 0, dom_id: &dom_id/1)
+           |> update(:post_count, &(&1 + 1))}
 
-      _ ->
-        {:noreply, socket}
+        _ ->
+          {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:streaming, topic, "delete", payload}, socket) do
+    with true <- topic == socket.assigns.feed_topic,
+         {:ok, id} when is_binary(id) <- Jason.decode(payload) do
+      {:noreply,
+       socket
+       |> stream_delete_by_dom_id(:posts, "post-" <> id)
+       |> update(:post_count, &max(&1 - 1, 0))}
+    else
+      _ -> {:noreply, socket}
     end
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  ## Internals
+
+  # Returns {socket-with-feed-assigns, rendered_posts}.
+  defp load_feed(socket, feed, connected?) do
+    {posts, topic} = fetch(feed)
+    if connected? and topic, do: Streaming.subscribe(topic)
+    rendered = StatusJSON.render_many(posts, nil)
+
+    socket =
+      socket
+      |> assign(:feed, feed)
+      |> assign(:feed_topic, topic)
+      |> assign(:post_count, length(rendered))
+
+    {socket, rendered}
+  end
+
+  defp fetch(:local) do
+    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), local_only: true)
+    {posts, "public:local"}
+  end
+
+  defp fetch(:network) do
+    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), [])
+    {posts, "public"}
+  end
+
+  defp fetch(:trending), do: {Trends.statuses(@feed_limit), nil}
 
   defp dom_id(status), do: "post-" <> status["id"]
 
@@ -71,9 +123,7 @@ defmodule AnglerWeb.IndexLive do
     %{
       title: Instance.title(),
       short_description: Instance.short_description(),
-      description: Instance.description(),
-      contact_email: Instance.contact_email(),
-      rules: Instance.rules()
+      contact_email: Instance.contact_email()
     }
   end
 
@@ -81,20 +131,18 @@ defmodule AnglerWeb.IndexLive do
     %{open?: Instance.open_registration?(), approval?: Instance.approval_required?()}
   end
 
+  defp empty_label(:local), do: "No local posts yet."
+  defp empty_label(:network), do: "No federated posts yet."
+  defp empty_label(:trending), do: "Nothing trending right now."
+
   @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_user={@current_user} current_profile={@current_profile}>
-      <section class="space-y-6">
+      <section class="space-y-5">
         <div class="space-y-2">
           <h1 class="text-3xl font-bold tracking-tight">{@instance.title}</h1>
           <p class="text-base-content/70">{@instance.short_description}</p>
-          <p
-            :if={@instance.description != @instance.short_description}
-            class="text-sm text-base-content/70 whitespace-pre-line"
-          >
-            {@instance.description}
-          </p>
         </div>
 
         <div class="grid grid-cols-3 gap-3">
@@ -103,48 +151,49 @@ defmodule AnglerWeb.IndexLive do
           <.stat label="Known servers" value={@stats.domain_count} />
         </div>
 
-        <div class="flex flex-wrap items-center gap-3">
+        <div :if={!@current_user} class="flex flex-wrap items-center gap-3">
           <%= cond do %>
-            <% @current_user -> %>
-              <span class="text-sm text-base-content/60">You're signed in.</span>
             <% @registration.open? -> %>
-              <.link navigate={~p"/register"} class="btn btn-primary btn-sm">
-                Create an account
-              </.link>
+              <.link navigate={~p"/register"} class="btn btn-primary btn-sm">Create an account</.link>
               <span :if={@registration.approval?} class="text-xs text-base-content/60">
                 New accounts require operator approval.
               </span>
             <% true -> %>
               <span class="text-sm text-base-content/60">Registration is currently closed.</span>
           <% end %>
-          <.link :if={!@current_user} navigate={~p"/login"} class="btn btn-ghost btn-sm">
+          <.link navigate={~p"/login"} class="btn btn-ghost btn-sm">
             Log in
           </.link>
         </div>
 
-        <div :if={@instance.contact_email} class="text-sm text-base-content/60">
-          Contact:
-          <a href={"mailto:#{@instance.contact_email}"} class="link link-hover">
-            {@instance.contact_email}
-          </a>
+        <div class="grid grid-cols-2 gap-3">
+          <.link navigate={~p"/about"} class="btn btn-outline w-full">About this server</.link>
+          <.link navigate={~p"/features"} class="btn btn-outline w-full">Features</.link>
         </div>
-
-        <ul :if={@instance.rules != []} class="text-sm text-base-content/70 list-disc pl-5 space-y-1">
-          <li :for={rule <- @instance.rules}>{rule}</li>
-        </ul>
       </section>
 
       <section class="mt-8 space-y-3">
-        <h2 class="text-lg font-semibold flex items-center gap-2">
-          <span class="inline-block size-2 rounded-full bg-success motion-safe:animate-pulse" />
-          Latest public posts
-        </h2>
+        <div role="tablist" class="tabs tabs-bordered">
+          <button
+            :for={{key, label, _topic} <- @feeds}
+            role="tab"
+            phx-click="switch_feed"
+            phx-value-feed={key}
+            class={["tab", @feed == key && "tab-active font-semibold"]}
+          >
+            {label}
+            <span
+              :if={key in [:local, :network] && @feed == key}
+              class="ml-2 inline-block size-2 rounded-full bg-success motion-safe:animate-pulse"
+            />
+          </button>
+        </div>
 
         <div id="feed" phx-update="stream" class="space-y-3">
           <.post_card :for={{dom_id, status} <- @streams.posts} id={dom_id} status={status} />
         </div>
 
-        <p :if={@post_count == 0} class="text-sm text-base-content/60">No public posts yet.</p>
+        <p :if={@post_count == 0} class="text-sm text-base-content/60">{empty_label(@feed)}</p>
       </section>
     </Layouts.app>
     """

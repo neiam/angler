@@ -98,6 +98,12 @@ defmodule Angler.Streaming do
     Phoenix.PubSub.subscribe(Angler.PubSub, "streaming:" <> topic)
   end
 
+  @doc "Unsubscribe the current process from a stream topic."
+  @spec unsubscribe(String.t()) :: :ok
+  def unsubscribe(topic) when is_binary(topic) do
+    Phoenix.PubSub.unsubscribe(Angler.PubSub, "streaming:" <> topic)
+  end
+
   defp publish(topic, event, payload) do
     Phoenix.PubSub.broadcast(
       Angler.PubSub,

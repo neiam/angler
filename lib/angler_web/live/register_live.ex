@@ -109,11 +109,25 @@ defmodule AnglerWeb.RegisterLive do
       {:error, message} when is_binary(message) ->
         {:noreply, assign(socket, error: message)}
 
-      {:error, %Ecto.Changeset{}} ->
-        {:noreply, assign(socket, error: "Could not create the account. Check your details.")}
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, error: changeset_error(changeset))}
 
-      {:error, _} ->
-        {:noreply, assign(socket, error: "Could not create the account. Try again.")}
+      {:error, reason} ->
+        {:noreply, assign(socket, error: "Could not create the account (#{inspect(reason)}).")}
+    end
+  end
+
+  defp changeset_error(changeset) do
+    changeset
+    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
+      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
+        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+      end)
+    end)
+    |> Enum.map_join("; ", fn {field, msgs} -> "#{field} #{Enum.join(msgs, ", ")}" end)
+    |> case do
+      "" -> "Could not create the account. Check your details."
+      msg -> msg
     end
   end
 

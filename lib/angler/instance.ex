@@ -9,6 +9,7 @@ defmodule Angler.Instance do
 
   alias Angler.Accounts.User
   alias Angler.Federation.Instance
+  alias Angler.Instance.Settings
   alias Angler.Profiles.Profile
   alias Angler.Repo
   alias Angler.Statuses.Status
@@ -53,38 +54,63 @@ defmodule Angler.Instance do
   """
   @spec contact_profile() :: Profile.t() | nil
   def contact_profile do
-    case Application.get_env(:angler, :instance_contact_username) do
+    case settings().contact_username || Application.get_env(:angler, :instance_contact_username) do
       username when is_binary(username) -> Angler.Profiles.get_local_by_username(username)
       _ -> nil
     end
   end
 
-  @doc "Configured operator email for the instance, or nil."
+  @doc "Operator contact email (DB override, else env), or nil."
   @spec contact_email() :: String.t() | nil
-  def contact_email, do: Application.get_env(:angler, :instance_contact_email)
+  def contact_email,
+    do: settings().contact_email || Application.get_env(:angler, :instance_contact_email)
 
-  @doc "Display title (defaults to host)."
+  @doc "Display title (DB override, else env, else host)."
   @spec title() :: String.t()
   def title do
-    Application.get_env(:angler, :instance_title) || host_from_endpoint()
+    settings().title || Application.get_env(:angler, :instance_title) || host_from_endpoint()
   end
 
   @doc "Short description for the instance description block."
   @spec short_description() :: String.t()
   def short_description do
-    Application.get_env(:angler, :instance_short_description) ||
+    settings().short_description ||
+      Application.get_env(:angler, :instance_short_description) ||
       "Angler — a Pixelfed-compatible Phoenix backend."
   end
 
   @doc "Long description shown on the about page."
   @spec description() :: String.t()
   def description do
-    Application.get_env(:angler, :instance_description) || short_description()
+    settings().description || Application.get_env(:angler, :instance_description) ||
+      short_description()
   end
 
-  @doc "List of human-readable rule strings configured by the operator."
+  @doc "List of human-readable rule strings (DB override, else env)."
   @spec rules() :: [String.t()]
-  def rules, do: Application.get_env(:angler, :instance_rules, [])
+  def rules do
+    case settings().rules do
+      list when is_list(list) -> list
+      _ -> Application.get_env(:angler, :instance_rules, [])
+    end
+  end
+
+  ## Editable settings (singleton row; overrides env)
+
+  @doc "Fetch the editable settings row (an empty `%Settings{}` if none yet)."
+  @spec get_settings() :: Settings.t()
+  def get_settings do
+    Repo.one(from(s in Settings, order_by: [asc: s.id], limit: 1)) || %Settings{}
+  end
+
+  @doc "Upsert the singleton settings row."
+  @spec update_settings(map()) :: {:ok, Settings.t()} | {:error, Ecto.Changeset.t()}
+  def update_settings(attrs) do
+    get_settings() |> Settings.changeset(attrs) |> Repo.insert_or_update()
+  end
+
+  # Singleton read (cheap single-row lookup; the override getters call this).
+  defp settings, do: get_settings()
 
   @doc "Whether open registration is on. Default false."
   @spec open_registration?() :: boolean()

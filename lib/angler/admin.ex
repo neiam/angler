@@ -131,6 +131,13 @@ defmodule Angler.Admin do
         :error -> base
       end
 
+    base =
+      case Keyword.fetch(opts, :pending) do
+        # Accounts awaiting approval carry `status: "pending"` (see Angler.Accounts).
+        {:ok, true} -> from p in base, where: p.status == "pending"
+        _ -> base
+      end
+
     Repo.all(base)
   end
 

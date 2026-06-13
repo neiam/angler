@@ -20,7 +20,7 @@ defmodule AnglerWeb.WebFrontendTest do
 
   test "index renders instance stats and the live public feed", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/")
-    assert html =~ "Latest public posts"
+    assert html =~ "Known Network"
     assert html =~ "Posts"
     assert html =~ "hello world"
   end

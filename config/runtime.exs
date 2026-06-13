@@ -267,7 +267,11 @@ if config_env() != :test do
 
   config :angler,
     media_storage: storage,
-    media_root: str.("MEDIA_ROOT", "priv/static/storage")
+    # Uploads live OUTSIDE priv/static: that dir is `Plug.Static`'s domain (and
+    # asset-tooling's), and serving media from there collides with the
+    # `/storage/*` router route (Plug.Static intercepts + raises). Media is
+    # served by `AnglerWeb.MediaController.serve` from this root instead.
+    media_root: str.("MEDIA_ROOT", "priv/uploads")
 
   ## Pixelfed directory submission (off by default)
   config :angler,

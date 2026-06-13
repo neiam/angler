@@ -71,6 +71,12 @@ defmodule AnglerWeb.LoginLive do
           </button>
         </.form>
 
+        <p class="text-sm text-center">
+          <.link navigate={~p"/forgot-password"} class="link link-hover text-base-content/60">
+            Forgot your password?
+          </.link>
+        </p>
+
         <p class="text-sm text-center text-base-content/60">
           No account? <.link navigate={~p"/register"} class="link link-primary">Register</.link>
         </p>

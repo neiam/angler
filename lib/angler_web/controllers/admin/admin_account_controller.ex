@@ -9,6 +9,7 @@ defmodule AnglerWeb.Admin.AccountController do
 
   use AnglerWeb, :controller
 
+  alias Angler.Accounts
   alias Angler.Admin
   alias Angler.Profiles.Profile
   alias AnglerWeb.MastodonAPI.Account
@@ -35,14 +36,52 @@ defmodule AnglerWeb.Admin.AccountController do
         _ -> opts
       end
 
-    json(conn, Enum.map(Admin.list_accounts(opts), &render_admin_account/1))
+    opts =
+      case params["pending"] do
+        v when v in ["true", true] -> Keyword.put(opts, :pending, true)
+        _ -> opts
+      end
+
+    pending = Accounts.pending_profile_ids()
+
+    accounts =
+      Enum.map(Admin.list_accounts(opts), fn p ->
+        render_admin_account(p, not MapSet.member?(pending, p.id))
+      end)
+
+    json(conn, accounts)
   end
 
   def show(conn, %{"id" => id}) do
     with {:ok, int_id} <- parse_id(id),
          %Profile{} = profile <- Admin.get_account(int_id) do
-      json(conn, render_admin_account(profile))
+      json(conn, render_admin_account(profile, approved?(profile)))
     else
+      _ -> not_found(conn)
+    end
+  end
+
+  @doc "POST /api/v1/admin/accounts/:id/approve — approve a pending account."
+  def approve(conn, %{"id" => id}) do
+    with {:ok, int_id} <- parse_id(id),
+         %Profile{} = profile <- Admin.get_account(int_id),
+         %{} = user <- Accounts.get_user_by_profile_id(profile.id),
+         {:ok, _user} <- Accounts.approve_user(user) do
+      json(conn, render_admin_account(Admin.get_account(int_id), true))
+    else
+      _ -> not_found(conn)
+    end
+  end
+
+  @doc "POST /api/v1/admin/accounts/:id/reject — reject (delete) a pending account."
+  def reject(conn, %{"id" => id}) do
+    with {:ok, int_id} <- parse_id(id),
+         %Profile{} = profile <- Admin.get_account(int_id),
+         %{} = user <- Accounts.get_user_by_profile_id(profile.id),
+         :ok <- Accounts.reject_user(user) do
+      json(conn, %{})
+    else
+      {:error, :not_pending} -> validation_error(conn, "account is not pending")
       _ -> not_found(conn)
     end
   end
@@ -93,7 +132,14 @@ defmodule AnglerWeb.Admin.AccountController do
 
   ## Internals
 
-  defp render_admin_account(%Profile{} = p) do
+  defp approved?(%Profile{} = p) do
+    case Accounts.get_user_by_profile_id(p.id) do
+      nil -> true
+      user -> not Accounts.pending?(user)
+    end
+  end
+
+  defp render_admin_account(%Profile{} = p, approved? \\ true) do
     base = Account.render(p)
 
     Map.merge(base, %{
@@ -107,7 +153,7 @@ defmodule AnglerWeb.Admin.AccountController do
       "suspended" => p.is_suspended,
       "silenced" => p.status == "silenced",
       "disabled" => p.status == "disabled",
-      "approved" => true,
+      "approved" => approved?,
       "account" => base
     })
   end

@@ -22,6 +22,16 @@ config :angler, AnglerWeb.Endpoint,
   # the dev server. (Was {127,0,0,1}; flipped to allow on-device testing
   # against pixelfed-rn.)
   http: [ip: {0, 0, 0, 0}],
+  # Generated URLs (OAuth redirects, webfinger, AP actor ids, account/media
+  # `url`s) must match the host the app actually talks to. Default stays
+  # localhost; set PHX_HOST to a TLS-terminating front (e.g. a `tailscale
+  # serve` ts.net name) for on-device testing:
+  #   PHX_HOST=boomer-25.tail6258a.ts.net iex -S mix phx.server
+  url:
+    (case System.get_env("PHX_HOST") do
+       nil -> [host: "localhost", scheme: "http", port: 4000]
+       host -> [host: host, scheme: "https", port: 443]
+     end),
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

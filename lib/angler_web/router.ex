@@ -66,10 +66,19 @@ defmodule AnglerWeb.Router do
 
     live_session :public, on_mount: {AnglerWeb.LiveAuth, :mount_current_user} do
       live "/", IndexLive
+      live "/about", AboutLive
+      live "/features", FeaturesLive
       live "/login", LoginLive
       live "/register", RegisterLive
+      live "/forgot-password", ForgotPasswordLive
+      live "/reset-password/:token", ResetPasswordLive
+      live "/settings/profile", ProfileEditLive
       live "/@:username", ProfileLive
       live "/p/:username/:id", StatusLive
+    end
+
+    live_session :admin, on_mount: {AnglerWeb.LiveAuth, :require_admin} do
+      live "/admin", AdminSettingsLive
     end
   end
 
@@ -298,7 +307,11 @@ defmodule AnglerWeb.Router do
     pipe_through :authenticated_write
 
     delete "/accounts/avatar", ApiV1Dot1Controller, :delete_avatar
+    delete "/accounts/header", ApiV1Dot1Controller, :delete_header
     post "/accounts/change-password", ApiV1Dot1Controller, :change_password
+    post "/accounts/email", ApiV1Dot1Controller, :change_email
+    post "/accounts/disable", ApiV1Dot1Controller, :disable_account
+    post "/accounts/delete", ApiV1Dot1Controller, :delete_account
     post "/report", ApiV1Dot1Controller, :report
 
     post "/web/settings", SettingsController, :set_web
@@ -409,7 +422,11 @@ defmodule AnglerWeb.Router do
     post "/report", ApiV1Dot1Controller, :report
 
     delete "/accounts/avatar", ApiV1Dot1Controller, :delete_avatar
+    delete "/accounts/header", ApiV1Dot1Controller, :delete_header
     post "/accounts/change-password", ApiV1Dot1Controller, :change_password
+    post "/accounts/email", ApiV1Dot1Controller, :change_email
+    post "/accounts/disable", ApiV1Dot1Controller, :disable_account
+    post "/accounts/delete", ApiV1Dot1Controller, :delete_account
 
     post "/archive/add/:id", ApiV1Dot1Controller, :archive_add
     post "/archive/remove/:id", ApiV1Dot1Controller, :archive_remove
@@ -485,6 +502,7 @@ defmodule AnglerWeb.Router do
     # Pixelfed-only direct avatar upload (mobile clients use it instead
     # of `PATCH /accounts/update_credentials` for solo avatar changes).
     post "/avatar/update", AccountController, :avatar_update
+    post "/header/update", AccountController, :header_update
 
     post "/follow_requests/:id/authorize", AccountController, :authorize_request
     post "/follow_requests/:id/reject", AccountController, :reject_request
@@ -583,6 +601,8 @@ defmodule AnglerWeb.Router do
     post "/reports/:id/reopen", ReportController, :reopen
 
     post "/accounts/:id/action", AccountController, :act
+    post "/accounts/:id/approve", AccountController, :approve
+    post "/accounts/:id/reject", AccountController, :reject
     post "/accounts/:id/unsuspend", AccountController, :unsuspend
     post "/accounts/:id/unsilence", AccountController, :unsilence
     post "/accounts/:id/enable", AccountController, :enable

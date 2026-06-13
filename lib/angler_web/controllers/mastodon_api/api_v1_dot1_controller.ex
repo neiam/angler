@@ -13,6 +13,7 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
 
   import Ecto.Query, only: [from: 2]
 
+  alias Angler.Accounts
   alias Angler.Accounts.User
   alias Angler.Follows.Follower
   alias Angler.OAuth.{Client, Token}
@@ -181,6 +182,26 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
     json(conn, body)
   end
 
+  ## DELETE /api/v1.1/accounts/header
+  def delete_header(conn, _params) do
+    %{user: user, profile: profile} = BearerAuth.current_scope(conn)
+
+    {:ok, updated} =
+      profile |> Ecto.Changeset.change(header_path: nil) |> Repo.update()
+
+    body =
+      Account.render(updated)
+      |> Map.put("source", %{
+        "privacy" => if(updated.is_private, do: "private", else: "public"),
+        "sensitive" => false,
+        "language" => user.language || "en",
+        "note" => updated.bio_text || "",
+        "fields" => []
+      })
+
+    json(conn, body)
+  end
+
   ## POST /api/v1.1/accounts/change-password
   def change_password(conn, params) do
     %{user: user} = BearerAuth.current_scope(conn)
@@ -199,6 +220,51 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
           {:ok, _} -> json(conn, %{"message" => "Password changed"})
           {:error, cs} -> validation_error(conn, translate_errors(cs))
         end
+    end
+  end
+
+  ## POST /api/v1.1/accounts/email
+  def change_email(conn, params) do
+    %{user: user} = BearerAuth.current_scope(conn)
+
+    case Accounts.change_email(user, params["current_password"], params["email"] || "") do
+      {:ok, _updated} ->
+        json(conn, %{"message" => "Email updated"})
+
+      {:error, :invalid_password} ->
+        validation_error(conn, %{"current_password" => ["The password you entered is incorrect"]})
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        validation_error(conn, translate_errors(cs))
+    end
+  end
+
+  ## POST /api/v1.1/accounts/disable
+  def disable_account(conn, params) do
+    %{user: user} = BearerAuth.current_scope(conn)
+
+    case Accounts.disable_own_account(user, params["password"]) do
+      {:ok, _} ->
+        json(conn, %{"message" => "Account disabled"})
+
+      {:error, :invalid_password} ->
+        validation_error(conn, %{"password" => ["The password you entered is incorrect"]})
+    end
+  end
+
+  ## POST /api/v1.1/accounts/delete
+  def delete_account(conn, params) do
+    %{user: user} = BearerAuth.current_scope(conn)
+
+    case Accounts.delete_own_account(user, params["password"]) do
+      {:ok, _} ->
+        json(conn, %{"message" => "Account scheduled for deletion"})
+
+      {:error, :deletion_disabled} ->
+        conn |> put_status(:forbidden) |> json(%{"error" => "Account deletion is disabled"})
+
+      {:error, :invalid_password} ->
+        validation_error(conn, %{"password" => ["The password you entered is incorrect"]})
     end
   end
 

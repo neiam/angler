@@ -36,3 +36,6 @@ npm-debug.log
 /assets/node_modules/
 
 plans
+
+# Local media uploads (served via MediaController, not Plug.Static)
+/priv/uploads/

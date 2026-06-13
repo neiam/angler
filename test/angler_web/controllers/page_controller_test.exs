@@ -6,6 +6,6 @@ defmodule AnglerWeb.PageControllerTest do
   # AnglerWeb.WebFrontendTest for the connected LiveView coverage.
   test "GET /", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Latest public posts"
+    assert html_response(conn, 200) =~ "Known Network"
   end
 end
