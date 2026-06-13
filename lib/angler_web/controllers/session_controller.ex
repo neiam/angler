@@ -11,10 +11,7 @@ defmodule AnglerWeb.SessionController do
 
   use AnglerWeb, :controller
 
-  import Ecto.Query, only: [from: 2]
-
   alias Angler.Accounts
-  alias Angler.Accounts.User
 
   def new(conn, params) do
     next = params["next"] || "/"
@@ -23,20 +20,15 @@ defmodule AnglerWeb.SessionController do
 
   def create(conn, %{"username" => handle, "password" => password} = params) do
     next = sanitize_next(params["next"])
-    user = lookup(handle)
 
-    cond do
-      is_nil(user) ->
-        _ = User.valid_password?(nil, password)
-        render(conn, :new, error: "Invalid credentials.", next: next, username: handle)
-
-      User.valid_password?(user, password) ->
+    case Accounts.authenticate(handle, password) do
+      {:ok, user} ->
         conn
         |> configure_session(renew: true)
         |> put_session(:user_id, user.id)
         |> redirect(to: next)
 
-      true ->
+      :error ->
         render(conn, :new, error: "Invalid credentials.", next: next, username: handle)
     end
   end
@@ -46,24 +38,6 @@ defmodule AnglerWeb.SessionController do
     |> configure_session(drop: true)
     |> redirect(to: "/")
   end
-
-  defp lookup(handle) when is_binary(handle) do
-    if String.contains?(handle, "@") do
-      Accounts.get_by_email(handle)
-    else
-      case Angler.Profiles.get_local_by_username(handle) do
-        %{id: pid} ->
-          Angler.Repo.one(
-            from u in Angler.Accounts.User, where: u.profile_id == ^pid and is_nil(u.status)
-          )
-
-        _ ->
-          nil
-      end
-    end
-  end
-
-  defp lookup(_), do: nil
 
   # Avoid open-redirect: only allow same-origin paths.
   defp sanitize_next(nil), do: "/"

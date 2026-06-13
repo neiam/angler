@@ -25,6 +25,22 @@ defmodule Angler.Statuses do
     |> Repo.one()
   end
 
+  @doc """
+  Public (non-deleted, top-level) statuses authored by `profile_id`, newest
+  first. Backs the anonymous web profile page; excludes replies so the grid
+  reads like a profile feed.
+  """
+  @spec list_public_for_profile(integer(), pos_integer()) :: [Status.t()]
+  def list_public_for_profile(profile_id, limit \\ 40) when is_integer(profile_id) do
+    Status
+    |> where([s], s.profile_id == ^profile_id)
+    |> where([s], s.visibility == :public and is_nil(s.deleted_at))
+    |> where([s], is_nil(s.in_reply_to_id))
+    |> order_by([s], desc: s.id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
   @doc "Get a non-deleted status by AS2 `id` / `uri`."
   @spec get_by_uri(String.t()) :: Status.t() | nil
   def get_by_uri(uri) when is_binary(uri) do

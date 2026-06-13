@@ -64,7 +64,13 @@ defmodule AnglerWeb.Router do
   scope "/", AnglerWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live_session :public, on_mount: {AnglerWeb.LiveAuth, :mount_current_user} do
+      live "/", IndexLive
+      live "/login", LoginLive
+      live "/register", RegisterLive
+      live "/@:username", ProfileLive
+      live "/p/:username/:id", StatusLive
+    end
   end
 
   # Federation discovery (.well-known + nodeinfo + instance actor + webfinger).

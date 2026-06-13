@@ -48,6 +48,10 @@ defmodule AnglerWeb.OAuth.TokenControllerTest do
       assert body["token_type"] == "Bearer"
       assert is_binary(body["access_token"])
       assert body["scope"] == "read write"
+
+      # RFC 6749 §5.1 — token responses must not be cached.
+      assert get_resp_header(resp, "cache-control") == ["no-store"]
+      assert get_resp_header(resp, "pragma") == ["no-cache"]
     end
 
     test "400 invalid_grant on bad password", %{conn: conn} = ctx do

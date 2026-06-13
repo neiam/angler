@@ -31,7 +31,7 @@ defmodule AnglerWeb.OAuth.TokenController do
          {:ok, redirect_uri} <- fetch_required(params, "redirect_uri"),
          {:ok, %{token: token, access: access}} <-
            OAuth.redeem_authorization_code(code, client, redirect_uri, params["code_verifier"]) do
-      json(conn, render_token(token, access))
+      send_token(conn, token, access)
     else
       {:error, reason} -> send_error(conn, reason)
     end
@@ -44,7 +44,7 @@ defmodule AnglerWeb.OAuth.TokenController do
       scopes = parse_scopes(params["scope"], client.scopes)
 
       case OAuth.issue_password_token(username, password, client, scopes) do
-        {:ok, %{token: token, access: access}} -> json(conn, render_token(token, access))
+        {:ok, %{token: token, access: access}} -> send_token(conn, token, access)
         {:error, reason} -> send_error(conn, reason)
       end
     else
@@ -58,7 +58,7 @@ defmodule AnglerWeb.OAuth.TokenController do
         scopes = parse_scopes(params["scope"], ["read"])
 
         case OAuth.issue_client_credentials_token(client, scopes) do
-          {:ok, %{token: token, access: access}} -> json(conn, render_token(token, access))
+          {:ok, %{token: token, access: access}} -> send_token(conn, token, access)
           _ -> send_error(conn, "server_error")
         end
 
@@ -71,7 +71,7 @@ defmodule AnglerWeb.OAuth.TokenController do
     with {:ok, client} <- authenticate_client(params, allow_public: false),
          {:ok, refresh_raw} <- fetch_required(params, "refresh_token"),
          {:ok, %{token: token, access: access}} <- OAuth.refresh_access_token(refresh_raw, client) do
-      json(conn, render_token(token, access))
+      send_token(conn, token, access)
     else
       {:error, :unsupported} -> send_error(conn, "unsupported_grant_type")
       {:error, reason} -> send_error(conn, reason)
@@ -109,6 +109,12 @@ defmodule AnglerWeb.OAuth.TokenController do
   defp parse_scopes("", default), do: default
   defp parse_scopes(s, _default) when is_binary(s), do: String.split(s, [" ", ","], trim: true)
 
+  defp send_token(conn, token, access) do
+    conn
+    |> put_no_store_headers()
+    |> json(render_token(token, access))
+  end
+
   defp render_token(token, access) do
     %{
       "access_token" => access,
@@ -122,8 +128,17 @@ defmodule AnglerWeb.OAuth.TokenController do
     code = if is_atom(code), do: Atom.to_string(code), else: code
 
     conn
+    |> put_no_store_headers()
     |> put_status(error_status(code))
     |> json(%{"error" => code, "error_description" => describe(code)})
+  end
+
+  # RFC 6749 §5.1/§5.2 — token endpoint responses carrying credentials must
+  # not be cached by intermediaries or the client.
+  defp put_no_store_headers(conn) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> put_resp_header("pragma", "no-cache")
   end
 
   defp error_status("invalid_client"), do: 401

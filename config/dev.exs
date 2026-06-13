@@ -18,9 +18,10 @@ config :angler, Angler.Repo,
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
 config :angler, AnglerWeb.Endpoint,
-  # Binding to loopback ipv4 address prevents access from other machines.
-  # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  http: [ip: {127, 0, 0, 1}],
+  # Bind on all interfaces so phones / emulators on the LAN can reach
+  # the dev server. (Was {127,0,0,1}; flipped to allow on-device testing
+  # against pixelfed-rn.)
+  http: [ip: {0, 0, 0, 0}],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

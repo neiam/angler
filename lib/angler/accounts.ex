@@ -36,6 +36,45 @@ defmodule Angler.Accounts do
   end
 
   @doc """
+  Authenticate a local user by handle (email or username) + password.
+
+  Returns `{:ok, user}` on success, `:error` otherwise. Runs a dummy password
+  check on the no-user path so response timing doesn't leak whether the
+  handle exists.
+  """
+  @spec authenticate(String.t(), String.t()) :: {:ok, User.t()} | :error
+  def authenticate(handle, password) when is_binary(handle) and is_binary(password) do
+    case lookup_by_handle(handle) do
+      %User{} = user ->
+        if User.valid_password?(user, password), do: {:ok, user}, else: :error
+
+      nil ->
+        _ = User.valid_password?(nil, password)
+        :error
+    end
+  end
+
+  def authenticate(_, _), do: :error
+
+  @doc "Resolve an active local user by email or username. Returns nil if missing."
+  @spec lookup_by_handle(String.t()) :: User.t() | nil
+  def lookup_by_handle(handle) when is_binary(handle) do
+    if String.contains?(handle, "@") do
+      get_by_email(handle)
+    else
+      case Profiles.get_local_by_username(handle) do
+        %Profile{id: pid} ->
+          Repo.one(from u in User, where: u.profile_id == ^pid and is_nil(u.status))
+
+        _ ->
+          nil
+      end
+    end
+  end
+
+  def lookup_by_handle(_), do: nil
+
+  @doc """
   Create a fresh local user + profile in one transaction.
 
   Used by the onboarding endpoint. Caller is responsible for ensuring the
