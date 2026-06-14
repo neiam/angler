@@ -15,6 +15,10 @@ defmodule AnglerWeb.PublicComponents do
   attr :status, :map, required: true, doc: "a rendered Mastodon status map (string keys)"
   attr :id, :string, default: nil
 
+  attr :current_user, :map,
+    default: nil,
+    doc: "when set, the reblog/favourite footer becomes interactive (phx-click)"
+
   def post_card(assigns) do
     assigns =
       assigns
@@ -54,18 +58,49 @@ defmodule AnglerWeb.PublicComponents do
         <.media_grid :if={@media != []} media={@media} sensitive={@status["sensitive"]} />
 
         <footer class="flex items-center gap-4 text-xs text-base-content/60">
-          <span class="flex items-center gap-1">
+          <.link
+            navigate={~p"/p/#{@account["username"]}/#{@status["id"]}"}
+            class="flex items-center gap-1 hover:text-base-content"
+          >
             <.icon name="hero-chat-bubble-oval-left-micro" class="size-4" />
             {@status["replies_count"] || 0}
-          </span>
-          <span class="flex items-center gap-1">
-            <.icon name="hero-arrow-path-rounded-square-micro" class="size-4" />
-            {@status["reblogs_count"] || 0}
-          </span>
-          <span class="flex items-center gap-1">
-            <.icon name="hero-heart-micro" class="size-4" />
-            {@status["favourites_count"] || 0}
-          </span>
+          </.link>
+
+          <%= if @current_user do %>
+            <button
+              type="button"
+              phx-click="reblog"
+              phx-value-id={@status["id"]}
+              class={[
+                "flex items-center gap-1 transition-colors hover:text-success",
+                @status["reblogged"] && "text-success font-medium"
+              ]}
+            >
+              <.icon name="hero-arrow-path-rounded-square-micro" class="size-4" />
+              {@status["reblogs_count"] || 0}
+            </button>
+            <button
+              type="button"
+              phx-click="favourite"
+              phx-value-id={@status["id"]}
+              class={[
+                "flex items-center gap-1 transition-colors hover:text-error",
+                @status["favourited"] && "text-error font-medium"
+              ]}
+            >
+              <.icon name="hero-heart-micro" class="size-4" />
+              {@status["favourites_count"] || 0}
+            </button>
+          <% else %>
+            <span class="flex items-center gap-1">
+              <.icon name="hero-arrow-path-rounded-square-micro" class="size-4" />
+              {@status["reblogs_count"] || 0}
+            </span>
+            <span class="flex items-center gap-1">
+              <.icon name="hero-heart-micro" class="size-4" />
+              {@status["favourites_count"] || 0}
+            </span>
+          <% end %>
         </footer>
       </div>
     </article>

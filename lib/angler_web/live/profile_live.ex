@@ -15,13 +15,17 @@ defmodule AnglerWeb.ProfileLive do
 
   @impl true
   def mount(%{"username" => username}, _session, socket) do
+    viewer_id = socket.assigns.current_profile && socket.assigns.current_profile.id
+
     case Profiles.get_local_by_username(username) do
       %Profile{} = profile ->
         posts =
           if profile.is_private do
             []
           else
-            profile.id |> Statuses.list_public_for_profile(40) |> StatusJSON.render_many(nil)
+            profile.id
+            |> Statuses.list_public_for_profile(40)
+            |> StatusJSON.render_many(viewer_id)
           end
 
         {:ok,
@@ -38,6 +42,25 @@ defmodule AnglerWeb.ProfileLive do
          |> assign(:profile, nil)
          |> assign(:account, nil)
          |> assign(:posts, [])}
+    end
+  end
+
+  @impl true
+  def handle_event("favourite", %{"id" => id}, socket), do: react(socket, id, :favourite)
+  def handle_event("reblog", %{"id" => id}, socket), do: react(socket, id, :reblog)
+
+  defp react(socket, id, kind) do
+    case AnglerWeb.Live.Interactions.toggle(socket.assigns.current_profile, id, kind) do
+      {:ok, rendered} ->
+        posts =
+          Enum.map(socket.assigns.posts, fn p ->
+            if p["id"] == rendered["id"], do: rendered, else: p
+          end)
+
+        {:noreply, assign(socket, :posts, posts)}
+
+      :error ->
+        {:noreply, socket}
     end
   end
 
@@ -99,7 +122,12 @@ defmodule AnglerWeb.ProfileLive do
         </div>
       <% else %>
         <div class="space-y-3">
-          <.post_card :for={post <- @posts} id={"post-#{post["id"]}"} status={post} />
+          <.post_card
+            :for={post <- @posts}
+            id={"post-#{post["id"]}"}
+            status={post}
+            current_user={@current_user}
+          />
           <p :if={@posts == []} class="text-sm text-base-content/60 text-center py-8">
             No public posts yet.
           </p>

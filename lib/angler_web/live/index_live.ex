@@ -56,6 +56,16 @@ defmodule AnglerWeb.IndexLive do
     end
   end
 
+  def handle_event("favourite", %{"id" => id}, socket), do: react(socket, id, :favourite)
+  def handle_event("reblog", %{"id" => id}, socket), do: react(socket, id, :reblog)
+
+  defp react(socket, id, kind) do
+    case AnglerWeb.Live.Interactions.toggle(socket.assigns.current_profile, id, kind) do
+      {:ok, rendered} -> {:noreply, stream_insert(socket, :posts, rendered, dom_id: &dom_id/1)}
+      :error -> {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_info({:streaming, topic, "update", payload}, socket) do
     if topic == socket.assigns.feed_topic do
@@ -94,7 +104,8 @@ defmodule AnglerWeb.IndexLive do
   defp load_feed(socket, feed, connected?) do
     {posts, topic} = fetch(feed)
     if connected? and topic, do: Streaming.subscribe(topic)
-    rendered = StatusJSON.render_many(posts, nil)
+    viewer_id = socket.assigns.current_profile && socket.assigns.current_profile.id
+    rendered = StatusJSON.render_many(posts, viewer_id)
 
     socket =
       socket
@@ -190,7 +201,12 @@ defmodule AnglerWeb.IndexLive do
         </div>
 
         <div id="feed" phx-update="stream" class="space-y-3">
-          <.post_card :for={{dom_id, status} <- @streams.posts} id={dom_id} status={status} />
+          <.post_card
+            :for={{dom_id, status} <- @streams.posts}
+            id={dom_id}
+            status={status}
+            current_user={@current_user}
+          />
         </div>
 
         <p :if={@post_count == 0} class="text-sm text-base-content/60">{empty_label(@feed)}</p>
