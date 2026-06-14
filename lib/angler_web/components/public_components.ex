@@ -29,13 +29,13 @@ defmodule AnglerWeb.PublicComponents do
     <article id={@id} class="card bg-base-200 border border-base-300">
       <div class="card-body gap-3 p-4">
         <header class="flex items-center gap-3">
-          <.link navigate={~p"/@#{@account["username"]}"} class="shrink-0">
+          <.account_link account={@account} class="shrink-0">
             <.avatar account={@account} />
-          </.link>
+          </.account_link>
           <div class="min-w-0">
-            <.link navigate={~p"/@#{@account["username"]}"} class="font-semibold hover:underline">
+            <.account_link account={@account} class="font-semibold hover:underline">
               {display_name(@account)}
-            </.link>
+            </.account_link>
             <div class="text-xs text-base-content/60 truncate">@{@account["acct"]}</div>
           </div>
           <.link
@@ -166,6 +166,58 @@ defmodule AnglerWeb.PublicComponents do
               class="w-full object-cover"
             />
         <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Wraps its content in an in-app link to the account's profile. Uses the
+  account's `acct` (`username` for local, `username@domain` for remote) so both
+  resolve through the cached `/@:acct` profile page; the remote profile page is
+  what surfaces the "view original" link out.
+  """
+  attr :account, :map, required: true
+  attr :class, :string, default: nil
+  slot :inner_block, required: true
+
+  def account_link(assigns) do
+    ~H"""
+    <.link navigate={~p"/@#{account_acct(@account)}"} class={@class}>
+      {render_slot(@inner_block)}
+    </.link>
+    """
+  end
+
+  @doc "True when the account map is a local one (no domain in its `acct`)."
+  def local_account?(%{"acct" => acct}) when is_binary(acct), do: not String.contains?(acct, "@")
+  def local_account?(_), do: true
+
+  defp account_acct(%{"acct" => acct}) when is_binary(acct) and acct != "", do: acct
+  defp account_acct(%{"username" => username}), do: username
+
+  @doc """
+  A list row for an account: avatar + display name + `@acct`, with a follower
+  count. Used by search results and the follower/following lists.
+  """
+  attr :account, :map, required: true
+
+  def account_row(assigns) do
+    ~H"""
+    <div class="card bg-base-200 border border-base-300">
+      <div class="card-body flex-row items-center gap-3 p-3">
+        <.account_link account={@account} class="shrink-0">
+          <.avatar account={@account} />
+        </.account_link>
+        <div class="min-w-0 flex-1">
+          <.account_link account={@account} class="font-semibold hover:underline">
+            {display_name(@account)}
+          </.account_link>
+          <div class="text-xs text-base-content/60 truncate">@{@account["acct"]}</div>
+        </div>
+        <div class="text-xs text-base-content/60 whitespace-nowrap tabular-nums">
+          {@account["followers_count"]} followers
+        </div>
       </div>
     </div>
     """

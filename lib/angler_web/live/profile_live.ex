@@ -1,8 +1,9 @@
 defmodule AnglerWeb.ProfileLive do
   @moduledoc """
-  Public profile page at `/@:username` — a local account's header plus its
-  latest public posts. Anonymous-safe: private accounts show a locked notice
-  and no posts.
+  Public profile page at `/@:acct` — a local account's header plus its latest
+  public posts. Remote accounts (`username@domain`) resolve to the same page
+  rendered from our cached copy, with a "view original" link to their origin.
+  Anonymous-safe: private accounts show a locked notice and no posts.
   """
   use AnglerWeb, :live_view
 
@@ -11,14 +12,17 @@ defmodule AnglerWeb.ProfileLive do
   alias Angler.Profiles
   alias Angler.Profiles.Profile
   alias Angler.Statuses
+  alias AnglerWeb.MastodonAPI.Account
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
 
   @impl true
-  def mount(%{"username" => username}, _session, socket) do
+  def mount(%{"username" => acct}, _session, socket) do
     viewer_id = socket.assigns.current_profile && socket.assigns.current_profile.id
 
-    case Profiles.get_local_by_username(username) do
+    case Profiles.lookup_acct(acct) do
       %Profile{} = profile ->
+        account = Account.render(profile)
+
         posts =
           if profile.is_private do
             []
@@ -30,9 +34,10 @@ defmodule AnglerWeb.ProfileLive do
 
         {:ok,
          socket
-         |> assign(:page_title, "@#{profile.username}")
+         |> assign(:page_title, "@#{account["acct"]}")
          |> assign(:profile, profile)
-         |> assign(:account, account_map(profile))
+         |> assign(:account, account)
+         |> assign(:remote?, not is_nil(profile.domain))
          |> assign(:posts, posts)}
 
       nil ->
@@ -64,15 +69,6 @@ defmodule AnglerWeb.ProfileLive do
     end
   end
 
-  defp account_map(%Profile{} = p) do
-    %{
-      "username" => p.username,
-      "acct" => p.username,
-      "display_name" => p.name || "",
-      "avatar" => p.avatar_path || ""
-    }
-  end
-
   @impl true
   def render(%{profile: nil} = assigns) do
     ~H"""
@@ -93,22 +89,44 @@ defmodule AnglerWeb.ProfileLive do
         <.avatar account={@account} class="size-20" />
         <div class="min-w-0 flex-1">
           <h1 class="text-2xl font-bold truncate">{display_name(@account)}</h1>
-          <div class="text-base-content/60">@{@profile.username}</div>
+          <div class="text-base-content/60">@{@account["acct"]}</div>
           <div :if={@profile.bio not in [nil, ""]} class="mt-2 prose prose-sm max-w-none break-words">
             {raw(@profile.bio)}
           </div>
-          <div class="mt-3 flex gap-4 text-sm text-base-content/70">
+          <div class="mt-3 flex flex-wrap items-center gap-4 text-sm text-base-content/70">
             <span>
               <span class="font-semibold text-base-content">{@profile.statuses_count}</span> posts
             </span>
-            <span>
-              <span class="font-semibold text-base-content">{@profile.followers_count}</span>
-              followers
-            </span>
-            <span>
-              <span class="font-semibold text-base-content">{@profile.following_count}</span>
-              following
-            </span>
+            <%= if @remote? do %>
+              <span>
+                <span class="font-semibold text-base-content">{@profile.followers_count}</span>
+                followers
+              </span>
+              <span>
+                <span class="font-semibold text-base-content">{@profile.following_count}</span>
+                following
+              </span>
+            <% else %>
+              <.link navigate={~p"/@#{@profile.username}/followers"} class="hover:text-base-content">
+                <span class="font-semibold text-base-content">{@profile.followers_count}</span>
+                followers
+              </.link>
+              <.link navigate={~p"/@#{@profile.username}/following"} class="hover:text-base-content">
+                <span class="font-semibold text-base-content">{@profile.following_count}</span>
+                following
+              </.link>
+            <% end %>
+          </div>
+          <div :if={@remote?} class="mt-2">
+            <a
+              href={@account["url"]}
+              target="_blank"
+              rel="noopener"
+              class="link link-primary text-sm inline-flex items-center gap-1"
+            >
+              <.icon name="hero-arrow-top-right-on-square-micro" class="size-4" />
+              View original on {@profile.domain}
+            </a>
           </div>
         </div>
       </header>

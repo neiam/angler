@@ -115,11 +115,6 @@ defmodule AnglerWeb.SearchLive do
     assigns.accounts == [] and assigns.hashtags == [] and assigns.statuses == []
   end
 
-  # Local accounts link to the in-app profile route; remote ones link out.
-  defp account_link(%{"acct" => acct, "username" => username}) do
-    if String.contains?(acct, "@"), do: nil, else: ~p"/@#{username}"
-  end
-
   @impl true
   def render(assigns) do
     ~H"""
@@ -205,39 +200,6 @@ defmodule AnglerWeb.SearchLive do
         </section>
       </section>
     </Layouts.app>
-    """
-  end
-
-  attr :account, :map, required: true
-
-  defp account_row(assigns) do
-    assigns = assign(assigns, :link, account_link(assigns.account))
-
-    ~H"""
-    <div class="card bg-base-200 border border-base-300">
-      <div class="card-body flex-row items-center gap-3 p-3">
-        <%= if @link do %>
-          <.link navigate={@link} class="shrink-0"><.avatar account={@account} /></.link>
-        <% else %>
-          <a href={@account["url"]} class="shrink-0"><.avatar account={@account} /></a>
-        <% end %>
-        <div class="min-w-0 flex-1">
-          <%= if @link do %>
-            <.link navigate={@link} class="font-semibold hover:underline">
-              {display_name(@account)}
-            </.link>
-          <% else %>
-            <a href={@account["url"]} class="font-semibold hover:underline">
-              {display_name(@account)}
-            </a>
-          <% end %>
-          <div class="text-xs text-base-content/60 truncate">@{@account["acct"]}</div>
-        </div>
-        <div class="text-xs text-base-content/60 whitespace-nowrap tabular-nums">
-          {@account["followers_count"]} followers
-        </div>
-      </div>
-    </div>
     """
   end
 end

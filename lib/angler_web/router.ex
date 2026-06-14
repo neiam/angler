@@ -79,6 +79,8 @@ defmodule AnglerWeb.Router do
       live "/search", SearchLive
       live "/tags/:name", TagLive
       live "/@:username", ProfileLive
+      live "/@:username/followers", ProfileFollowsLive, :followers
+      live "/@:username/following", ProfileFollowsLive, :following
       live "/p/:username/:id", StatusLive
     end
 

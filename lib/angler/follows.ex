@@ -41,6 +41,40 @@ defmodule Angler.Follows do
     Repo.get_by(FollowRequest, profile_id: profile_id, following_id: following_id)
   end
 
+  @doc """
+  Accounts that follow `profile` (most recent first). Only accepted edges —
+  pending remote follows are excluded, matching `followers_count`.
+  """
+  @spec list_followers(Profile.t(), keyword()) :: [Profile.t()]
+  def list_followers(%Profile{id: id}, opts \\ []) do
+    Repo.all(
+      from f in Follower,
+        join: p in Profile,
+        on: p.id == f.following_id,
+        where: f.profile_id == ^id and f.pending_remote == false,
+        order_by: [desc: f.id],
+        limit: ^Keyword.get(opts, :limit, 40),
+        select: p
+    )
+  end
+
+  @doc """
+  Accounts that `profile` follows (most recent first). Only accepted edges,
+  matching `following_count`.
+  """
+  @spec list_following(Profile.t(), keyword()) :: [Profile.t()]
+  def list_following(%Profile{id: id}, opts \\ []) do
+    Repo.all(
+      from f in Follower,
+        join: p in Profile,
+        on: p.id == f.profile_id,
+        where: f.following_id == ^id and f.pending_remote == false,
+        order_by: [desc: f.id],
+        limit: ^Keyword.get(opts, :limit, 40),
+        select: p
+    )
+  end
+
   ## Local-initiated follow
 
   @doc """

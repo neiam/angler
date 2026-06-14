@@ -133,7 +133,19 @@ defmodule AnglerWeb.StatusLive do
     <Layouts.app flash={@flash} current_user={@current_user} current_profile={@current_profile}>
       <.post_card status={@status} current_user={@current_user} />
       <div class="mt-2 text-xs text-base-content/50">
-        Permalink: <a href={@status["url"]} class="link link-hover">{@status["url"]}</a>
+        <%= if local_account?(@status["account"]) do %>
+          Permalink: <a href={@status["url"]} class="link link-hover">{@status["url"]}</a>
+        <% else %>
+          <a
+            href={@status["url"]}
+            target="_blank"
+            rel="noopener"
+            class="link link-primary inline-flex items-center gap-1"
+          >
+            <.icon name="hero-arrow-top-right-on-square-micro" class="size-3.5" />
+            View original on {@status["account"]["acct"] |> String.split("@") |> List.last()}
+          </a>
+        <% end %>
       </div>
 
       <section class="mt-6 space-y-3">
