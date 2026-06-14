@@ -42,12 +42,15 @@ defmodule AnglerWeb.Layouts do
   def app(assigns) do
     ~H"""
     <header class="navbar px-4 sm:px-6 lg:px-8 border-b border-base-300 bg-base-200">
-      <div class="flex-1">
+      <div class="navbar-start">
         <.link navigate={~p"/"} class="flex w-fit items-center gap-2">
           <span class="font-mono font-bold tracking-[0.16em] text-accent">ANGLER</span>
         </.link>
       </div>
-      <div class="flex-none">
+      <div class="navbar-center">
+        <.search_box />
+      </div>
+      <div class="navbar-end">
         <ul class="flex flex-row items-center gap-1">
           <li>
             <.theme_toggle />
@@ -114,6 +117,100 @@ defmodule AnglerWeb.Layouts do
     <% end %>
 
     <.flash_group flash={@flash} />
+    """
+  end
+
+  @doc """
+  Global navbar search box. Not a `<form>` (so it never collides with a page's
+  own form) — the colocated `.SearchBox` hook drives everything: a debounced
+  type-ahead dropdown fetched from `/search/suggest`, Enter to jump to the full
+  `/search` results page, and Escape/outside-click to dismiss.
+  """
+  def search_box(assigns) do
+    ~H"""
+    <div
+      id="navbar-search"
+      role="search"
+      class="relative hidden sm:block"
+      phx-hook=".SearchBox"
+      phx-update="ignore"
+    >
+      <label class="input input-sm input-bordered flex items-center gap-2 w-44 lg:w-64">
+        <.icon name="hero-magnifying-glass-micro" class="size-4 opacity-60" />
+        <input
+          type="search"
+          placeholder="Search"
+          autocomplete="off"
+          aria-label="Search"
+          data-search-input
+          class="grow"
+        />
+      </label>
+      <ul
+        data-search-results
+        class="hidden absolute left-0 right-0 z-20 mt-1 menu bg-base-200 border border-base-300 rounded-box p-1 shadow-lg max-h-96 flex-nowrap overflow-auto"
+      >
+      </ul>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".SearchBox">
+        export default {
+          mounted() {
+            const root = this.el
+            const input = root.querySelector("[data-search-input]")
+            const box = root.querySelector("[data-search-results]")
+            let timer
+
+            const hide = () => { box.classList.add("hidden"); box.innerHTML = "" }
+            const go = (q) => { if (q) window.location.assign(`/search?q=${encodeURIComponent(q)}`) }
+
+            const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => (
+              {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]
+            ))
+
+            const render = (data, q) => {
+              const rows = []
+              ;(data.accounts || []).forEach((a) => {
+                rows.push(
+                  `<li><a href="${esc(a.url)}" class="flex items-center gap-2">` +
+                  `<span class="font-semibold truncate">${esc(a.display_name)}</span>` +
+                  `<span class="opacity-60 text-xs truncate">@${esc(a.acct)}</span></a></li>`
+                )
+              })
+              ;(data.hashtags || []).forEach((h) => {
+                rows.push(
+                  `<li><a href="${esc(h.url)}" class="flex items-center gap-2">` +
+                  `<span>#${esc(h.name)}</span>` +
+                  `<span class="opacity-60 text-xs ml-auto tabular-nums">${esc(h.count)}</span></a></li>`
+                )
+              })
+              rows.push(
+                `<li><a href="/search?q=${encodeURIComponent(q)}" class="text-primary">` +
+                `See all results for &quot;${esc(q)}&quot;</a></li>`
+              )
+              box.innerHTML = rows.join("")
+              box.classList.remove("hidden")
+            }
+
+            input.addEventListener("input", () => {
+              clearTimeout(timer)
+              const q = input.value.trim()
+              if (q.length < 1) { hide(); return }
+              timer = setTimeout(() => {
+                fetch(`/search/suggest?q=${encodeURIComponent(q)}`, {headers: {accept: "application/json"}})
+                  .then((r) => (r.ok ? r.json() : null))
+                  .then((data) => { if (data) render(data, q) })
+                  .catch(() => {})
+              }, 200)
+            })
+
+            input.addEventListener("keydown", (e) => {
+              if (e.key === "Enter") { e.preventDefault(); go(input.value.trim()) }
+              else if (e.key === "Escape") { hide() }
+            })
+            document.addEventListener("click", (e) => { if (!root.contains(e.target)) hide() })
+          }
+        }
+      </script>
+    </div>
     """
   end
 

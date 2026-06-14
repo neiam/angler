@@ -38,6 +38,12 @@ defmodule Angler.DataCase do
   def setup_sandbox(tags) do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Angler.Repo, shared: not tags[:async])
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+
+    # Global, TTL'd `:persistent_term` caches survive sandbox rollback and would
+    # otherwise leak stale snapshots across tests (e.g. a count computed against
+    # one test's rows being read by another). Start each test from a clean slate.
+    Angler.Instance.clear_stats_cache()
+    Angler.Hashtags.clear_usage_counts_cache()
   end
 
   @doc """

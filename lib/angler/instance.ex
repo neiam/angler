@@ -35,6 +35,13 @@ defmodule Angler.Instance do
     end
   end
 
+  @doc "Drop the cached stats snapshot so the next read recomputes."
+  @spec clear_stats_cache() :: :ok
+  def clear_stats_cache do
+    :persistent_term.erase(@cache_key)
+    :ok
+  end
+
   defp compute_stats do
     %{
       user_count: Repo.aggregate(from(u in User, where: is_nil(u.status)), :count),

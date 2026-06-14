@@ -155,6 +155,70 @@ Set both keys to enable. Without them push delivery is a no-op.
 | `MAIL_FROM` | `noreply@<host>` | From: address |
 | `MAIL_FROM_NAME` | `Pixelfed` | From: display name |
 
+## Deployment
+
+Get started in 30 seconds. Angler is easy to run because it ships as a single
+container image, published to three registries — pick whichever you mirror:
+
+- `quay.io/neiam/angler`
+- `ghcr.io/neiam/angler`
+- `docker.io/neiam/angler`
+
+The public [`/about`](lib/angler_web/live/about_live.ex) page has an interactive
+"Run your own" generator for the single-container commands below (toggle
+runtime/registry, fill in user / password / host). This section is the
+canonical reference and also covers the compose and Kubernetes recipes.
+
+All environment variables are documented under [Configuration](#configuration).
+
+### Single host (podman / docker)
+
+Put everything on one network so the app can resolve the database by name, then
+start Postgres:
+
+```bash
+podman network create angler-net
+
+podman run -d --name angler-db --network angler-net \
+  -e POSTGRES_USER=angler \
+  -e POSTGRES_PASSWORD=changeme \
+  -e POSTGRES_DB=angler \
+  -v angler-db:/var/lib/postgresql/data \
+  docker.io/postgres:16-alpine
+```
+
+Run migrations once, then start the server — `bin/server` does **not**
+auto-migrate:
+
+```bash
+podman run --rm --network angler-net \
+  -e DATABASE_URL=ecto://angler:changeme@angler-db/angler \
+  ghcr.io/neiam/angler:latest bin/migrate
+
+podman run -d --name angler --network angler-net \
+  -p 4000:4000 \
+  -e PHX_HOST=angler.you.com \
+  -e SECRET_KEY_BASE="$(openssl rand -base64 48)" \
+  -e DATABASE_URL=ecto://angler:changeme@angler-db/angler \
+  ghcr.io/neiam/angler:latest
+```
+
+Swap `podman` for `docker` throughout; the commands are otherwise identical.
+
+### Compose
+
+`compose.yml` ships a Postgres service for local development:
+
+```bash
+podman compose up -d        # or: docker compose up -d
+```
+
+### Kubernetes
+
+`app.yml` is a reference manifest (Deployment + Service + HTTP→HTTPS redirect),
+backed by a StackGres Postgres cluster (`pg.yml`). Adjust the image, `PHX_HOST`,
+and secrets for your cluster.
+
 ## Layout
 
 - `lib/angler/` — domain contexts (Accounts, Statuses, Stories, Groups, Federation, …)

@@ -53,6 +53,75 @@ defmodule AnglerWeb.WebPagesTest do
     assert html =~ ~s(href="https://neiam.org")
   end
 
+  test "about page 'Run your own' defaults to podman + ghcr", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, ~p"/about")
+    assert html =~ "Run your own"
+    assert html =~ "Get started in 30 seconds"
+    assert html =~ "podman run -d --name angler"
+    assert html =~ "ghcr.io/neiam/angler:latest"
+    # default host + placeholder creds flow into the command
+    assert html =~ "PHX_HOST=angler.you.com"
+    assert html =~ "ecto://USER:PASS@HOST/angler"
+    assert html =~ "repo documentation"
+  end
+
+  test "about page interpolates typed user/pass/host into both commands", %{conn: conn} do
+    {:ok, lv, _html} = live(conn, ~p"/about")
+
+    html =
+      lv
+      |> form("#run-config", %{"user" => "bob", "pass" => "s3cret", "host" => "pics.example.org"})
+      |> render_change()
+
+    assert html =~ "PHX_HOST=pics.example.org"
+    assert html =~ "ecto://bob:s3cret@HOST/angler"
+    assert html =~ "POSTGRES_USER=bob"
+    assert html =~ "POSTGRES_PASSWORD=s3cret"
+
+    # blanking a field falls back to its placeholder default
+    html =
+      lv
+      |> form("#run-config", %{"user" => "", "pass" => "", "host" => ""})
+      |> render_change()
+
+    assert html =~ "PHX_HOST=angler.you.com"
+    assert html =~ "ecto://USER:PASS@HOST/angler"
+  end
+
+  test "about page has a database setup command matching the runtime", %{conn: conn} do
+    {:ok, lv, html} = live(conn, ~p"/about")
+    assert html =~ "Start your database"
+    assert html =~ "podman run -d --name angler-db"
+    assert html =~ "docker.io/postgres:16-alpine"
+
+    html =
+      lv
+      |> element(~s{button[phx-value-runtime="docker"]})
+      |> render_click()
+
+    assert html =~ "docker run -d --name angler-db"
+  end
+
+  test "about page run-command matrix switches runtime and registry", %{conn: conn} do
+    {:ok, lv, _html} = live(conn, ~p"/about")
+
+    html =
+      lv
+      |> element(~s{button[phx-value-runtime="docker"]})
+      |> render_click()
+
+    assert html =~ "docker run -d --name angler"
+
+    html =
+      lv
+      |> element(~s{button[phx-value-registry="quay"]})
+      |> render_click()
+
+    assert html =~ "docker run -d --name angler"
+    assert html =~ "quay.io/neiam/angler:latest"
+    refute html =~ "ghcr.io/neiam/angler:latest"
+  end
+
   test "features page renders the feature sections", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/features")
     assert html =~ "Features"

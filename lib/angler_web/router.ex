@@ -76,6 +76,8 @@ defmodule AnglerWeb.Router do
       live "/forgot-password", ForgotPasswordLive
       live "/reset-password/:token", ResetPasswordLive
       live "/settings/profile", ProfileEditLive
+      live "/search", SearchLive
+      live "/tags/:name", TagLive
       live "/@:username", ProfileLive
       live "/p/:username/:id", StatusLive
     end
@@ -101,6 +103,9 @@ defmodule AnglerWeb.Router do
 
     get "/api/nodeinfo/2.0.json", Federation.NodeinfoController, :document
     get "/api/service/health-check", HealthController, :show
+
+    # Public type-ahead backing the navbar search box (accounts + hashtags).
+    get "/search/suggest", SearchController, :suggest
 
     post "/api/auth/app-code-verify", AuthController, :app_code_verify
     post "/api/auth/onboarding", AuthController, :onboarding
