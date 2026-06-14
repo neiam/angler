@@ -36,20 +36,34 @@ defmodule Angler.Statuses.OutboundAudience do
     |> dedupe_inboxes()
   end
 
-  def inboxes_for(%Status{profile_id: author_id}) do
-    # Followers of the author who are remote (have a domain).
-    from(f in Follower,
-      where: f.profile_id == ^author_id and not is_nil(f.accepted_at),
-      join: p in Profile,
-      on: p.id == f.following_id,
-      where: not is_nil(p.domain),
-      select: %{inbox: p.inbox_url, shared: p.shared_inbox_url}
-    )
-    |> Repo.all()
-    |> dedupe_inboxes()
+  def inboxes_for(%Status{profile_id: author_id} = status) do
+    # Followers of the author who are remote (have a domain)...
+    follower_rows =
+      from(f in Follower,
+        where: f.profile_id == ^author_id and not is_nil(f.accepted_at),
+        join: p in Profile,
+        on: p.id == f.following_id,
+        where: not is_nil(p.domain),
+        select: %{inbox: p.inbox_url, shared: p.shared_inbox_url}
+      )
+      |> Repo.all()
+
+    # ...plus the account being replied to, who may not be a follower — without
+    # this a reply to a remote post never reaches that instance's thread.
+    dedupe_inboxes(follower_rows ++ reply_parent_rows(status))
   end
 
   ## Internals
+
+  defp reply_parent_rows(%Status{in_reply_to_profile_id: nil}), do: []
+
+  defp reply_parent_rows(%Status{in_reply_to_profile_id: pid}) do
+    from(p in Profile,
+      where: p.id == ^pid and not is_nil(p.domain),
+      select: %{inbox: p.inbox_url, shared: p.shared_inbox_url}
+    )
+    |> Repo.all()
+  end
 
   # Prefer sharedInbox where present (one delivery per remote instance is
   # what every grown federation instance does). Fall back to the per-actor

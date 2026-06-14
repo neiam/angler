@@ -149,10 +149,13 @@ defmodule Angler.Profiles do
           {:ok, Profile.t()} | {:error, Ecto.Changeset.t() | atom()}
   def update_credentials(%Profile{domain: nil} = profile, attrs) do
     with {:ok, attrs} <- maybe_upload_avatar(profile, attrs, "avatar", :avatar_path),
-         {:ok, attrs} <- maybe_upload_avatar(profile, attrs, "header", :header_path) do
-      profile
-      |> Profile.update_credentials_changeset(attrs)
-      |> Repo.update()
+         {:ok, attrs} <- maybe_upload_avatar(profile, attrs, "header", :header_path),
+         {:ok, updated} <-
+           profile |> Profile.update_credentials_changeset(attrs) |> Repo.update() do
+      # Announce the change so remote followers refresh their cached actor
+      # (avatar/header/name/bio) — otherwise they keep showing the old one.
+      Angler.Profiles.Workers.ActorUpdateDeliver.enqueue_for(updated)
+      {:ok, updated}
     end
   end
 

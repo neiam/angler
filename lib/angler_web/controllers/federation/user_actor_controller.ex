@@ -9,6 +9,7 @@ defmodule AnglerWeb.Federation.UserActorController do
 
   use AnglerWeb, :controller
 
+  alias Angler.Federation.ActorBuilder
   alias Angler.Profiles
   alias Angler.Profiles.Profile
 
@@ -22,41 +23,7 @@ defmodule AnglerWeb.Federation.UserActorController do
       %Profile{} = profile ->
         conn
         |> put_resp_content_type("application/activity+json")
-        |> send_resp(200, Jason.encode_to_iodata!(actor_json(profile)))
+        |> send_resp(200, Jason.encode_to_iodata!(ActorBuilder.person(profile)))
     end
-  end
-
-  defp actor_json(%Profile{} = p) do
-    base = AnglerWeb.Endpoint.url()
-    actor_url = base <> "/users/" <> p.username
-
-    %{
-      "@context" => [
-        "https://www.w3.org/ns/activitystreams",
-        "https://w3id.org/security/v1"
-      ],
-      "id" => actor_url,
-      "type" => if(p.is_bot, do: "Service", else: "Person"),
-      "preferredUsername" => p.username,
-      "name" => p.name || p.username,
-      "summary" => p.bio || "",
-      "url" => base <> "/@" <> p.username,
-      "inbox" => actor_url <> "/inbox",
-      "outbox" => actor_url <> "/outbox",
-      "followers" => actor_url <> "/followers",
-      "following" => actor_url <> "/following",
-      "manuallyApprovesFollowers" => p.is_private,
-      "discoverable" => p.discoverable,
-      "indexable" => p.indexable_search,
-      "published" => p.inserted_at && DateTime.to_iso8601(p.inserted_at),
-      "endpoints" => %{
-        "sharedInbox" => base <> "/f/inbox"
-      },
-      "publicKey" => %{
-        "id" => actor_url <> "#main-key",
-        "owner" => actor_url,
-        "publicKeyPem" => p.public_key_pem
-      }
-    }
   end
 end

@@ -5,10 +5,40 @@ defmodule Angler.Federation.NoteBuilderTest do
   alias Angler.Media.Asset
   alias Angler.Profiles
   alias Angler.Statuses
+  alias Angler.Statuses.OutboundAudience
+  alias Angler.Statuses.Status
 
   defp local!(username) do
     {:ok, p} = Profiles.create_profile(%{username: username})
     p
+  end
+
+  defp remote!(username) do
+    {:ok, p} =
+      Profiles.create_profile(%{
+        username: username,
+        domain: "remote.test",
+        remote_url: "http://remote.test/users/#{username}",
+        inbox_url: "http://remote.test/users/#{username}/inbox",
+        public_key_pem: "stub"
+      })
+
+    p
+  end
+
+  defp remote_status!(profile, uri) do
+    Status.changeset(%{
+      profile_id: profile.id,
+      local: false,
+      uri: uri,
+      url: uri,
+      visibility: :public,
+      scope: "public",
+      caption: "parent",
+      rendered: "<p>parent</p>",
+      type: "text"
+    })
+    |> Repo.insert!()
   end
 
   test "object/1 emits a public Note addressed to followers" do
@@ -65,5 +95,48 @@ defmodule Angler.Federation.NoteBuilderTest do
     assert activity["object"]["type"] == "Note"
     refute Map.has_key?(activity["object"], "@context")
     assert activity["@context"]
+  end
+
+  describe "replies" do
+    test "emit inReplyTo, and address + mention the (remote) parent author" do
+      alice = local!("alice")
+      bob = remote!("bob")
+      parent = remote_status!(bob, "http://remote.test/notes/1")
+
+      {:ok, reply} =
+        Statuses.create_local(alice, %{"status" => "nice shot", "in_reply_to_id" => parent.id})
+
+      obj = NoteBuilder.object(reply)
+
+      assert obj["inReplyTo"] == parent.uri
+      assert bob.remote_url in obj["cc"]
+
+      assert Enum.any?(obj["tag"], fn t ->
+               t["type"] == "Mention" and t["href"] == bob.remote_url
+             end)
+
+      # The Create activity mirrors the object's addressing.
+      activity = NoteBuilder.create_activity(reply, alice)
+      assert activity["cc"] == obj["cc"]
+      assert activity["object"]["inReplyTo"] == parent.uri
+    end
+
+    test "OutboundAudience delivers a reply to the replied-to remote author" do
+      alice = local!("alice")
+      bob = remote!("bob")
+      parent = remote_status!(bob, "http://remote.test/notes/2")
+
+      {:ok, reply} =
+        Statuses.create_local(alice, %{"status" => "hello", "in_reply_to_id" => parent.id})
+
+      # Bob doesn't follow alice, but must still receive the reply.
+      assert bob.inbox_url in OutboundAudience.inboxes_for(reply)
+    end
+
+    test "a top-level post has no inReplyTo" do
+      alice = local!("alice")
+      {:ok, status} = Statuses.create_local(alice, %{"status" => "standalone"})
+      refute Map.has_key?(NoteBuilder.object(status), "inReplyTo")
+    end
   end
 end
