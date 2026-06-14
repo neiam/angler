@@ -46,6 +46,13 @@ defmodule AnglerWeb.WebPagesTest do
     assert html =~ "No administrators are listed."
   end
 
+  test "about page shows the NEIAM production mark", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, ~p"/about")
+    assert html =~ "ANGLER"
+    assert html =~ "production"
+    assert html =~ ~s(href="https://neiam.org")
+  end
+
   test "features page renders the feature sections", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/features")
     assert html =~ "Features"

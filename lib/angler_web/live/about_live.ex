@@ -103,6 +103,23 @@ defmodule AnglerWeb.AboutLive do
             <.link navigate={~p"/features"} class="link link-primary">See supported features →</.link>
           </p>
         </section>
+
+        <footer class="py-10 sm:py-12 mt-8 border-t border-base-300 text-center">
+          <p class="font-mono text-xs uppercase tracking-[0.25em] text-base-content/70 flex items-center justify-center gap-2">
+            <span class="font-bold tracking-[0.16em]">ANGLER</span>
+            <span class="opacity-50">·</span>
+            <span>a</span>
+            <%!--
+              Hardcoded oklch from the neiam-co accent (the value every ported
+              theme assigns to --color-accent). Inline so the NEIAM mark stays
+              yellow regardless of which theme the viewer has picked.
+            --%>
+            <span class="font-bold tracking-[0.16em]" style="color: oklch(96% 0.058 96);">
+              <a href="https://neiam.org">NEIAM</a>
+            </span>
+            <span>production</span>
+          </p>
+        </footer>
       </article>
     </Layouts.app>
     """
