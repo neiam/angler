@@ -17,7 +17,8 @@ defmodule AnglerWeb.Federation.NodeinfoControllerTest do
 
     body = json_response(conn, 200)
     assert body["version"] == "2.0"
-    assert body["software"]["name"] == "pixelfed"
+    assert body["software"]["name"] == "angler"
+    assert body["metadata"]["compatible"]["pixelfed"] == "0.12.5"
     assert body["protocols"] == ["activitypub"]
     assert is_map(body["usage"])
     assert get_resp_header(conn, "access-control-allow-origin") == ["*"]

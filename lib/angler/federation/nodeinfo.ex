@@ -10,10 +10,16 @@ defmodule Angler.Federation.Nodeinfo do
   import Ecto.Query, only: [from: 2]
   alias Angler.Repo
 
-  # The Pixelfed-compatibility tag the rest of the federation network expects to
-  # see. We identify as `pixelfed` so existing peers route us correctly; the
-  # Angler-specific identity is exposed elsewhere.
+  # We report ourselves as `angler` (our own name + version) in the `software`
+  # block, and advertise the Pixelfed API level we implement under
+  # `metadata.compatible` so Pixelfed-aware peers and clients can still detect
+  # the compatibility surface.
   @pixelfed_compat "0.12.5"
+
+  # Angler's version, read from the loaded application (works in releases where
+  # Mix isn't available).
+  @spec version() :: String.t()
+  def version, do: Application.spec(:angler, :vsn) |> to_string()
 
   @doc "GET /.well-known/nodeinfo"
   @spec well_known() :: map()
@@ -37,8 +43,8 @@ defmodule Angler.Federation.Nodeinfo do
     %{
       "version" => "2.0",
       "software" => %{
-        "name" => "pixelfed",
-        "version" => @pixelfed_compat
+        "name" => "angler",
+        "version" => version()
       },
       "protocols" => ["activitypub"],
       "services" => %{"outbound" => [], "inbound" => []},
@@ -55,11 +61,15 @@ defmodule Angler.Federation.Nodeinfo do
       "metadata" => %{
         "nodeName" => domain,
         "software" => %{
-          "homepage" => "https://pixelfed.org",
-          "repo" => "https://github.com/pixelfed/pixelfed"
+          "name" => "Angler",
+          "version" => version(),
+          "homepage" => "https://neiam.org"
         },
         "config" => %{
           "features" => ["mobile_apis"]
+        },
+        "compatible" => %{
+          "pixelfed" => @pixelfed_compat
         }
       }
     }
