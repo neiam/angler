@@ -55,6 +55,7 @@ defmodule Angler.Statuses.Status do
   end
 
   @cast_fields ~w(
+    id
     profile_id caption rendered is_nsfw cw_summary visibility scope type pf_type
     local uri url
     in_reply_to_id in_reply_to_profile_id reblog_of_id

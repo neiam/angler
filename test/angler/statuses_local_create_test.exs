@@ -20,6 +20,10 @@ defmodule Angler.Statuses.LocalCreateTest do
       assert status.caption == "hello world"
       assert status.rendered =~ "hello world"
       assert status.uri =~ "/p/alice/"
+      # The snowflake in the permalink/AP-object id must equal the row PK,
+      # else web permalinks and federation dereferencing 404.
+      assert String.ends_with?(status.uri, "/" <> Integer.to_string(status.id))
+      assert status.url == status.uri
     end
 
     test "extracts and links a local mention" do

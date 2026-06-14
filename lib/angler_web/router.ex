@@ -2,6 +2,9 @@ defmodule AnglerWeb.Router do
   use AnglerWeb, :router
 
   pipeline :browser do
+    # Serve AP JSON for `/p/:username/:id` to federation peers before the
+    # `:accepts, ["html"]` plug would 406 their `application/activity+json`.
+    plug AnglerWeb.Plugs.APObjectNegotiation
     plug :accepts, ["html"]
     plug :fetch_session
     plug :fetch_live_flash
