@@ -19,6 +19,7 @@ defmodule Angler.Media do
   alias Angler.Media.Workers.ImageProcess
   alias Angler.Profiles.Profile
   alias Angler.Repo
+  alias Angler.Statuses.Status
 
   @max_size_bytes 100 * 1_048_576
 
@@ -57,14 +58,58 @@ defmodule Angler.Media do
          {:ok, size} <- check_size(path),
          {:ok, sha} <- hash(path) do
       case Repo.get_by(Asset, profile_id: profile_id, sha256: sha) do
-        %Asset{} = existing ->
+        # A clean, unattached prior upload of the same bytes — reuse as-is.
+        %Asset{status_id: nil, status: status} = existing when status != "deleted" ->
           {:ok, existing}
+
+        # The sha+profile row is unique, so we can't insert a second copy and
+        # we can't reuse one that's stale (soft-deleted, or left attached to a
+        # since-deleted status). Reclaim it so the same image can be posted or
+        # set as an avatar again — this is what makes re-uploads after a delete
+        # work.
+        %Asset{} = existing ->
+          reclaim(existing, profile_id, path)
 
         nil ->
           do_insert(profile_id, path, sha, sniffed_type, size, params)
       end
     end
   end
+
+  # Reuse the row if it's still live-attached (a genuine duplicate of a current
+  # post's media); otherwise free it: re-store the bytes (in case the file was
+  # removed) and reset to a fresh, unattached, reprocessable state.
+  defp reclaim(%Asset{} = asset, profile_id, src_path) do
+    if attached_to_live_status?(asset) do
+      {:ok, asset}
+    else
+      case Path.basename(asset.path_original || "") do
+        "" -> :ok
+        filename -> Storage.put(profile_id, :original, filename, src_path)
+      end
+
+      asset
+      |> Ecto.Changeset.change(
+        status: "pending",
+        status_id: nil,
+        unattached_at: DateTime.utc_now()
+      )
+      |> Repo.update()
+      |> case do
+        {:ok, reclaimed} ->
+          {:ok, _} = ImageProcess.enqueue(reclaimed.id)
+          {:ok, reclaimed}
+
+        err ->
+          err
+      end
+    end
+  end
+
+  defp attached_to_live_status?(%Asset{status_id: nil}), do: false
+
+  defp attached_to_live_status?(%Asset{status_id: status_id}),
+    do: Repo.exists?(from(s in Status, where: s.id == ^status_id and is_nil(s.deleted_at)))
 
   @doc """
   Update an asset's caption (alt text). Owner-only.

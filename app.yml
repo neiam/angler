@@ -3,38 +3,32 @@ kind: Namespace
 metadata:
   name: angler
 ---
-# RBAC for libcluster's Kubernetes strategy. The ServiceAccount on the
-# pod gets read-only access to its own namespace's pods so it can
-# discover peer node IPs.
+# Dedicated ServiceAccount for the angler pods. Clustering uses DNSCluster
+# (DNS-based peer discovery via the headless Service), which needs no
+# Kubernetes API access — so no Role/RoleBinding is required here.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: angler
   namespace: angler
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+# Shared, persistent storage for user uploads (MEDIA_STORAGE=local writes
+# here). ReadWriteMany so both replicas — and the RollingUpdate surge pod —
+# can read/write the same files; otherwise an image stored by one pod 404s
+# when a later request lands on the other. openebs-zfspv is node-local, so
+# the bound PV's nodeAffinity co-locates all angler pods onto its node.
+apiVersion: v1
+kind: PersistentVolumeClaim
 metadata:
-  name: angler-pod-reader
+  name: angler-uploads
   namespace: angler
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "endpoints"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: angler-pod-reader
-  namespace: angler
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: angler-pod-reader
-subjects:
-  - kind: ServiceAccount
-    name: angler
-    namespace: angler
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: openebs-zfspv-shared
+  resources:
+    requests:
+      storage: 250Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -61,12 +55,35 @@ spec:
         name: angler
     spec:
       serviceAccountName: angler
+      # The image runs as `nobody` (uid/gid 65534). A freshly-provisioned PVC
+      # is owned by root; OpenEBS ZFS LocalPV (and several other CSI drivers)
+      # ignore `fsGroup` for ReadWriteMany volumes, so we explicitly chown the
+      # volume in an init container that runs once as root.
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsGroup: 65534
+      initContainers:
+        - name: chown-uploads
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            ["sh", "-c", "chown -R 65534:65534 /data/uploads && chmod -R u+rwX,g+rwX /data/uploads"]
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
       containers:
         - image: r.g.gmp.io/neiam/angler:latest
           imagePullPolicy: Always
           name: angler
           ports:
             - containerPort: 4000
+            # Erlang distribution: epmd (node lookup) + the pinned inet_dist
+            # listener (rel/env.sh.eex) for pod-to-pod clustering.
+            - { name: epmd, containerPort: 4369 }
+            - { name: dist, containerPort: 9100 }
           env:
             - name: PHX_HOST
               value: angler.neiam.org
@@ -77,19 +94,27 @@ spec:
             - name: POOL_SIZE
               value: "10"
 
-            # Cluster glue: every pod becomes angler@<pod-ip>.
-            # libcluster (Cluster.Strategy.Kubernetes) discovers peers
-            # via the K8s API (RBAC defined above) and Horde rides on
-            # top to keep the Authority registry coherent.
+            # Local media storage root — points at the mounted uploads PVC
+            # so files survive pod restarts/redeploys and are shared across
+            # replicas. (Switch to MEDIA_STORAGE=s3 to drop the volume.)
+            - name: MEDIA_ROOT
+              value: /data/uploads
+
+            # Cluster glue: every pod becomes angler@<pod-ip> (name
+            # distribution is set from POD_IP in rel/env.sh.eex). DNSCluster
+            # resolves the headless Service's A records to peer pod IPs and
+            # connects to angler@<ip>; the shared cookie lets them handshake.
             - name: POD_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-            # - name: RELEASE_COOKIE
-            #   valueFrom:
-            #     secretKeyRef:
-            #       name: elixir-args
-            #       key: erlang_cookie
+            - name: DNS_CLUSTER_QUERY
+              value: angler-headless.angler.svc.cluster.local
+            - name: RELEASE_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  name: elixir-args
+                  key: erlang_cookie
 
             - name: SECRET_KEY_BASE
               valueFrom:
@@ -124,6 +149,9 @@ spec:
                 secretKeyRef:
                   name: postgres
                   key: superuser-password
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
           readinessProbe:
             httpGet:
               path: /
@@ -136,6 +164,10 @@ spec:
               port: 4000
             initialDelaySeconds: 30
             periodSeconds: 30
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: angler-uploads
       imagePullSecrets:
         - name: gitlabgmp
 ---
@@ -168,6 +200,10 @@ spec:
       targetPort: 4000
       protocol: TCP
       name: http
+    # Erlang distribution ports, so DNSCluster peers can reach epmd + the
+    # pinned inet_dist listener across pods.
+    - { name: epmd, port: 4369, targetPort: 4369, protocol: TCP }
+    - { name: dist, port: 9100, targetPort: 9100, protocol: TCP }
   selector:
     name: angler
 ---

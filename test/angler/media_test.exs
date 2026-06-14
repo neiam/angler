@@ -52,6 +52,34 @@ defmodule Angler.MediaTest do
       assert a.id == b.id
     end
 
+    test "re-uploading after a post delete reclaims the asset (re-attachable)", ctx do
+      {:ok, a} = Media.upload(ctx.alice, upload_fixture())
+
+      {:ok, status} =
+        Angler.Statuses.create_local(ctx.alice, %{"status" => "pic", "media_ids" => [a.id]})
+
+      {:ok, _} = Angler.Statuses.delete_local(status.id, ctx.alice)
+
+      # Same bytes again — must come back unattached so a new post can take it.
+      {:ok, b} = Media.upload(ctx.alice, upload_fixture())
+      assert b.id == a.id
+      assert is_nil(b.status_id)
+      assert b.status != "deleted"
+
+      {:ok, other} = Angler.Statuses.create_local(ctx.alice, %{"status" => "again"})
+      assert {:ok, [_]} = Media.attach_to_status([b.id], other.id, ctx.alice.id)
+    end
+
+    test "revives a soft-deleted asset on re-upload (e.g. avatar re-set)", ctx do
+      {:ok, a} = Media.upload(ctx.alice, upload_fixture())
+      Repo.update!(Ecto.Changeset.change(a, status: "deleted"))
+
+      {:ok, b} = Media.upload(ctx.alice, upload_fixture())
+      assert b.id == a.id
+      assert b.status != "deleted"
+      assert is_nil(b.status_id)
+    end
+
     test "accepts MP4 video upload", ctx do
       src = Path.join(System.tmp_dir!(), "ang-mp4-#{System.unique_integer([:positive])}.mp4")
       File.cp!(@video_fixture, src)
