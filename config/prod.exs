@@ -7,17 +7,17 @@ import Config
 # before starting your production server.
 config :angler, AnglerWeb.Endpoint, cache_static_manifest: "priv/static/cache_manifest.json"
 
-# Force using SSL in production. This also sets the "strict-security-transport" header,
-# known as HSTS. If you have a health check endpoint, you may want to exclude it below.
-# Note `:force_ssl` is required to be set at compile-time.
-config :angler, AnglerWeb.Endpoint,
-  force_ssl: [
-    rewrite_on: [:x_forwarded_proto],
-    exclude: [
-      # paths: ["/health"],
-      hosts: ["localhost", "127.0.0.1"]
-    ]
-  ]
+# TLS termination + the http → https redirect happen at the Traefik
+# ingress, so Phoenix doesn't run `force_ssl` itself. Leaving it on
+# behind a proxy that doesn't reliably forward `X-Forwarded-Proto`
+# breaks the LiveView WebSocket: Plug.SSL sees the upgrade as plain
+# HTTP, returns a 301, and the browser drops the connection.
+#
+# If you ever serve directly without a TLS-terminating proxy, re-enable
+# this block:
+#
+#     config :angler, AnglerWeb.Endpoint,
+#       force_ssl: [rewrite_on: [:x_forwarded_proto]]
 
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req
