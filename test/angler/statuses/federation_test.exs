@@ -124,6 +124,59 @@ defmodule Angler.Statuses.FederationTest do
     end
   end
 
+  describe "remote media attachments" do
+    test "ingests AP attachments as remote assets the API renders by origin URL", ctx do
+      uri = "http://remote.test/notes/media-1"
+
+      img = "http://remote.test/storage/pic.jpg"
+
+      activity =
+        create_note(uri,
+          extra_object: %{
+            "attachment" => [
+              %{
+                "type" => "Document",
+                "mediaType" => "image/jpeg",
+                "url" => img,
+                "name" => "a cat",
+                "blurhash" => "UU",
+                "width" => 1080,
+                "height" => 1350
+              }
+            ]
+          }
+        )
+
+      assert :ok = Federation.handle_create(activity, ctx.bob.remote_url)
+
+      status = Statuses.get_by_uri(uri) |> Repo.preload(:media_attachments)
+      assert [asset] = status.media_attachments
+      assert asset.storage == "remote"
+      assert asset.remote_url == img
+      assert asset.media_type == "image/jpeg"
+      assert asset.caption == "a cat"
+      assert status.type in ["photo", "photo:album"]
+
+      rendered = AnglerWeb.MastodonAPI.Media.render(asset)
+      assert rendered["url"] == img
+      assert rendered["preview_url"] == img
+      assert rendered["remote_url"] == img
+    end
+
+    test "skips attachments lacking a usable url/type", ctx do
+      uri = "http://remote.test/notes/media-2"
+
+      activity =
+        create_note(uri,
+          extra_object: %{"attachment" => [%{"type" => "Document", "name" => "no url"}]}
+        )
+
+      assert :ok = Federation.handle_create(activity, ctx.bob.remote_url)
+      status = Statuses.get_by_uri(uri) |> Repo.preload(:media_attachments)
+      assert status.media_attachments == []
+    end
+  end
+
   describe "handle_delete_tombstone/1" do
     test "soft-deletes a previously-mirrored status", ctx do
       uri = "http://remote.test/notes/del"

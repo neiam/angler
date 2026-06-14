@@ -78,6 +78,27 @@ defmodule Angler.Release do
     result
   end
 
+  @doc """
+  Enqueue remote-media backfill for federated posts mirrored before remote
+  attachment ingestion existed.
+
+      bin/angler eval 'Angler.Release.backfill_remote_media()'
+
+  Inserts one Oban job per candidate status; returns the count enqueued.
+  """
+  def backfill_remote_media do
+    load_app()
+
+    {:ok, count, _} =
+      Ecto.Migrator.with_repo(Angler.Repo, fn _repo ->
+        # Oban isn't running under `with_repo`; insert job rows directly.
+        Angler.Media.Workers.RemoteBackfill.enqueue_all_via_repo()
+      end)
+
+    IO.puts("Enqueued #{count} media-backfill job(s).")
+    count
+  end
+
   defp roles(user) do
     [user.is_admin && "admin", user.is_moderator && "moderator"]
     |> Enum.filter(& &1)

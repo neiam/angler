@@ -47,6 +47,7 @@ defmodule Angler.Statuses.Federation do
     with {:ok, %Profile{} = author} <- Actor.resolve(actor_url),
          attrs = build_attrs(object, author),
          {:ok, status} <- Statuses.create_remote(attrs) do
+      attach_media(status, object)
       attach_mentions(status, object)
       attach_hashtags(status, object)
       bump_author_count(status.profile_id)
@@ -212,6 +213,16 @@ defmodule Angler.Statuses.Federation do
   defp lookup_reply_target_author_id(_), do: nil
 
   ## Tag processing
+
+  defp attach_media(%Status{} = status, object) do
+    Angler.Media.ingest_remote_attachments(
+      List.wrap(object["attachment"]),
+      status.id,
+      status.profile_id
+    )
+
+    :ok
+  end
 
   defp attach_mentions(%Status{} = status, %{"tag" => tags}) when is_list(tags) do
     base_users = AnglerWeb.Endpoint.url() <> "/users/"

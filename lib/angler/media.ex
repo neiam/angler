@@ -105,6 +105,66 @@ defmodule Angler.Media do
     if n == length(ids), do: {:ok, rows}, else: {:error, :unattachable}
   end
 
+  @doc """
+  Persist AP attachment objects from a federated Note as remote `Asset` rows
+  linked to `status_id`. Remote media is referenced by URL — never downloaded —
+  so the rendered attachment points straight at the origin. Attachments without
+  a usable URL/media type are skipped; insert failures are dropped silently.
+  """
+  @spec ingest_remote_attachments(list() | nil, integer(), integer()) :: {:ok, [Asset.t()]}
+  def ingest_remote_attachments(attachments, status_id, profile_id)
+      when is_list(attachments) and is_integer(status_id) and is_integer(profile_id) do
+    rows =
+      attachments
+      |> Enum.map(&remote_attachment_attrs(&1, status_id, profile_id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.flat_map(fn attrs ->
+        case Asset.changeset(attrs) |> Repo.insert() do
+          {:ok, asset} -> [asset]
+          {:error, _} -> []
+        end
+      end)
+
+    {:ok, rows}
+  end
+
+  def ingest_remote_attachments(_, _, _), do: {:ok, []}
+
+  defp remote_attachment_attrs(att, status_id, profile_id) when is_map(att) do
+    with {url, link_type} <- attachment_url(att),
+         media_type when is_binary(media_type) <- att["mediaType"] || link_type do
+      %{
+        profile_id: profile_id,
+        status_id: status_id,
+        media_type: media_type,
+        storage: "remote",
+        status: "ready",
+        remote_url: url,
+        caption: att["name"] || att["summary"],
+        blurhash: att["blurhash"],
+        width: positive_int(att["width"]),
+        height: positive_int(att["height"])
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp remote_attachment_attrs(_, _, _), do: nil
+
+  # AP `url` may be a plain string, a Link object, or a list of either.
+  defp attachment_url(%{"url" => url}), do: pick_url(url)
+  defp attachment_url(%{"href" => href}) when is_binary(href), do: {href, nil}
+  defp attachment_url(_), do: nil
+
+  defp pick_url(url) when is_binary(url), do: {url, nil}
+  defp pick_url(%{"href" => href} = link) when is_binary(href), do: {href, link["mediaType"]}
+  defp pick_url([first | _]), do: pick_url(first)
+  defp pick_url(_), do: nil
+
+  defp positive_int(n) when is_integer(n) and n > 0, do: n
+  defp positive_int(_), do: nil
+
   ## Internals
 
   defp fetch_path(%{path: p}) when is_binary(p), do: {:ok, p}
