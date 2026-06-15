@@ -202,15 +202,19 @@ podman run -d --name angler --network angler-net \
 
 Swap `podman` for `docker` throughout; the commands are otherwise identical.
 
-To migrate yourself instead — e.g. a dedicated pre-deploy job, or to avoid a
-startup race when running **multiple replicas** — set `SKIP_MIGRATIONS=true` on
-the server and run `bin/migrate` separately:
+To migrate yourself instead — e.g. a dedicated pre-deploy job — set
+`SKIP_MIGRATIONS=true` on the server and run `bin/migrate` separately:
 
 ```bash
 podman run --rm --network angler-net \
   -e DATABASE_URL=ecto://angler:changeme@angler-db/angler \
   ghcr.io/neiam/angler:latest bin/migrate
 ```
+
+Auto-migrate-on-boot is safe with **multiple replicas** — Ecto takes a Postgres
+advisory lock, so concurrent pods serialize rather than race. A dedicated
+migrate step is still worth it at scale, so a slow or failed migration gates one
+job instead of every pod's startup.
 
 ### Compose
 
@@ -238,4 +242,4 @@ and secrets for your cluster.
 
 ## License
 
-AGPL-3.0 (matches Pixelfed).
+**Angler** is Free Software under the AGPL.
