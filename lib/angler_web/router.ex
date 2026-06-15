@@ -76,6 +76,8 @@ defmodule AnglerWeb.Router do
       live "/forgot-password", ForgotPasswordLive
       live "/reset-password/:token", ResetPasswordLive
       live "/settings/profile", ProfileEditLive
+      live "/settings/followed-tags", FollowedTagsLive
+      live "/settings/import/instagram", InstagramImportLive
       live "/search", SearchLive
       live "/tags/:name", TagLive
       live "/@:username", ProfileLive
@@ -86,6 +88,7 @@ defmodule AnglerWeb.Router do
 
     live_session :admin, on_mount: {AnglerWeb.LiveAuth, :require_admin} do
       live "/admin", AdminSettingsLive
+      live "/admin/relays", AdminRelaysLive
     end
   end
 
@@ -123,7 +126,7 @@ defmodule AnglerWeb.Router do
     pipe_through :federation
 
     get "/i/actor", Federation.InstanceActorController, :show
-    post "/i/actor/inbox", Federation.InstanceActorController, :inbox
+    post "/i/actor/inbox", Federation.InboxController, :instance
     get "/i/actor/outbox", Federation.InstanceActorController, :outbox
 
     # User-facing AP actor docs and inboxes.
@@ -600,6 +603,8 @@ defmodule AnglerWeb.Router do
     get "/email_domain_blocks", EmailDomainBlockController, :index
 
     get "/announcements", AnnouncementController, :index
+
+    get "/relays", RelayController, :index
   end
 
   scope "/api/v1/admin", AnglerWeb.Admin do
@@ -628,6 +633,11 @@ defmodule AnglerWeb.Router do
     post "/announcements", AnnouncementController, :create
     put "/announcements/:id", AnnouncementController, :update
     delete "/announcements/:id", AnnouncementController, :delete
+
+    post "/relays", RelayController, :create
+    post "/relays/:id/enable", RelayController, :enable
+    post "/relays/:id/disable", RelayController, :disable
+    delete "/relays/:id", RelayController, :delete
   end
 
   ## Pixelfed `/api/v0/groups/...` — community groups. Whole feature is

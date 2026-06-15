@@ -9,6 +9,8 @@ defmodule AnglerWeb.TagLive do
 
   import AnglerWeb.PublicComponents
 
+  alias Angler.Hashtags
+  alias Angler.Hashtags.Following
   alias Angler.Pagination.MastodonCursor
   alias Angler.Streaming
   alias Angler.Timelines
@@ -21,7 +23,8 @@ defmodule AnglerWeb.TagLive do
     name = name |> String.downcase() |> String.trim_leading("#")
     topic = "hashtag:#{name}"
 
-    viewer_id = socket.assigns.current_profile && socket.assigns.current_profile.id
+    profile = socket.assigns.current_profile
+    viewer_id = profile && profile.id
 
     {posts, _} =
       Timelines.hashtag(name, MastodonCursor.parse(%{}, @feed_limit, 40), viewer_id: viewer_id)
@@ -35,11 +38,31 @@ defmodule AnglerWeb.TagLive do
      |> assign(:page_title, "##{name}")
      |> assign(:tag_name, name)
      |> assign(:topic, topic)
+     |> assign(:following?, following?(profile, name))
      |> assign(:post_count, length(rendered))
      |> stream(:posts, rendered, dom_id: &dom_id/1)}
   end
 
   @impl true
+  def handle_event("follow_tag", _params, socket) do
+    case socket.assigns.current_profile do
+      nil ->
+        {:noreply, push_navigate(socket, to: ~p"/login?next=/tags/#{socket.assigns.tag_name}")}
+
+      profile ->
+        {:ok, _tag} = Following.follow(profile, socket.assigns.tag_name)
+        {:noreply, assign(socket, :following?, true)}
+    end
+  end
+
+  def handle_event("unfollow_tag", _params, socket) do
+    if profile = socket.assigns.current_profile do
+      :ok = Following.unfollow(profile, socket.assigns.tag_name)
+    end
+
+    {:noreply, assign(socket, :following?, false)}
+  end
+
   def handle_event("favourite", %{"id" => id}, socket), do: react(socket, id, :favourite)
   def handle_event("reblog", %{"id" => id}, socket), do: react(socket, id, :reblog)
 
@@ -79,6 +102,15 @@ defmodule AnglerWeb.TagLive do
 
   defp dom_id(status), do: "post-" <> status["id"]
 
+  defp following?(nil, _name), do: false
+
+  defp following?(profile, name) do
+    case Hashtags.get_by_name(name) do
+      nil -> false
+      tag -> Following.following?(profile.id, tag.id)
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -86,6 +118,18 @@ defmodule AnglerWeb.TagLive do
       <section class="space-y-5">
         <div class="flex items-center gap-3">
           <h1 class="text-3xl font-bold tracking-tight">#{@tag_name}</h1>
+          <button
+            :if={@current_profile}
+            type="button"
+            class={["btn btn-sm", if(@following?, do: "btn-outline", else: "btn-primary")]}
+            phx-click={if @following?, do: "unfollow_tag", else: "follow_tag"}
+          >
+            <.icon
+              name={if @following?, do: "hero-check-micro", else: "hero-plus-micro"}
+              class="size-4"
+            />
+            {if @following?, do: "Following", else: "Follow"}
+          </button>
           <.link
             navigate={~p"/search?#{%{q: "##{@tag_name}", type: "hashtags"}}"}
             class="btn btn-ghost btn-xs"

@@ -72,6 +72,7 @@ submission) ship disabled — opt in per instance.
 | `POSTGRES_DB` | `angler_dev` (dev), `angler` (prod) | Database name |
 | `DATABASE_URL` | — | Fallback when `POSTGRES_HOST` is unset (`ecto://USER:PASS@HOST/DB`) |
 | `POOL_SIZE` | `10` | Ecto pool size (prod) |
+| `SKIP_MIGRATIONS` | — | Set to `true` to disable auto-migrate-on-boot (prod). Run `bin/migrate` yourself instead |
 
 ### Endpoint
 
@@ -187,14 +188,10 @@ podman run -d --name angler-db --network angler-net \
   docker.io/postgres:16-alpine
 ```
 
-Run migrations once, then start the server — `bin/server` does **not**
-auto-migrate:
+Then start the server. `bin/server` runs pending migrations on boot (after the
+DB connects, before it serves traffic), so there's no separate migration step:
 
 ```bash
-podman run --rm --network angler-net \
-  -e DATABASE_URL=ecto://angler:changeme@angler-db/angler \
-  ghcr.io/neiam/angler:latest bin/migrate
-
 podman run -d --name angler --network angler-net \
   -p 4000:4000 \
   -e PHX_HOST=angler.you.com \
@@ -204,6 +201,16 @@ podman run -d --name angler --network angler-net \
 ```
 
 Swap `podman` for `docker` throughout; the commands are otherwise identical.
+
+To migrate yourself instead — e.g. a dedicated pre-deploy job, or to avoid a
+startup race when running **multiple replicas** — set `SKIP_MIGRATIONS=true` on
+the server and run `bin/migrate` separately:
+
+```bash
+podman run --rm --network angler-net \
+  -e DATABASE_URL=ecto://angler:changeme@angler-db/angler \
+  ghcr.io/neiam/angler:latest bin/migrate
+```
 
 ### Compose
 

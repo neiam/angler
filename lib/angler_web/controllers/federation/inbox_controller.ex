@@ -29,6 +29,24 @@ defmodule AnglerWeb.Federation.InboxController do
     end)
   end
 
+  def instance(conn, _params) do
+    # The instance-actor inbox (`/i/actor/inbox`) receives relay `Accept`s and
+    # firehose `Announce`s. Valid activities are enqueued like the shared
+    # inbox; anything else (crawler probes, junk) is swallowed with a 202 so we
+    # don't leak which payloads we route.
+    raw = RawBodyReader.raw_body(conn)
+    headers = headers_to_map(conn)
+
+    with {:ok, payload} when is_map(payload) <- decode_body(raw, conn.body_params),
+         :ok <- check_required(payload),
+         :ok <- check_banned(payload) do
+      {:ok, _job} = InboxWorker.enqueue(headers, raw, payload, conn.request_path)
+      send_resp(conn, 202, "")
+    else
+      _ -> send_resp(conn, 202, "")
+    end
+  end
+
   def user(conn, %{"username" => username}) do
     case Profiles.get_local_by_username(username) do
       nil ->

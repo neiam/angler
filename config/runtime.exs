@@ -76,6 +76,13 @@ if config_env() == :prod do
 
   config :angler, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # Run pending migrations automatically on boot (after the Repo starts, before
+  # Oban / the Endpoint) so a fresh deploy is serving with no separate
+  # `bin/migrate` step. Opt out with SKIP_MIGRATIONS=true to run migrations
+  # yourself (e.g. a dedicated pre-deploy job). dev/test never auto-migrate —
+  # they use `mix ecto.migrate` / the Ecto sandbox.
+  config :angler, :auto_migrate, System.get_env("SKIP_MIGRATIONS") != "true"
+
   config :angler, AnglerWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [

@@ -16,6 +16,7 @@ defmodule Angler.Federation.Workers.ActivityHandler do
 
   require Logger
 
+  alias Angler.Federation.Relays
   alias Angler.Federation.Workers.DeleteWorker
   alias Angler.Follows
   alias Angler.Likes
@@ -59,23 +60,15 @@ defmodule Angler.Federation.Workers.ActivityHandler do
 
   defp dispatch(
          %{"type" => "Accept", "object" => %{"type" => "Follow", "id" => id}} = _activity,
-         _actor_url
+         actor_url
        ) do
-    # Inbound Accept of a Follow we sent. The id matches our outbound
-    # Follower.remote_url; flip the row to accepted + bump counters.
-    case Follows.accept_remote!(id) do
-      {:ok, _follower} -> :ok
-      {:error, :not_found} -> :ok
-    end
+    handle_accept(id, actor_url)
   end
 
-  defp dispatch(%{"type" => "Accept", "object" => id} = _activity, _actor_url)
+  defp dispatch(%{"type" => "Accept", "object" => id} = _activity, actor_url)
        when is_binary(id) do
     # Some peers Accept by passing just the Follow id as a bare string.
-    case Follows.accept_remote!(id) do
-      {:ok, _follower} -> :ok
-      {:error, :not_found} -> :ok
-    end
+    handle_accept(id, actor_url)
   end
 
   defp dispatch(%{"type" => "Accept"}, _actor_url), do: :ok
@@ -98,7 +91,13 @@ defmodule Angler.Federation.Workers.ActivityHandler do
   end
 
   defp dispatch(%{"type" => "Announce"} = activity, actor_url) do
-    Reblogs.Federation.handle_announce(activity, actor_url)
+    # An Announce from an accepted relay is the firehose: ingest the wrapped
+    # object as a public remote status. Otherwise it's an ordinary user boost.
+    if Relays.relay_actor?(actor_url) do
+      Statuses.Federation.ingest_announced(activity)
+    else
+      Reblogs.Federation.handle_announce(activity, actor_url)
+    end
   end
 
   defp dispatch(%{"type" => "Delete"} = activity, _actor_url) do
@@ -117,4 +116,20 @@ defmodule Angler.Federation.Workers.ActivityHandler do
   end
 
   defp dispatch(_, _), do: :ok
+
+  # An inbound Accept may answer either a relay Follow (object `as:Public`) or
+  # a user-to-user Follow. Try the relay table first; on miss, fall through to
+  # the user-follow path which matches `Follower.remote_url`.
+  defp handle_accept(follow_id, actor_url) do
+    case Relays.accept(follow_id, actor_url) do
+      :ok ->
+        :ok
+
+      :not_found ->
+        case Follows.accept_remote!(follow_id) do
+          {:ok, _follower} -> :ok
+          {:error, :not_found} -> :ok
+        end
+    end
+  end
 end

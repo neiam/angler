@@ -48,6 +48,20 @@ defmodule Angler.TimelinesTest do
     status
   end
 
+  defp tag_status!(status, tag) do
+    {:ok, sh} =
+      %StatusHashtag{}
+      |> StatusHashtag.changeset(%{
+        status_id: status.id,
+        hashtag_id: tag.id,
+        profile_id: status.profile_id,
+        status_visibility: to_string(status.visibility)
+      })
+      |> Repo.insert()
+
+    sh
+  end
+
   defp default_cursor, do: MastodonCursor.parse(%{}, 20, 40)
 
   ## Home
@@ -129,6 +143,144 @@ defmodule Angler.TimelinesTest do
 
       {statuses, _} = Timelines.home(ctx.alice.id, default_cursor())
       assert statuses == []
+    end
+
+    test "fans hashtag-followed posts to a follower who doesn't follow the author", ctx do
+      # carol follows #photography but does NOT follow bob.
+      carol = local!("carol")
+      tag = Hashtags.ensure!("photography")
+      {:ok, _} = Hashtags.Following.follow(carol, "photography")
+
+      s = insert_status!(ctx.bob)
+      tag_status!(s, tag)
+
+      FeedInsert.enqueue(s.id)
+      Oban.drain_queue(queue: :feed)
+
+      {statuses, _} = Timelines.home(carol.id, default_cursor())
+      assert Enum.map(statuses, & &1.id) == [s.id]
+    end
+
+    test "does not fan a :private hashtagged post to a hashtag-follower", ctx do
+      carol = local!("carol")
+      tag = Hashtags.ensure!("photography")
+      {:ok, _} = Hashtags.Following.follow(carol, "photography")
+
+      s = insert_status!(ctx.bob, %{visibility: :private})
+      tag_status!(s, tag)
+
+      FeedInsert.enqueue(s.id)
+      Oban.drain_queue(queue: :feed)
+
+      {statuses, _} = Timelines.home(carol.id, default_cursor())
+      assert statuses == []
+    end
+
+    test "does not duplicate a row for someone following both the author and the tag", ctx do
+      tag = Hashtags.ensure!("photography")
+      {:ok, _} = Hashtags.Following.follow(ctx.alice, "photography")
+
+      s = insert_status!(ctx.bob)
+      tag_status!(s, tag)
+
+      FeedInsert.enqueue(s.id)
+      Oban.drain_queue(queue: :feed)
+
+      assert Repo.aggregate(
+               from(h in HomeFeedEntry,
+                 where: h.profile_id == ^ctx.alice.id and h.status_id == ^s.id
+               ),
+               :count
+             ) == 1
+    end
+  end
+
+  describe "unfollowing a hashtag prunes its posts from the home feed" do
+    setup do
+      alice = local!("alice")
+      bob = remote!("bob")
+
+      {:ok, _} =
+        %Follower{}
+        |> Follower.changeset(%{
+          profile_id: bob.id,
+          following_id: alice.id,
+          accepted_at: DateTime.utc_now()
+        })
+        |> Repo.insert()
+
+      %{alice: alice, bob: bob}
+    end
+
+    test "removes a post that was only there because of the tag follow", ctx do
+      carol = local!("carol")
+      tag = Hashtags.ensure!("photography")
+      {:ok, _} = Hashtags.Following.follow(carol, "photography")
+
+      s = insert_status!(ctx.bob)
+      tag_status!(s, tag)
+      FeedInsert.enqueue(s.id)
+      Oban.drain_queue(queue: :feed)
+
+      assert {[_], _} = Timelines.home(carol.id, default_cursor())
+
+      :ok = Hashtags.Following.unfollow(carol, "photography")
+      Oban.drain_queue(queue: :feed)
+
+      assert {[], _} = Timelines.home(carol.id, default_cursor())
+    end
+
+    test "keeps a post whose author the user directly follows", ctx do
+      # alice follows bob (per setup) AND #photography.
+      tag = Hashtags.ensure!("photography")
+      {:ok, _} = Hashtags.Following.follow(ctx.alice, "photography")
+
+      s = insert_status!(ctx.bob)
+      tag_status!(s, tag)
+      FeedInsert.enqueue(s.id)
+      Oban.drain_queue(queue: :feed)
+
+      :ok = Hashtags.Following.unfollow(ctx.alice, "photography")
+      Oban.drain_queue(queue: :feed)
+
+      {statuses, _} = Timelines.home(ctx.alice.id, default_cursor())
+      assert Enum.map(statuses, & &1.id) == [s.id]
+    end
+
+    test "keeps a post still carried by another followed tag", ctx do
+      carol = local!("carol")
+      photo = Hashtags.ensure!("photography")
+      nature = Hashtags.ensure!("nature")
+      {:ok, _} = Hashtags.Following.follow(carol, "photography")
+      {:ok, _} = Hashtags.Following.follow(carol, "nature")
+
+      s = insert_status!(ctx.bob)
+      tag_status!(s, photo)
+      tag_status!(s, nature)
+      FeedInsert.enqueue(s.id)
+      Oban.drain_queue(queue: :feed)
+
+      :ok = Hashtags.Following.unfollow(carol, "photography")
+      Oban.drain_queue(queue: :feed)
+
+      {statuses, _} = Timelines.home(carol.id, default_cursor())
+      assert Enum.map(statuses, & &1.id) == [s.id]
+    end
+
+    test "keeps the user's own tagged post", ctx do
+      tag = Hashtags.ensure!("photography")
+      {:ok, _} = Hashtags.Following.follow(ctx.alice, "photography")
+
+      s = insert_status!(ctx.alice)
+      tag_status!(s, tag)
+      FeedInsert.enqueue(s.id)
+      Oban.drain_queue(queue: :feed)
+
+      :ok = Hashtags.Following.unfollow(ctx.alice, "photography")
+      Oban.drain_queue(queue: :feed)
+
+      {statuses, _} = Timelines.home(ctx.alice.id, default_cursor())
+      assert s.id in Enum.map(statuses, & &1.id)
     end
   end
 

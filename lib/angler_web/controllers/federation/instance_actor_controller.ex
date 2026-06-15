@@ -1,10 +1,11 @@
 defmodule AnglerWeb.Federation.InstanceActorController do
   @moduledoc """
-  /i/actor, /i/actor/inbox, /i/actor/outbox.
+  /i/actor and /i/actor/outbox. The inbox (`POST /i/actor/inbox`) is served by
+  `AnglerWeb.Federation.InboxController.instance/2` so relay activities flow
+  through the same verify→dispatch pipeline as the shared inbox.
 
   See:
   * `plans/federation/endpoints/get_instance_actor.md`
-  * `plans/federation/endpoints/post_instance_actor_inbox.md`
   * `plans/federation/endpoints/get_instance_actor_outbox.md`
   """
 
@@ -18,16 +19,6 @@ defmodule AnglerWeb.Federation.InstanceActorController do
     conn
     |> put_resp_content_type("application/activity+json")
     |> send_resp(200, Jason.encode_to_iodata!(actor))
-  end
-
-  def inbox(conn, _params) do
-    # The endpoint exists for federation peers that discover it. We accept and
-    # discard. Body is intentionally not parsed beyond Plug's read limit.
-    case Plug.Conn.read_body(conn, length: 1_048_576) do
-      {:ok, _body, conn} -> send_resp(conn, 202, "")
-      {:more, _, conn} -> send_resp(conn, 413, "")
-      {:error, _} -> send_resp(conn, 400, "")
-    end
   end
 
   def outbox(conn, _params) do

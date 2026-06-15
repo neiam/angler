@@ -13,6 +13,8 @@ defmodule Angler.Statuses.Federation do
 
   alias Angler.Conversations
   alias Angler.Federation.Actor
+  alias Angler.Federation.HTTP
+  alias Angler.Federation.InstanceActor
   alias Angler.Hashtags
   alias Angler.Notifications
   alias Angler.Profiles
@@ -42,6 +44,41 @@ defmodule Angler.Statuses.Federation do
   end
 
   def handle_create(_, _), do: {:error, :unsupported_object_type}
+
+  @doc """
+  Ingest the object of a relay-forwarded `Announce` as an ordinary public
+  remote status.
+
+  Unlike a user boost (handled by `Angler.Reblogs.Federation`), a relay
+  firehose `Announce` carries a Note we don't have yet — usually a bare URI.
+  We fetch it (signed with the instance actor, since some servers require
+  signed object fetches) and run the normal `Create` path. Idempotent on the
+  object id. Callers must gate this on `Relays.relay_actor?/1`.
+  """
+  @spec ingest_announced(map()) :: :ok | {:error, term()}
+  def ingest_announced(%{"object" => object}) do
+    with {:ok, %{"type" => type, "id" => id, "attributedTo" => author} = note}
+         when type in ["Note", "Question"] and is_binary(id) and is_binary(author) <-
+           resolve_announced_object(object) do
+      case Statuses.get_by_uri(id) do
+        %Status{} -> :ok
+        nil -> do_create(note, author)
+      end
+    else
+      _ -> {:error, :unprocessable_announce}
+    end
+  end
+
+  def ingest_announced(_), do: {:error, :bad_announce}
+
+  defp resolve_announced_object(object) when is_map(object), do: {:ok, object}
+
+  defp resolve_announced_object(url) when is_binary(url) do
+    actor = InstanceActor.ensure!()
+    HTTP.fetch(url, signed_with: {actor.key_id, actor.private_key_pem})
+  end
+
+  defp resolve_announced_object(_), do: {:error, :bad_object}
 
   defp do_create(object, actor_url) do
     with {:ok, %Profile{} = author} <- Actor.resolve(actor_url),

@@ -41,10 +41,40 @@ defmodule Angler.Snowflake do
     Bitwise.bsr(id, @ts_shift) + epoch()
   end
 
+  @doc """
+  Mint a snowflake that encodes an arbitrary millisecond timestamp.
+
+  This is the inverse of `timestamp/1` and exists to backdate imported content
+  (e.g. an Instagram export) so the synthetic ids sort into their correct
+  chronological position alongside organically-created posts. `seq` (0..4095)
+  disambiguates multiple ids minted for the same millisecond; callers importing
+  a batch must vary it (or the timestamp) to avoid collisions. The configured
+  node id is used so ids stay comparable with `next/0`.
+
+  Unlike `next/0` this does not touch the GenServer's monotonic state, so it
+  must only be used for out-of-band, non-realtime id minting.
+  """
+  @spec from_timestamp(integer(), non_neg_integer()) :: pos_integer()
+  def from_timestamp(ms, seq \\ 0) when is_integer(ms) and is_integer(seq) do
+    if seq < 0 or seq > @max_seq do
+      raise ArgumentError, "seq must be 0..#{@max_seq}, got: #{inspect(seq)}"
+    end
+
+    Bitwise.bsl(ms - epoch(), @ts_shift)
+    |> Bitwise.bor(Bitwise.bsl(node_id(), @node_shift))
+    |> Bitwise.bor(seq)
+  end
+
   @doc false
   def epoch do
     Application.get_env(:angler, __MODULE__, [])
     |> Keyword.get(:epoch, 1_577_836_800_000)
+  end
+
+  @doc false
+  def node_id do
+    Application.get_env(:angler, __MODULE__, [])
+    |> Keyword.get(:node_id, 0)
   end
 
   ## Server

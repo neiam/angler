@@ -79,9 +79,24 @@ defmodule AnglerWeb.Layouts do
                       <.icon name="hero-pencil-square-micro" class="size-4" /> Edit profile
                     </.link>
                   </li>
+                  <li>
+                    <.link navigate={~p"/settings/followed-tags"}>
+                      <.icon name="hero-hashtag-micro" class="size-4" /> Followed hashtags
+                    </.link>
+                  </li>
+                  <li>
+                    <.link navigate={~p"/settings/import/instagram"}>
+                      <.icon name="hero-arrow-down-tray-micro" class="size-4" /> Import from Instagram
+                    </.link>
+                  </li>
                   <li :if={@current_user.is_admin}>
                     <.link navigate={~p"/admin"}>
                       <.icon name="hero-cog-6-tooth-micro" class="size-4" /> Admin settings
+                    </.link>
+                  </li>
+                  <li :if={@current_user.is_admin}>
+                    <.link navigate={~p"/admin/relays"}>
+                      <.icon name="hero-signal-micro" class="size-4" /> Relays
                     </.link>
                   </li>
                   <li>

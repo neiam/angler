@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+cmd="${1:-}"
+arg="${2:-}"
+
+case "$cmd" in
+  list)
+    exec ./angler rpc 'Angler.Release.relay_list()'
+    ;;
+  follow)
+    [ -n "$arg" ] || { echo "Usage: relay follow <actor_url>"; exit 1; }
+    exec ./angler rpc "Angler.Release.relay_follow(\"$arg\")"
+    ;;
+  unfollow)
+    [ -n "$arg" ] || { echo "Usage: relay unfollow <actor_url|id>"; exit 1; }
+    exec ./angler rpc "Angler.Release.relay_unfollow(\"$arg\")"
+    ;;
+  enable)
+    [ -n "$arg" ] || { echo "Usage: relay enable <id>"; exit 1; }
+    exec ./angler rpc "Angler.Release.relay_enable(\"$arg\")"
+    ;;
+  disable)
+    [ -n "$arg" ] || { echo "Usage: relay disable <id>"; exit 1; }
+    exec ./angler rpc "Angler.Release.relay_disable(\"$arg\")"
+    ;;
+  *)
+    echo "Usage: relay {list | follow <actor_url> | unfollow <actor_url|id> | enable <id> | disable <id>}"
+    exit 1
+    ;;
+esac

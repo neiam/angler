@@ -8,10 +8,15 @@ defmodule Angler.Timelines.Workers.FeedInsert do
   unique.
 
   Visibility rules:
-    * `:public`, `:unlisted`, `:private` — fan to all followers (status
-      visibility filtering happens at the *read* layer in `Statuses.visible_to?/2`,
+    * `:public`, `:unlisted`, `:private` — fan to all of the author's
+      followers (status visibility filtering happens at the *read* layer,
       not at fan-out time, so changes to a viewer's follow state take
       immediate effect).
+    * `:public`, `:unlisted` — *also* fan to anyone following a hashtag the
+      status carries (Mastodon followed-tags / Pixelfed hashtag-follow).
+      Restricted to public + unlisted because the home read path does no
+      visibility filtering, so this is the enforcement point — a `:private`
+      post must never reach a hashtag-follower who isn't an actual follower.
     * `:direct` — no fan-out.
 
   See `plans/timelines/queues/feed_insert_pipeline.md`.
@@ -25,8 +30,9 @@ defmodule Angler.Timelines.Workers.FeedInsert do
   import Ecto.Query, warn: false
 
   alias Angler.Follows.Follower
+  alias Angler.Hashtags.Follow, as: HashtagFollow
   alias Angler.Repo
-  alias Angler.Statuses.Status
+  alias Angler.Statuses.{Status, StatusHashtag}
   alias Angler.Timelines.HomeFeedEntry
 
   @doc "Enqueue a fan-out job for `status_id`."
@@ -51,7 +57,7 @@ defmodule Angler.Timelines.Workers.FeedInsert do
     end
   end
 
-  defp fan_out(%Status{id: status_id, profile_id: author_id, inserted_at: inserted_at}) do
+  defp fan_out(%Status{id: status_id, profile_id: author_id, inserted_at: inserted_at} = status) do
     # Followers of the author. Includes the author themselves so their own
     # statuses show up in their home timeline (Mastodon behaviour).
     follower_ids =
@@ -61,7 +67,7 @@ defmodule Angler.Timelines.Workers.FeedInsert do
       )
       |> Repo.all()
 
-    recipient_ids = Enum.uniq([author_id | follower_ids])
+    recipient_ids = Enum.uniq([author_id | follower_ids] ++ hashtag_follower_ids(status))
 
     rows =
       Enum.map(recipient_ids, fn rid ->
@@ -81,4 +87,22 @@ defmodule Angler.Timelines.Workers.FeedInsert do
 
     :ok
   end
+
+  # Profiles following any hashtag this status carries. Only public/unlisted
+  # statuses are eligible (see moduledoc). The `(profile_id, status_id)`
+  # conflict target dedups a profile who both follows the author and a
+  # matching tag, so we don't pre-filter against the author's followers here.
+  defp hashtag_follower_ids(%Status{id: status_id, visibility: vis})
+       when vis in [:public, :unlisted] do
+    from(sh in StatusHashtag,
+      where: sh.status_id == ^status_id,
+      join: f in HashtagFollow,
+      on: f.hashtag_id == sh.hashtag_id,
+      select: f.profile_id,
+      distinct: true
+    )
+    |> Repo.all()
+  end
+
+  defp hashtag_follower_ids(%Status{}), do: []
 end

@@ -648,12 +648,26 @@ defmodule Angler.Statuses do
   Side effects: caption → HTML render, mention/hashtag association inserts,
   reply parent counter bump, author counter + last_status_at bump. Caller
   is responsible for kicking off `FeedInsert` and outbound federation.
+
+  ## Options
+
+    * `:id` — explicit snowflake id to use instead of minting a fresh one. Used
+      by the importer to assign a backdated, collision-free id.
+    * `:created_at` — `DateTime` to stamp as `inserted_at`/`updated_at` instead
+      of "now". Backdates imported posts.
+    * `:broadcast` — set `false` to skip the live-streaming broadcast (default
+      `true`). Bulk backfills pass `false` to avoid flooding connected clients.
   """
-  @spec create_local(Profile.t(), map()) ::
+  @spec create_local(Profile.t(), map(), keyword()) ::
           {:ok, Status.t()} | {:error, atom() | Ecto.Changeset.t()}
-  def create_local(%Profile{domain: nil} = profile, attrs) when is_map(attrs) do
+  def create_local(profile, attrs, opts \\ [])
+
+  def create_local(%Profile{domain: nil} = profile, attrs, opts) when is_map(attrs) do
     attrs = stringify(attrs)
     media_ids = parse_media_ids(attrs["media_ids"])
+    id = Keyword.get(opts, :id)
+    created_at = Keyword.get(opts, :created_at)
+    broadcast? = Keyword.get(opts, :broadcast, true)
 
     with {:ok, caption} <- fetch_caption(attrs, media_ids),
          {:ok, visibility} <- parse_visibility(attrs["visibility"]),
@@ -670,7 +684,9 @@ defmodule Angler.Statuses do
                sensitive?,
                attrs,
                parent,
-               media_ids
+               media_ids,
+               id,
+               created_at
              ) do
           {:ok, status} ->
             case Media.attach_to_status(media_ids, status.id, profile.id) do
@@ -691,7 +707,7 @@ defmodule Angler.Statuses do
 
             loaded = preload_local(status)
             if visibility == :direct, do: Conversations.record(loaded)
-            Angler.Streaming.broadcast_status_update(loaded)
+            if broadcast?, do: Angler.Streaming.broadcast_status_update(loaded)
 
             loaded
 
@@ -702,7 +718,7 @@ defmodule Angler.Statuses do
     end
   end
 
-  def create_local(%Profile{}, _), do: {:error, :not_local_profile}
+  def create_local(%Profile{}, _, _), do: {:error, :not_local_profile}
 
   defp attach_poll(_status, nil), do: :ok
 
@@ -776,8 +792,19 @@ defmodule Angler.Statuses do
     end
   end
 
-  defp insert_status(profile, caption, lex, visibility, sensitive?, attrs, parent, media_ids) do
-    snowflake = Angler.Snowflake.next()
+  defp insert_status(
+         profile,
+         caption,
+         lex,
+         visibility,
+         sensitive?,
+         attrs,
+         parent,
+         media_ids,
+         id,
+         created_at
+       ) do
+    snowflake = id || Angler.Snowflake.next()
     base = AnglerWeb.Endpoint.url()
     canonical = base <> "/p/" <> profile.username <> "/" <> Integer.to_string(snowflake)
     type = type_for(media_ids)
@@ -802,7 +829,14 @@ defmodule Angler.Statuses do
       group_id: parse_group_id(attrs["group_id"])
     }
     |> Status.changeset()
+    |> put_timestamps(created_at)
     |> Repo.insert()
+  end
+
+  defp put_timestamps(changeset, nil), do: changeset
+
+  defp put_timestamps(changeset, %DateTime{} = created_at) do
+    Ecto.Changeset.change(changeset, inserted_at: created_at, updated_at: created_at)
   end
 
   defp parse_group_id(nil), do: nil

@@ -12,20 +12,36 @@ defmodule AnglerWeb.MastodonAPI.TagController do
   alias Angler.Hashtags.Following, as: HashtagFollows
   alias AnglerWeb.Plugs.BearerAuth
 
+  # Pixelfed caps a user at 25 followed hashtags (HashtagFollow::MAX_LIMIT).
+  @max_follows 25
+
   def show(conn, %{"id" => name}) do
     %{profile: profile} = BearerAuth.current_scope(conn)
     name = canon(name)
 
     case Hashtags.get_by_name(name) do
-      nil -> not_found(conn)
+      # Pixelfed returns 200 with `following: false` for a tag that has no row
+      # yet (not 404), so the app can render the follow button on a
+      # never-before-seen hashtag. Mirror that.
+      nil -> json(conn, render_tag(%{name: name, id: nil}, false))
       tag -> json(conn, render_tag(tag, HashtagFollows.following?(profile.id, tag.id)))
     end
   end
 
   def follow(conn, %{"id" => name}) do
     %{profile: profile} = BearerAuth.current_scope(conn)
-    {:ok, tag} = HashtagFollows.follow(profile, canon(name))
-    json(conn, render_tag(tag, true))
+    name = canon(name)
+    existing = Hashtags.get_by_name(name)
+    already? = existing != nil and HashtagFollows.following?(profile.id, existing.id)
+
+    if not already? and HashtagFollows.count(profile.id) >= @max_follows do
+      conn
+      |> put_status(:unprocessable_entity)
+      |> json(%{"error" => "You can only follow #{@max_follows} hashtags."})
+    else
+      {:ok, tag} = HashtagFollows.follow(profile, name)
+      json(conn, render_tag(tag, true))
+    end
   end
 
   def unfollow(conn, %{"id" => name}) do
@@ -64,7 +80,4 @@ defmodule AnglerWeb.MastodonAPI.TagController do
   end
 
   defp canon(name), do: name |> String.trim_leading("#") |> String.downcase()
-
-  defp not_found(conn),
-    do: conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
 end
