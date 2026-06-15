@@ -30,6 +30,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ARC's default runner image ships no build tools; native deps (and any
+      # Makefile-driven build) need make + a C compiler.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make build-essential
+
       - uses: erlef/setup-beam@v1
         with:
           # Match the build image in the Dockerfile.
