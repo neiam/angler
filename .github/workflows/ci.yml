@@ -34,9 +34,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ARC's default runner image ships no build tools; native deps (and any
-      # Makefile-driven build) need make + a C compiler.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make build-essential
+      # ARC's default runner image is bare. Install:
+      #   make + build-essential — native deps / Makefile-driven builds
+      #   imagemagick (identify/convert/mogrify) + ffmpeg (ffmpeg/ffprobe) —
+      #     the media pipeline shells out to these (Angler.Media.Workers.ImageProcess)
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make build-essential imagemagick ffmpeg
 
       - uses: erlef/setup-beam@v1
         with:
