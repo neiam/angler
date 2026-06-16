@@ -27,7 +27,10 @@ API coverage matches Pixelfed's `routes/api.php` end to end:
 
 ## Getting started
 
-Requires Elixir 1.15+ and Postgres 15+.
+Requires Elixir 1.15+ and Postgres 15+. Media processing shells out to
+**ImageMagick** (`identify`/`convert`) and **ffmpeg** (`ffmpeg`/`ffprobe`) — both
+must be on `PATH`, or image/video uploads (and their tests) will fail. On
+Debian/Ubuntu: `apt-get install imagemagick ffmpeg`.
 
 ```bash
 mix setup            # deps, db, assets
