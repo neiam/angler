@@ -12,7 +12,11 @@ config :angler, Angler.Repo,
   port: String.to_integer(System.get_env("POSTGRES_PORT") || "5432"),
   database: "angler_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  # One sandbox connection per concurrent async test. Defaults to the core
+  # count (matches ExUnit's `max_cases`), but on a many-core CI runner that can
+  # exceed Postgres' `max_connections` (default 100) — cap it there with
+  # `POOL_SIZE`. `test_helper.exs` keeps `max_cases` in lockstep.
+  pool_size: String.to_integer(System.get_env("POOL_SIZE") || "#{System.schedulers_online() * 2}")
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.

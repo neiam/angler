@@ -14,6 +14,10 @@ jobs:
     runs-on: arc-runner-set
     env:
       MIX_ENV: test
+      # Cap the test DB pool (and, via test_helper, ExUnit's max_cases) below
+      # the Postgres service's default max_connections (100). Big CI runners
+      # otherwise scale the pool to cores × 2 and exhaust connections.
+      POOL_SIZE: "40"
     services:
       postgres:
         image: docker.io/postgres:16-alpine
