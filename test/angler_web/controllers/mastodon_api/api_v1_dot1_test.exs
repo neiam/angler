@@ -69,14 +69,20 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Test do
       assert Enum.any?(body, & &1["current_session"])
     end
 
-    test "GET /accounts/username/:username resolves to id", ctx do
+    test "GET /accounts/username/:username returns the full account", ctx do
       body =
         ctx.conn
         |> auth(ctx.read)
-        |> get(~p"/api/v1.1/accounts/username/alice")
+        |> get(~p"/api/v1.1/accounts/username/alice?_pe=1")
         |> json_response(200)
 
+      # The mobile app types this as a full `Account` (profile-by-handle nav),
+      # so it must carry more than a bare id.
       assert body["id"] == Integer.to_string(ctx.alice.id)
+      assert body["username"] == "alice"
+      assert body["acct"] == "alice"
+      assert Map.has_key?(body, "url")
+      assert Map.has_key?(body, "followers_count")
     end
 
     test "GET /accounts/username/:username 404 for unknown", ctx do

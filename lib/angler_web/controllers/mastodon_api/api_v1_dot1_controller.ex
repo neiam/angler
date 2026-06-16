@@ -14,6 +14,7 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
   import Ecto.Query, only: [from: 2]
 
   alias Angler.Accounts
+  alias Angler.Accounts.Settings
   alias Angler.Accounts.User
   alias Angler.Follows.Follower
   alias Angler.OAuth.{Client, Token}
@@ -127,10 +128,35 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
   end
 
   ## GET /api/v1.1/accounts/username/:username
-  def username_to_id(conn, %{"username" => username}) do
+  #
+  # Despite the legacy name, Pixelfed returns the **full account** here, not a
+  # bare `{id}` — `AccountService::get($accountId)` upstream. The mobile app's
+  # `getAccountByUsername` (profile-by-handle navigation, e.g. tapping a
+  # mention) types the response as a full `Account` and renders it directly, so
+  # returning only `{id}` leaves the profile header empty. Honor `?_pe=1` and
+  # attach private settings when it's the caller's own profile, matching
+  # `AccountController.show`.
+  def username_to_id(conn, %{"username" => username} = params) do
     case Profiles.lookup_acct(username) do
-      %Profile{id: id} -> json(conn, %{"id" => Integer.to_string(id)})
-      _ -> conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+      %Profile{} = profile ->
+        json(conn, Account.render(profile, account_render_opts(conn, params, profile)))
+
+      _ ->
+        conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+    end
+  end
+
+  defp account_render_opts(conn, params, %Profile{} = profile) do
+    if Map.get(params, "_pe") in ["1", "true", 1, true] do
+      case BearerAuth.current_scope(conn) do
+        %{user: %{} = user, profile: %{id: pid}} when pid == profile.id ->
+          [pe: true, user: user, settings: Settings.account_settings(user.id)]
+
+        _ ->
+          [pe: true]
+      end
+    else
+      []
     end
   end
 
