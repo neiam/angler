@@ -7,8 +7,9 @@ defmodule AnglerWeb.MastodonAPI.DiscoverController do
     * GET /api/v1.1/discover/accounts/popular   — `[Account, ...]`
     * GET /api/v1.1/discover/posts/trending     — `[Status, ...]` (range=daily|monthly|yearly)
     * GET /api/v1.1/discover/posts/hashtags     — `[%{id, total, name, hashtag, url}, ...]`
-    * GET /api/v1.1/discover/posts/network/trending — always `[]` (Beagle-equivalent
-      cross-instance aggregator is upstream-only).
+    * GET /api/v1.1/discover/posts/network/trending — `[Status, ...]` from remote
+      (federated) authors. The cross-instance counterpart to `trending_posts`,
+      which covers instance-local trending.
   """
 
   use AnglerWeb, :controller
@@ -73,7 +74,11 @@ defmodule AnglerWeb.MastodonAPI.DiscoverController do
 
   ## /api/v1.1/discover/posts/network/trending
 
-  def network_trending(conn, _params), do: json(conn, [])
+  def network_trending(conn, _params) do
+    viewer_id = viewer_id(conn)
+    statuses = Discover.network_trending(viewer_id)
+    json(conn, StatusJSON.render_many(statuses, viewer_id))
+  end
 
   ## Internals
 

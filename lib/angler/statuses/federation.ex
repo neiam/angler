@@ -71,6 +71,18 @@ defmodule Angler.Statuses.Federation do
 
   def ingest_announced(_), do: {:error, :bad_announce}
 
+  @doc """
+  Fetch a remote status by its AS2 object URL and mirror it locally.
+
+  The discovery counterpart to `ingest_announced/1`: used by the Beagle
+  network-trending poller (`Angler.Discover.Workers.BeagleDiscover`) to pull in
+  curated cross-instance posts. Signed fetch with the instance actor, idempotent
+  on the object id, and subject to the same SSRF/banned-domain guards as every
+  other outbound fetch (via `Angler.Federation.HTTP`).
+  """
+  @spec fetch_and_ingest(String.t()) :: :ok | {:error, term()}
+  def fetch_and_ingest(url) when is_binary(url), do: ingest_announced(%{"object" => url})
+
   defp resolve_announced_object(object) when is_map(object), do: {:ok, object}
 
   defp resolve_announced_object(url) when is_binary(url) do

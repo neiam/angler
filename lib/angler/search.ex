@@ -14,10 +14,12 @@ defmodule Angler.Search do
   external engine (Tantivy/OpenSearch) later without touching callers.
   """
 
-  import Ecto.Query, only: [from: 2]
+  import Ecto.Query
 
   alias Angler.Hashtags.Hashtag
+  alias Angler.Likes.Like
   alias Angler.Profiles
+  alias Angler.Reblogs.Reblog
   alias Angler.Repo
   alias Angler.Statuses.Status
 
@@ -75,9 +77,16 @@ defmodule Angler.Search do
   end
 
   @doc """
-  Statuses whose caption matches `query`. Returns the viewer's own posts plus
-  any public/unlisted post (local or remote). Associations needed for
-  rendering are preloaded.
+  Statuses whose caption matches `query`. Associations needed for rendering are
+  preloaded.
+
+  Visibility scoping:
+
+    * Anonymous viewers (`viewer_id == nil`) see public posts only.
+    * Logged-in viewers also see `:unlisted` posts, their own posts (any
+      visibility), and any post they've **liked, boosted, or commented on** —
+      so engaged-with content stays findable even when it's otherwise hidden
+      (e.g. a followers-only post by someone else).
   """
   @spec statuses(String.t(), integer() | nil, keyword()) :: [struct()]
   def statuses(query, viewer_id, opts \\ []) when is_binary(query) do
@@ -86,17 +95,48 @@ defmodule Angler.Search do
     else
       pattern = "%" <> String.trim(query) <> "%"
 
-      Repo.all(
-        from s in Status,
-          where:
-            is_nil(s.deleted_at) and
-              ilike(s.caption, ^pattern) and
-              (s.visibility in [:public, :unlisted] or s.profile_id == ^(viewer_id || -1)),
-          order_by: [desc: s.id],
-          limit: ^limit(opts),
-          preload: ^@status_preloads
+      from(s in Status,
+        where: is_nil(s.deleted_at) and ilike(s.caption, ^pattern),
+        order_by: [desc: s.id],
+        limit: ^limit(opts),
+        preload: ^@status_preloads
       )
+      |> scope_visibility(viewer_id)
+      |> Repo.all()
     end
+  end
+
+  # Anonymous searches are limited to public posts.
+  defp scope_visibility(q, nil), do: where(q, [s], s.visibility == :public)
+
+  # Authenticated viewers additionally see unlisted posts, their own posts, and
+  # anything they've interacted with (regardless of that post's visibility).
+  defp scope_visibility(q, viewer_id) do
+    where(
+      q,
+      [s],
+      s.visibility in [:public, :unlisted] or
+        s.profile_id == ^viewer_id or
+        s.id in subquery(interacted_status_ids(viewer_id))
+    )
+  end
+
+  # Status ids the viewer has liked, boosted, or commented on (a comment is a
+  # reply the viewer authored). Unioned so the outer query can `IN (...)` it
+  # without loading the full set into memory.
+  defp interacted_status_ids(viewer_id) do
+    liked = from(l in Like, where: l.profile_id == ^viewer_id, select: l.status_id)
+    boosted = from(r in Reblog, where: r.profile_id == ^viewer_id, select: r.status_id)
+
+    commented =
+      from(c in Status,
+        where: c.profile_id == ^viewer_id and not is_nil(c.in_reply_to_id),
+        select: c.in_reply_to_id
+      )
+
+    liked
+    |> union(^boosted)
+    |> union(^commented)
   end
 
   @doc "Clamp a caller-supplied limit into the supported range."

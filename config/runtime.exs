@@ -324,6 +324,14 @@ config :angler, Oban,
      crontab: [
        {"15 3 * * *", Angler.OAuth.Workers.PruneExpired},
        {"* * * * *", Angler.Statuses.Workers.ScheduledFire},
-       {"* * * * *", Angler.Stories.Workers.Expire}
+       {"* * * * *", Angler.Stories.Workers.Expire},
+       # No-op unless Beagle discovery is enabled (see below).
+       {"0 * * * *", Angler.Discover.Workers.BeagleDiscover}
      ]}
   ]
+
+# Opt in to the Beagle network-discovery poller (beagle.pixelfed.net). Off
+# unless explicitly enabled — it's an outbound call to a third-party service.
+if System.get_env("BEAGLE_DISCOVER_ENABLED") in ~w(true 1) do
+  config :angler, Angler.Discover.Beagle, enabled: true
+end

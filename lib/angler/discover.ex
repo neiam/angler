@@ -76,6 +76,37 @@ defmodule Angler.Discover do
     |> preload_for_render()
   end
 
+  ## Network (remote/federated) trending
+
+  @doc """
+  Trending posts from **remote** authors (`local == false`) — the federated
+  half of the explore tab (`GET /api/v1.1/discover/posts/network/trending`).
+
+  Instance-wide local trending lives in `trending_posts/2`; this is its
+  cross-instance counterpart. Ordered by likes then recency. We deliberately
+  skip a time cutoff here: federated content is sparse and Pixelfed doesn't
+  federate like counts, so a hard recency window would usually leave this
+  empty. Newest-first ordering surfaces whatever the instance has ingested.
+  """
+  @spec network_trending(integer() | nil, pos_integer()) :: [Status.t()]
+  def network_trending(viewer_id, limit \\ 30) do
+    limit = clamp(limit, 1, 40)
+    hidden = hidden_profile_ids(viewer_id)
+
+    base =
+      from s in Status,
+        where:
+          s.local == false and s.visibility == :public and is_nil(s.deleted_at) and
+            s.is_nsfw == false and s.type in ^@media_types,
+        order_by: [desc: s.likes_count, desc: s.id],
+        limit: ^limit
+
+    base
+    |> exclude_authors(hidden)
+    |> Repo.all()
+    |> preload_for_render()
+  end
+
   ## Popular accounts
 
   @doc """

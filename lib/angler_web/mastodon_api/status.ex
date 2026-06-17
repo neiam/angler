@@ -92,6 +92,13 @@ defmodule AnglerWeb.MastodonAPI.Status do
       "bookmarked" => false,
       "pinned" => false,
       "content" => status.rendered || "",
+      # Pixelfed extensions the mobile app depends on: `pf_type` drives the
+      # photo/video grid filters (profile grid, explore, feed) and `content_text`
+      # is the plain-text caption used for client-side checks. Missing `pf_type`
+      # makes the app's `['photo','photo:album','video'].includes(pf_type)` and
+      # `pf_type === 'photo'` filters drop every post.
+      "pf_type" => status.pf_type || status.type || "text",
+      "content_text" => status.caption || "",
       "reblog" => nil,
       "application" => %{"name" => "web", "website" => nil},
       "mentions" => render_mentions(status.mentions),

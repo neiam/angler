@@ -34,7 +34,7 @@ defmodule AnglerWeb.MastodonAPI.DiscoverControllerTest do
         caption: opts[:caption] || "x",
         rendered: "<p>x</p>",
         type: opts[:type] || "photo",
-        local: opts[:local] || true,
+        local: Keyword.get(opts, :local, true),
         is_nsfw: opts[:nsfw] || false,
         uri: "http://remote.test/notes/#{System.unique_integer([:positive])}"
       })
@@ -143,6 +143,10 @@ defmodule AnglerWeb.MastodonAPI.DiscoverControllerTest do
 
       [first | _] = body
       assert first["id"] == Integer.to_string(hot.id)
+
+      # Pixelfed extensions the mobile grids filter on.
+      assert first["pf_type"] == "photo"
+      assert Map.has_key?(first, "content_text")
     end
 
     test "honors range=daily by skipping older posts", ctx do
@@ -194,12 +198,37 @@ defmodule AnglerWeb.MastodonAPI.DiscoverControllerTest do
   end
 
   describe "GET /api/v1.1/discover/posts/network/trending" do
-    test "always []", ctx do
-      assert [] =
-               ctx.conn
-               |> auth(ctx.read)
-               |> get(~p"/api/v1.1/discover/posts/network/trending")
-               |> json_response(200)
+    test "returns remote/federated posts, excludes local", ctx do
+      {:ok, local} = Profiles.create_profile(%{username: "localbob"})
+      {:ok, remote} = Profiles.create_profile(%{username: "remotecarol", domain: "remote.test"})
+
+      _local_photo = insert_photo!(local, local: true)
+      remote_photo = insert_photo!(remote, local: false)
+
+      body =
+        ctx.conn
+        |> auth(ctx.read)
+        |> get(~p"/api/v1.1/discover/posts/network/trending")
+        |> json_response(200)
+
+      ids = Enum.map(body, & &1["id"])
+      assert Integer.to_string(remote_photo.id) in ids
+      refute Enum.any?(body, &(&1["pf_type"] == nil))
+      assert Enum.all?(body, &(&1["account"]["acct"] =~ "@"))
+    end
+
+    test "excludes nsfw and non-public remote posts", ctx do
+      {:ok, remote} = Profiles.create_profile(%{username: "remotedan", domain: "remote.test"})
+      _ = insert_photo!(remote, local: false, nsfw: true)
+      _ = insert_photo!(remote, local: false, visibility: :private)
+
+      body =
+        ctx.conn
+        |> auth(ctx.read)
+        |> get(~p"/api/v1.1/discover/posts/network/trending")
+        |> json_response(200)
+
+      assert body == []
     end
   end
 end

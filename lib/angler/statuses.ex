@@ -41,6 +41,50 @@ defmodule Angler.Statuses do
     |> Repo.all()
   end
 
+  @profile_page_preloads [
+    :profile,
+    {:mentions, :profile},
+    {:status_hashtags, :hashtag},
+    :media_attachments
+  ]
+
+  @doc """
+  A page of top-level statuses for a profile page, newest first, with render
+  associations preloaded. Cursor-paginated via `:max_id` (returns rows with
+  `id < max_id`).
+
+  Visibility is owner-scoped: only the profile owner (`opts[:viewer_id] ==
+  profile_id`) may request anything beyond public posts. `opts[:filter]`:
+
+    * `:public` — public only (the default, and forced for non-owners)
+    * `:unlisted` — unlisted only (owner)
+    * `:all` — public + unlisted + private, i.e. everything on the owner's
+      profile except DMs (owner)
+  """
+  @spec list_for_profile_page(integer(), keyword()) :: [Status.t()]
+  def list_for_profile_page(profile_id, opts \\ []) when is_integer(profile_id) do
+    owner? = opts[:viewer_id] == profile_id
+    filter = if owner?, do: opts[:filter] || :all, else: :public
+    limit = opts[:limit] || 30
+
+    Status
+    |> where([s], s.profile_id == ^profile_id)
+    |> where([s], s.visibility in ^profile_page_visibilities(filter))
+    |> where([s], is_nil(s.deleted_at) and is_nil(s.in_reply_to_id))
+    |> profile_page_before(opts[:max_id])
+    |> order_by([s], desc: s.id)
+    |> limit(^limit)
+    |> preload(^@profile_page_preloads)
+    |> Repo.all()
+  end
+
+  defp profile_page_visibilities(:unlisted), do: [:unlisted]
+  defp profile_page_visibilities(:all), do: [:public, :unlisted, :private]
+  defp profile_page_visibilities(_), do: [:public]
+
+  defp profile_page_before(query, nil), do: query
+  defp profile_page_before(query, max_id), do: where(query, [s], s.id < ^max_id)
+
   @doc "Get a non-deleted status by AS2 `id` / `uri`."
   @spec get_by_uri(String.t()) :: Status.t() | nil
   def get_by_uri(uri) when is_binary(uri) do
@@ -233,6 +277,38 @@ defmodule Angler.Statuses do
       Angler.Streaming.broadcast_status_edit(loaded)
       loaded
     end)
+  end
+
+  @doc """
+  Change a local status's visibility. Owner-only (`profile` must be the author),
+  local statuses only. Used by the profile page to lift posts out of `unlisted`
+  (e.g. a silent import) into `public`.
+
+  Visibility-only change: it does not snapshot edit history or bump `edited_at`,
+  and does not re-run follower fan-out.
+  """
+  @spec set_visibility(integer(), Angler.Profiles.Profile.t(), atom()) ::
+          {:ok, Status.t()} | {:error, :not_found | :forbidden}
+  def set_visibility(status_id, %Angler.Profiles.Profile{id: profile_id}, visibility)
+      when is_integer(status_id) and visibility in [:public, :unlisted, :private] do
+    case Repo.get(Status, status_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Status{deleted_at: %DateTime{}} ->
+        {:error, :not_found}
+
+      %Status{profile_id: pid} when pid != profile_id ->
+        {:error, :forbidden}
+
+      %Status{local: false} ->
+        {:error, :forbidden}
+
+      %Status{} = status ->
+        status
+        |> Status.changeset(%{visibility: visibility, scope: Atom.to_string(visibility)})
+        |> Repo.update()
+    end
   end
 
   defp snapshot_edit!(%Status{} = status) do
