@@ -39,6 +39,15 @@ defmodule AnglerWeb.MastodonAPI.TagControllerTest do
       conn = ctx.conn |> auth(ctx.read) |> get(~p"/api/v1/tags/Photography")
       assert json_response(conn, 200)["following"] == true
     end
+
+    test "includes post count when _pe is set (mobile header), omits it otherwise", ctx do
+      # pixelfed-rn always requests with `?_pe=1` and reads `hashtag.count`.
+      with_pe = ctx.conn |> auth(ctx.read) |> get(~p"/api/v1/tags/neverseen?_pe=1")
+      assert json_response(with_pe, 200)["count"] == 0
+
+      without = ctx.conn |> auth(ctx.read) |> get(~p"/api/v1/tags/neverseen")
+      refute Map.has_key?(json_response(without, 200), "count")
+    end
   end
 
   describe "POST /api/v1/tags/:id/follow + /unfollow" do

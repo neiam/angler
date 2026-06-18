@@ -15,16 +15,21 @@ defmodule AnglerWeb.MastodonAPI.TagController do
   # Pixelfed caps a user at 25 followed hashtags (HashtagFollow::MAX_LIMIT).
   @max_follows 25
 
-  def show(conn, %{"id" => name}) do
+  def show(conn, %{"id" => name} = params) do
     %{profile: profile} = BearerAuth.current_scope(conn)
     name = canon(name)
+
+    # Pixelfed only includes `count` when the entity flag (`_pe`) is set; the
+    # mobile app always sends it and reads `hashtag.count` for the header and to
+    # gate the follow button. Without it the header shows "0 posts".
+    opts = if Map.has_key?(params, "_pe"), do: [count: Hashtags.usage_count(name)], else: []
 
     case Hashtags.get_by_name(name) do
       # Pixelfed returns 200 with `following: false` for a tag that has no row
       # yet (not 404), so the app can render the follow button on a
       # never-before-seen hashtag. Mirror that.
-      nil -> json(conn, render_tag(%{name: name, id: nil}, false))
-      tag -> json(conn, render_tag(tag, HashtagFollows.following?(profile.id, tag.id)))
+      nil -> json(conn, render_tag(%{name: name, id: nil}, false, opts))
+      tag -> json(conn, render_tag(tag, HashtagFollows.following?(profile.id, tag.id), opts))
     end
   end
 
@@ -69,14 +74,21 @@ defmodule AnglerWeb.MastodonAPI.TagController do
 
   ## Internals
 
-  defp render_tag(%{name: name} = tag, following?) do
-    %{
+  defp render_tag(tag, following?, opts \\ [])
+
+  defp render_tag(%{name: name} = tag, following?, opts) do
+    base = %{
       "name" => name,
       "url" => AnglerWeb.Endpoint.url() <> "/tags/" <> name,
       "history" => [],
       "following" => following?,
       "id" => Map.get(tag, :id) && Integer.to_string(tag.id)
     }
+
+    case Keyword.fetch(opts, :count) do
+      {:ok, count} -> Map.put(base, "count", count)
+      :error -> base
+    end
   end
 
   defp canon(name), do: name |> String.trim_leading("#") |> String.downcase()
