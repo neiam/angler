@@ -3,14 +3,38 @@ kind: Namespace
 metadata:
   name: angler
 ---
-# Dedicated ServiceAccount for the angler pods. Clustering uses DNSCluster
-# (DNS-based peer discovery via the headless Service), which needs no
-# Kubernetes API access — so no Role/RoleBinding is required here.
+# RBAC for libcluster's Kubernetes strategy. The ServiceAccount on the
+# pod gets read-only access to its own namespace's pods + endpoints so
+# it can discover peer node IPs for Distributed Erlang.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: angler
   namespace: angler
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: angler-pod-reader
+  namespace: angler
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: angler-pod-reader
+  namespace: angler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: angler-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: angler
+    namespace: angler
 ---
 # Shared, persistent storage for user uploads (MEDIA_STORAGE=local writes
 # here). ReadWriteMany so both replicas — and the RollingUpdate surge pod —
@@ -101,15 +125,15 @@ spec:
               value: /data/uploads
 
             # Cluster glue: every pod becomes angler@<pod-ip> (name
-            # distribution is set from POD_IP in rel/env.sh.eex). DNSCluster
-            # resolves the headless Service's A records to peer pod IPs and
-            # connects to angler@<ip>; the shared cookie lets them handshake.
+            # distribution is set from POD_IP in rel/env.sh.eex).
+            # libcluster (Cluster.Strategy.Kubernetes) discovers peers
+            # via the K8s API (RBAC defined above); Phoenix.PubSub then
+            # fans broadcasts out across nodes. The shared cookie lets
+            # them handshake.
             - name: POD_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-            - name: DNS_CLUSTER_QUERY
-              value: angler-headless.angler.svc.cluster.local
             - name: RELEASE_COOKIE
               valueFrom:
                 secretKeyRef:
@@ -184,24 +208,26 @@ spec:
   selector:
     name: angler
 ---
-# Headless service so dns_cluster can resolve all pod IPs for clustering.
-# Pods discover siblings via SRV/A records on this name; epmd-less long-
-# name distribution does the actual node connection.
+# Headless service so libcluster's Kubernetes strategy can resolve all
+# pod IPs for peer discovery. Pods discover siblings via this service's
+# Endpoints; the actual Erlang distribution traffic flows pod-IP →
+# pod-IP (4369 = epmd, 9100 = inet_dist pinned in rel/env.sh.eex).
 apiVersion: v1
 kind: Service
 metadata:
   name: angler-headless
   namespace: angler
+  # Labels here propagate to the Endpoints object. libcluster's K8s
+  # strategy filters endpoints by labelSelector (not by service name),
+  # so without `name: angler` here the Endpoints have no matching label
+  # and discovery silently returns zero peers.
+  labels:
+    name: angler
 spec:
   clusterIP: None
   publishNotReadyAddresses: true
   ports:
-    - port: 4000
-      targetPort: 4000
-      protocol: TCP
-      name: http
-    # Erlang distribution ports, so DNSCluster peers can reach epmd + the
-    # pinned inet_dist listener across pods.
+    - { name: http, port: 4000, targetPort: 4000, protocol: TCP }
     - { name: epmd, port: 4369, targetPort: 4369, protocol: TCP }
     - { name: dist, port: 9100, targetPort: 9100, protocol: TCP }
   selector:

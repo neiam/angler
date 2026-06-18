@@ -7,6 +7,8 @@ defmodule Angler.Application do
 
   @impl true
   def start(_type, _args) do
+    topologies = Application.get_env(:libcluster, :topologies, [])
+
     children =
       [
         AnglerWeb.Telemetry,
@@ -15,7 +17,10 @@ defmodule Angler.Application do
         migrator_children() ++
         [
           {Angler.Snowflake, Application.get_env(:angler, Angler.Snowflake, [])},
-          {DNSCluster, query: Application.get_env(:angler, :dns_cluster_query) || :ignore},
+          {DNSCluster, query: Application.get_env(:angler, :dns_cluster_query) || :ignore}
+        ] ++
+        cluster_children(topologies) ++
+        [
           {Phoenix.PubSub, name: Angler.PubSub},
           {Oban, Application.fetch_env!(:angler, Oban)},
           # Start to serve requests, typically the last entry
@@ -26,6 +31,15 @@ defmodule Angler.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Angler.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # libcluster is only added to the supervision tree when a topology is
+  # configured (prod, via runtime.exs). In dev/test the list is empty and
+  # we skip starting a Cluster.Supervisor entirely.
+  defp cluster_children([]), do: []
+
+  defp cluster_children(topologies) do
+    [{Cluster.Supervisor, [topologies, [name: Angler.ClusterSupervisor]]}]
   end
 
   @doc """

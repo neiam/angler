@@ -76,6 +76,26 @@ if config_env() == :prod do
 
   config :angler, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # libcluster — Kubernetes endpoints lookup against the headless
+  # service we deploy alongside the app. RBAC (pods + endpoints) is
+  # granted to the `angler` ServiceAccount in app.yml.
+  config :libcluster,
+    topologies: [
+      angler: [
+        strategy: Cluster.Strategy.Kubernetes,
+        config: [
+          mode: :ip,
+          # Both keys are required by libcluster 3.5 even in :endpoints
+          # lookup mode — it filters endpoints by selector.
+          kubernetes_selector: "name=angler",
+          kubernetes_service_name: "angler-headless",
+          kubernetes_node_basename: "angler",
+          kubernetes_namespace: "angler",
+          polling_interval: 10_000
+        ]
+      ]
+    ]
+
   # Run pending migrations automatically on boot (after the Repo starts, before
   # Oban / the Endpoint) so a fresh deploy is serving with no separate
   # `bin/migrate` step. Opt out with SKIP_MIGRATIONS=true to run migrations
