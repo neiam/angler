@@ -63,7 +63,8 @@ defmodule AnglerWeb.ProfileEditLive do
       "pronouns" => Enum.join(profile.pronouns || [], ", "),
       "locked" => profile.is_private,
       "is_suggestable" => profile.discoverable,
-      "indexable" => profile.indexable_search
+      "indexable" => profile.indexable_search,
+      "default_license" => Settings.default_license(socket.assigns.current_user.id)
     }
 
     toggle_keys = for {k, _, _} <- @toggles, k not in Map.keys(base), do: k
@@ -82,7 +83,8 @@ defmodule AnglerWeb.ProfileEditLive do
     with {:ok, attrs} <- put_upload(base, socket, :avatar, "avatar_path", profile),
          {:ok, attrs} <- put_upload(attrs, socket, :header, "header_path", profile),
          {:ok, updated} <- Profiles.update_credentials(profile, attrs),
-         {:ok, _settings} <- Settings.apply_account_params(user.id, attrs) do
+         {:ok, _settings} <- Settings.apply_account_params(user.id, attrs),
+         {:ok, _license} <- maybe_set_license(user.id, attrs) do
       {:noreply,
        socket
        |> put_flash(:info, "Profile updated.")
@@ -95,6 +97,17 @@ defmodule AnglerWeb.ProfileEditLive do
         {:noreply, put_flash(socket, :error, "Couldn't save (#{inspect(reason)}).")}
     end
   end
+
+  # Persist the chosen default media license. An out-of-range value is ignored
+  # rather than failing the whole save (the select only offers valid ids).
+  defp maybe_set_license(user_id, %{"default_license" => v}) when v not in [nil, ""] do
+    case Settings.set_default_license(user_id, v) do
+      {:ok, id} -> {:ok, id}
+      {:error, _} -> {:ok, :unchanged}
+    end
+  end
+
+  defp maybe_set_license(_user_id, _attrs), do: {:ok, :unchanged}
 
   defp split_pronouns(nil), do: []
 
@@ -162,6 +175,24 @@ defmodule AnglerWeb.ProfileEditLive do
             <.live_file_input upload={@uploads.header} class="file-input file-input-sm w-full" />
           </div>
 
+          <div class="divider">Media</div>
+
+          <label class="block space-y-1">
+            <span class="text-sm font-medium">Default photo license</span>
+            <span class="block text-xs text-base-content/60">
+              Applied to new uploads unless overridden per post.
+            </span>
+            <select name="profile[default_license]" class="select select-bordered w-full">
+              <option
+                :for={license <- license_options()}
+                value={license.id}
+                selected={to_string(license.id) == to_string(@form[:default_license].value)}
+              >
+                {license.title}
+              </option>
+            </select>
+          </label>
+
           <div class="divider">Privacy &amp; display</div>
 
           <div class="space-y-2">
@@ -186,6 +217,23 @@ defmodule AnglerWeb.ProfileEditLive do
           </button>
         </.form>
 
+        <div class="divider">More settings</div>
+
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <.link navigate={~p"/settings/two-factor"} class="btn btn-ghost btn-sm justify-start">
+            <.icon name="hero-finger-print" class="size-4" /> Two-factor auth
+          </.link>
+          <.link navigate={~p"/settings/filters"} class="btn btn-ghost btn-sm justify-start">
+            <.icon name="hero-funnel" class="size-4" /> Filters
+          </.link>
+          <.link navigate={~p"/settings/followed-tags"} class="btn btn-ghost btn-sm justify-start">
+            <.icon name="hero-hashtag" class="size-4" /> Followed tags
+          </.link>
+          <.link navigate={~p"/settings/data"} class="btn btn-ghost btn-sm justify-start">
+            <.icon name="hero-arrow-down-tray" class="size-4" /> Import &amp; export
+          </.link>
+        </div>
+
         <p class="text-center text-sm">
           <.link navigate={~p"/@#{@current_profile.username}"} class="link link-hover">
             View my profile
@@ -199,4 +247,6 @@ defmodule AnglerWeb.ProfileEditLive do
   defp truthy(true), do: true
   defp truthy("true"), do: true
   defp truthy(_), do: false
+
+  defp license_options, do: Angler.Media.License.all()
 end

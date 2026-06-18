@@ -65,6 +65,17 @@ config :phoenix, :json_library, Jason
 # Enable per-instance via runtime.exs / BEAGLE_DISCOVER_ENABLED.
 config :angler, Angler.Discover.Beagle, enabled: false
 
+# Encryption key for two-factor secrets at rest (AES-256-GCM). This is a
+# DEV/TEST default — production MUST override it in runtime.exs from
+# `TWO_FACTOR_MASTER_KEY` (a base64-encoded 32-byte key). Rotating the key
+# invalidates existing TOTP enrollments.
+config :angler, Angler.Accounts.Secrets,
+  master_key: "lsCfRpBWR85WLYFHYTz5/adKq3Yg3ezq4UXxXhzOpXE=",
+  primary_key_id: "default"
+
+# Two-factor policy. `required: true` enforces enrollment after a grace period.
+config :angler, Angler.Accounts.TwoFactor, required: false
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

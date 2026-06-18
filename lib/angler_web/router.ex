@@ -25,6 +25,16 @@ defmodule AnglerWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # JSON over a cookie session (with CSRF) — used by the browser WebAuthn
+  # ceremony endpoints, which need the session but aren't bearer-token APIs.
+  pipeline :webauthn_api do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+    plug AnglerWeb.Plugs.SessionAuth
+  end
+
   # Adds bearer-auth to a JSON pipeline. Pass `scopes:` to require specific
   # scopes; omit for "any valid bearer is fine".
   pipeline :authenticated do
@@ -75,9 +85,14 @@ defmodule AnglerWeb.Router do
       live "/register", RegisterLive
       live "/forgot-password", ForgotPasswordLive
       live "/reset-password/:token", ResetPasswordLive
+      live "/compose", ComposeLive
       live "/settings/profile", ProfileEditLive
       live "/settings/followed-tags", FollowedTagsLive
+      live "/settings/filters", FiltersLive
+      live "/settings/two-factor", TwoFactorSetupLive
+      live "/settings/data", DataLive
       live "/settings/import/instagram", InstagramImportLive
+      live "/login/two-factor", TwoFactorChallengeLive
       live "/search", SearchLive
       live "/tags/:name", TagLive
       live "/@:username", ProfileLive
@@ -258,6 +273,8 @@ defmodule AnglerWeb.Router do
     get "/app/settings", SettingsController, :get_app
     get "/compose/settings", SettingsController, :compose
 
+    get "/muted-tags", MutedTagController, :index
+
     get "/archive/list", ApiV1Dot1Controller, :archive_list
 
     get "/direct/compose/mutuals", DirectComposeController, :mutuals
@@ -329,6 +346,9 @@ defmodule AnglerWeb.Router do
 
     post "/web/settings", SettingsController, :set_web
     post "/app/settings", SettingsController, :set_app
+
+    post "/muted-tags", MutedTagController, :create
+    delete "/muted-tags/:name", MutedTagController, :delete
 
     post "/archive/add/:id", ApiV1Dot1Controller, :archive_add
     post "/archive/remove/:id", ApiV1Dot1Controller, :archive_remove
@@ -785,8 +805,22 @@ defmodule AnglerWeb.Router do
     post "/session/login", SessionController, :create
     post "/session/logout", SessionController, :delete
 
+    get "/login/two-factor/complete", SessionController, :complete_two_factor
+
+    get "/settings/data/export", ExportController, :download
+    get "/settings/data/posts.json", ExportController, :posts_json
+
     get "/oauth/authorize", OAuth.AuthorizeController, :show
     post "/oauth/authorize", OAuth.AuthorizeController, :authorize
+  end
+
+  scope "/api/webauthn", AnglerWeb do
+    pipe_through :webauthn_api
+
+    post "/register/start", WebauthnController, :register_start
+    post "/register/finish", WebauthnController, :register_finish
+    post "/auth/start", WebauthnController, :auth_start
+    post "/auth/finish", WebauthnController, :auth_finish
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

@@ -276,6 +276,7 @@ defmodule Angler.Media do
       status: "pending",
       path_original: stored_path,
       caption: Map.get(params, "description"),
+      license: resolve_license(profile_id, params),
       unattached_at: DateTime.utc_now()
     }
 
@@ -287,6 +288,17 @@ defmodule Angler.Media do
       err ->
         err
     end
+  end
+
+  # Per-upload `license` param wins; otherwise fall back to the uploader's
+  # default. Returns the canonical stored string, or `nil` for All Rights
+  # Reserved / unknown values (so we never persist the redundant default).
+  defp resolve_license(profile_id, params) do
+    case Map.get(params, "license") do
+      nil -> Angler.Accounts.Settings.default_license_for_profile(profile_id)
+      explicit -> explicit
+    end
+    |> Angler.Media.License.normalize_stored()
   end
 
   defp ext_for("image/jpeg"), do: "jpg"

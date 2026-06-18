@@ -42,8 +42,9 @@ defmodule AnglerWeb.OAuth.TokenController do
          {:ok, username} <- fetch_required(params, "username"),
          {:ok, password} <- fetch_required(params, "password") do
       scopes = parse_scopes(params["scope"], client.scopes)
+      otp = params["otp"] || params["code"] || params["two_factor_code"]
 
-      case OAuth.issue_password_token(username, password, client, scopes) do
+      case OAuth.issue_password_token(username, password, client, scopes, otp: otp) do
         {:ok, %{token: token, access: access, refresh: refresh}} ->
           send_token(conn, token, access, refresh)
 
@@ -163,11 +164,13 @@ defmodule AnglerWeb.OAuth.TokenController do
   end
 
   defp error_status("invalid_client"), do: 401
+  defp error_status("mfa_required"), do: 401
   defp error_status(_), do: 400
 
   defp describe("invalid_request"), do: "request was missing a required parameter"
   defp describe("invalid_client"), do: "client authentication failed"
   defp describe("invalid_grant"), do: "the credentials or code are invalid or expired"
   defp describe("unsupported_grant_type"), do: "the requested grant type is not supported"
+  defp describe("mfa_required"), do: "a two-factor code is required; resend with an otp parameter"
   defp describe(_), do: "internal error"
 end

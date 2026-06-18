@@ -136,6 +136,50 @@ defmodule Angler.TimelinesTest do
       # next slice. Not a correctness issue — just a minor write cost.
     end
 
+    test "a boost fans the original into the booster's followers' feeds", ctx do
+      # carol follows alice; alice boosts one of bob's old posts.
+      carol = local!("carol")
+
+      {:ok, _} =
+        %Follower{}
+        |> Follower.changeset(%{
+          profile_id: ctx.alice.id,
+          following_id: carol.id,
+          accepted_at: DateTime.utc_now()
+        })
+        |> Repo.insert()
+
+      old = insert_status!(ctx.bob)
+
+      {:ok, _} = Statuses.reblog(ctx.alice, old)
+      Oban.drain_queue(queue: :feed)
+
+      # The boost surfaces in both the booster's and the booster's follower's home.
+      {alice_home, _} = Timelines.home(ctx.alice.id, default_cursor())
+      {carol_home, _} = Timelines.home(carol.id, default_cursor())
+      assert Enum.map(alice_home, & &1.id) == [old.id]
+      assert Enum.map(carol_home, & &1.id) == [old.id]
+    end
+
+    test "boosting an old post bumps it to the top of the timeline", ctx do
+      # alice already has two of bob's posts in her feed.
+      s1 = insert_status!(ctx.bob)
+      s2 = insert_status!(ctx.bob)
+      Enum.each([s1, s2], fn s -> FeedInsert.enqueue(s.id) end)
+      Oban.drain_queue(queue: :feed)
+
+      # Sanity: newest first.
+      {home, _} = Timelines.home(ctx.alice.id, default_cursor())
+      assert Enum.map(home, & &1.id) == [s2.id, s1.id]
+
+      # Boosting the older one re-surfaces it at the top.
+      {:ok, _} = Statuses.reblog(ctx.alice, s1)
+      Oban.drain_queue(queue: :feed)
+
+      {home, _} = Timelines.home(ctx.alice.id, default_cursor())
+      assert Enum.map(home, & &1.id) == [s1.id, s2.id]
+    end
+
     test "skips :direct visibility", ctx do
       direct = insert_status!(ctx.bob, %{visibility: :direct})
       FeedInsert.enqueue(direct.id)

@@ -19,13 +19,24 @@ defmodule Angler.Timelines.Workers.FeedInsert do
       post must never reach a hashtag-follower who isn't an actual follower.
     * `:direct` — no fan-out.
 
+  ## Reblog (boost) fan-out
+
+  A boost re-shares an existing status into the **booster's** audience. When
+  `enqueue_reblog/2` is used, the original status is fanned into the booster's
+  followers' feeds (plus the booster themselves), keyed on the *booster* rather
+  than the original author. Any existing `home_feed_entry` for those recipients
+  is dropped first so the re-inserted row gets a fresh (higher) bigserial `id`
+  and an updated `inserted_at` — the boosted post surfaces at the top of the
+  timeline as if it were new. Only `:public` / `:unlisted` statuses are eligible
+  (the read path does no visibility filtering).
+
   See `plans/timelines/queues/feed_insert_pipeline.md`.
   """
 
   use Oban.Worker,
     queue: :feed,
     max_attempts: 5,
-    unique: [period: 60, fields: [:args], keys: [:status_id]]
+    unique: [period: 60, fields: [:args], keys: [:status_id, :reblog_actor_id]]
 
   import Ecto.Query, warn: false
 
@@ -43,7 +54,33 @@ defmodule Angler.Timelines.Workers.FeedInsert do
     |> Oban.insert()
   end
 
+  @doc """
+  Enqueue a reblog (boost) fan-out: fan `status_id` into `actor_id`'s
+  followers' feeds (plus `actor_id`), bumped to the top of the timeline.
+  """
+  @spec enqueue_reblog(integer(), integer()) :: {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue_reblog(status_id, actor_id)
+      when is_integer(status_id) and is_integer(actor_id) do
+    %{"status_id" => status_id, "reblog_actor_id" => actor_id}
+    |> __MODULE__.new()
+    |> Oban.insert()
+  end
+
   @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"status_id" => status_id, "reblog_actor_id" => actor_id}})
+      when is_integer(actor_id) do
+    case Repo.get(Status, status_id) do
+      nil ->
+        :ok
+
+      %Status{visibility: vis} when vis in [:private, :direct] ->
+        :ok
+
+      %Status{} = status ->
+        fan_out_reblog(status, actor_id)
+    end
+  end
+
   def perform(%Oban.Job{args: %{"status_id" => status_id}}) do
     case Repo.get(Status, status_id) do
       nil ->
@@ -76,6 +113,42 @@ defmodule Angler.Timelines.Workers.FeedInsert do
           status_id: status_id,
           inserted_at: inserted_at || DateTime.utc_now()
         }
+      end)
+
+    if rows != [] do
+      Repo.insert_all(HomeFeedEntry, rows,
+        on_conflict: :nothing,
+        conflict_target: [:profile_id, :status_id]
+      )
+    end
+
+    :ok
+  end
+
+  # Boost fan-out: re-share `status` into the booster's audience, surfacing it
+  # at the top of each recipient's timeline. We delete any pre-existing entry
+  # for these recipients first so the re-inserted row earns a fresh bigserial
+  # `id` (timeline order) and a current `inserted_at` (reads as "new").
+  defp fan_out_reblog(%Status{id: status_id}, actor_id) do
+    follower_ids =
+      from(f in Follower,
+        where: f.profile_id == ^actor_id and not is_nil(f.accepted_at),
+        select: f.following_id
+      )
+      |> Repo.all()
+
+    recipient_ids = Enum.uniq([actor_id | follower_ids])
+
+    from(h in HomeFeedEntry,
+      where: h.status_id == ^status_id and h.profile_id in ^recipient_ids
+    )
+    |> Repo.delete_all()
+
+    now = DateTime.utc_now()
+
+    rows =
+      Enum.map(recipient_ids, fn rid ->
+        %{profile_id: rid, status_id: status_id, inserted_at: now}
       end)
 
     if rows != [] do

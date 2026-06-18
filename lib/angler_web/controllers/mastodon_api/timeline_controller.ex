@@ -22,7 +22,7 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
     cursor = MastodonCursor.parse(params, @default_limit, @max_limit)
 
     {statuses, cursor_rows} = Timelines.home(profile.id, cursor)
-    respond(conn, statuses, cursor_rows, profile.id)
+    respond(conn, statuses, cursor_rows, profile.id, "home")
   end
 
   ## GET /timelines/public
@@ -38,7 +38,7 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
     ]
 
     {statuses, cursor_rows} = Timelines.public(cursor, opts)
-    respond(conn, statuses, cursor_rows, viewer_id(conn))
+    respond(conn, statuses, cursor_rows, viewer_id(conn), "public")
   end
 
   ## GET /timelines/tag/:hashtag
@@ -54,13 +54,13 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
     ]
 
     {statuses, cursor_rows} = Timelines.hashtag(name, cursor, opts)
-    respond(conn, statuses, cursor_rows, viewer_id(conn))
+    respond(conn, statuses, cursor_rows, viewer_id(conn), "public")
   end
 
   ## Internals
 
-  defp respond(conn, statuses, cursor_rows, viewer_id) do
-    rendered = StatusJSON.render_many(statuses, viewer_id)
+  defp respond(conn, statuses, cursor_rows, viewer_id, context) do
+    rendered = StatusJSON.render_many(statuses, viewer_id, context: context)
 
     conn =
       case MastodonCursor.link_header(cursor_rows, current_url_without_cursor(conn), :id) do

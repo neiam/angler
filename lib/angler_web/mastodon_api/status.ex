@@ -12,6 +12,7 @@ defmodule AnglerWeb.MastodonAPI.Status do
 
   import Ecto.Query, warn: false
 
+  alias Angler.Filters.Matching
   alias Angler.Hashtags.Hashtag
   alias Angler.Profiles
   alias Angler.Profiles.Profile
@@ -30,8 +31,10 @@ defmodule AnglerWeb.MastodonAPI.Status do
   fields are all `false` — appropriate for anonymous reads or for when the
   caller will overlay later in batch.
   """
-  @spec render(Status.t(), integer() | nil) :: map()
-  def render(%Status{} = status, viewer_id \\ nil) do
+  @spec render(Status.t(), integer() | nil, keyword()) :: map()
+  def render(status, viewer_id \\ nil, opts \\ [])
+
+  def render(%Status{} = status, viewer_id, opts) do
     status =
       Repo.preload(status,
         profile: [],
@@ -43,7 +46,11 @@ defmodule AnglerWeb.MastodonAPI.Status do
     base = render_base(status)
 
     if viewer_id do
-      apply_viewer_overlay(base, ViewerOverlay.for_status(viewer_id, status.id))
+      base
+      |> apply_viewer_overlay(ViewerOverlay.for_status(viewer_id, status.id))
+      # Single render (e.g. the permalink page) never drops the requested post;
+      # it only stamps the marker so the UI can gate it.
+      |> apply_filtered(Matching.action_for(viewer_id, status, opts[:context]))
     else
       base
     end
@@ -53,20 +60,31 @@ defmodule AnglerWeb.MastodonAPI.Status do
   Render a list of statuses, computing the viewer overlay in **one** batched
   query (not one per status).
   """
-  @spec render_many([Status.t()], integer() | nil) :: [map()]
-  def render_many(statuses, viewer_id \\ nil)
-  def render_many([], _), do: []
+  @spec render_many([Status.t()], integer() | nil, keyword()) :: [map()]
+  def render_many(statuses, viewer_id \\ nil, opts \\ [])
+  def render_many([], _, _), do: []
 
-  def render_many(statuses, nil) do
+  def render_many(statuses, nil, _opts) do
     Enum.map(statuses, &render(&1, nil))
   end
 
-  def render_many(statuses, viewer_id) when is_integer(viewer_id) do
+  def render_many(statuses, viewer_id, opts) when is_integer(viewer_id) do
     overlays = ViewerOverlay.batch(viewer_id, Enum.map(statuses, & &1.id))
+    actions = Matching.actions_for(viewer_id, statuses, opts[:context])
 
-    Enum.map(statuses, fn status ->
+    statuses
+    # `hide`-action matches are removed from the list entirely; `warn`/`blur`
+    # stay but get a `filtered` marker the client/UI gates on.
+    |> Enum.reject(fn status ->
+      match = Map.get(actions, status.id)
+      match && match.action == "hide"
+    end)
+    |> Enum.map(fn status ->
       base = render(status, nil)
-      apply_viewer_overlay(base, Map.get(overlays, status.id, ViewerOverlay.empty()))
+
+      base
+      |> apply_viewer_overlay(Map.get(overlays, status.id, ViewerOverlay.empty()))
+      |> apply_filtered(Map.get(actions, status.id))
     end)
   end
 
@@ -107,8 +125,28 @@ defmodule AnglerWeb.MastodonAPI.Status do
       "poll" => render_poll(status),
       "media_attachments" => render_media(status),
       "account" => Account.render(status.profile),
-      "tags" => render_tags(status.status_hashtags)
+      "tags" => render_tags(status.status_hashtags),
+      "filtered" => []
     }
+  end
+
+  # Stamp the Mastodon `filtered` array from a matcher result. `nil` (no match)
+  # leaves the default empty list in place.
+  defp apply_filtered(rendered, nil), do: rendered
+
+  defp apply_filtered(rendered, %{action: action, title: title}) do
+    Map.put(rendered, "filtered", [
+      %{
+        "filter" => %{
+          "id" => "0",
+          "title" => title,
+          "filter_action" => action,
+          "context" => []
+        },
+        "keyword_matches" => [],
+        "status_matches" => []
+      }
+    ])
   end
 
   @doc """

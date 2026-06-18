@@ -3,6 +3,7 @@ defmodule Angler.Accounts.Settings do
   Read/write helpers around `Angler.Accounts.UserSettings`.
   """
 
+  alias Angler.Accounts.User
   alias Angler.Accounts.UserSettings
   alias Angler.Repo
 
@@ -123,5 +124,62 @@ defmodule Angler.Accounts.Settings do
   def set_app(user_id, common) when is_map(common) do
     row = get(user_id)
     row |> UserSettings.changeset(%{app: common}) |> Repo.update()
+  end
+
+  ## Default media license (Pixelfed compose-setting parity)
+
+  @doc """
+  The user's default media license id (integer). Falls back to `1`
+  (All Rights Reserved) when unset. The id is validated against
+  `Angler.Media.License` on write, so a stored value is always known.
+  """
+  @spec default_license(integer()) :: pos_integer()
+  def default_license(user_id) when is_integer(user_id) do
+    case get(user_id).account["default_license"] do
+      n when is_integer(n) -> n
+      s when is_binary(s) -> String.to_integer(s)
+      _ -> 1
+    end
+  end
+
+  @doc "Resolve a profile's owning user's default license id, or `1` if none."
+  @spec default_license_for_profile(integer()) :: pos_integer()
+  def default_license_for_profile(profile_id) when is_integer(profile_id) do
+    case Repo.get_by(User, profile_id: profile_id) do
+      %User{id: user_id} -> default_license(user_id)
+      _ -> 1
+    end
+  end
+
+  @doc """
+  Persist the user's default media license. `license_id` must be a known
+  `Angler.Media.License` id; otherwise `{:error, :invalid_license}`.
+  """
+  @spec set_default_license(integer(), integer() | String.t()) ::
+          {:ok, pos_integer()} | {:error, :invalid_license}
+  def set_default_license(user_id, license_id) when is_integer(user_id) do
+    id =
+      case license_id do
+        n when is_integer(n) ->
+          n
+
+        s when is_binary(s) ->
+          case Integer.parse(s) do
+            {n, _} -> n
+            :error -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    if id && Angler.Media.License.valid?(id) do
+      row = get(user_id)
+      account = Map.put(row.account || %{}, "default_license", id)
+      {:ok, _} = row |> UserSettings.changeset(%{account: account}) |> Repo.update()
+      {:ok, id}
+    else
+      {:error, :invalid_license}
+    end
   end
 end

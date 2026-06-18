@@ -98,6 +98,48 @@ defmodule AnglerWeb.OAuth.TokenControllerTest do
 
       assert json_response(resp, 400)["error"] == "invalid_request"
     end
+
+    test "401 mfa_required when 2FA is on and no otp", %{conn: conn} = ctx do
+      enable_totp!()
+
+      resp =
+        post(conn, ~p"/oauth/token", %{
+          "grant_type" => "password",
+          "client_id" => ctx.client_id,
+          "client_secret" => ctx.client_secret,
+          "username" => "alice@example.com",
+          "password" => "verysecret123"
+        })
+
+      assert json_response(resp, 401)["error"] == "mfa_required"
+    end
+
+    test "200 when a valid otp accompanies the password", %{conn: conn} = ctx do
+      secret = enable_totp!()
+
+      resp =
+        post(conn, ~p"/oauth/token", %{
+          "grant_type" => "password",
+          "client_id" => ctx.client_id,
+          "client_secret" => ctx.client_secret,
+          "username" => "alice@example.com",
+          "password" => "verysecret123",
+          "otp" => NimbleTOTP.verification_code(secret)
+        })
+
+      assert is_binary(json_response(resp, 200)["access_token"])
+    end
+  end
+
+  # Turn on TOTP for the seeded alice; returns the raw secret.
+  defp enable_totp! do
+    user = Accounts.get_by_email("alice@example.com")
+    secret = Angler.Accounts.TwoFactor.new_secret()
+
+    {:ok, _} =
+      Angler.Accounts.TwoFactor.enable(user, secret, NimbleTOTP.verification_code(secret))
+
+    secret
   end
 
   describe "POST /oauth/token grant_type=client_credentials" do

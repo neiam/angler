@@ -49,6 +49,20 @@ defmodule Angler.Statuses do
   ]
 
   @doc """
+  Every non-deleted status authored by `profile_id` (all visibilities, including
+  replies), oldest first, with render associations preloaded. Backs the account
+  data export — the caller serializes each to an ActivityPub object.
+  """
+  @spec list_for_export(integer()) :: [Status.t()]
+  def list_for_export(profile_id) when is_integer(profile_id) do
+    Status
+    |> where([s], s.profile_id == ^profile_id and is_nil(s.deleted_at))
+    |> order_by([s], asc: s.id)
+    |> preload(^@profile_page_preloads)
+    |> Repo.all()
+  end
+
+  @doc """
   A page of top-level statuses for a profile page, newest first, with render
   associations preloaded. Cursor-paginated via `:max_id` (returns rows with
   `id < max_id`).
@@ -620,6 +634,7 @@ defmodule Angler.Statuses do
           if reblog.remote_url == activity_id do
             inc_counter(status.id, :reblogs_count, 1)
             maybe_deliver_interaction(:announce, actor, status, activity_id)
+            Angler.Timelines.Workers.FeedInsert.enqueue_reblog(status.id, actor.id)
 
             Notifications.notify(%{
               recipient_id: status.profile_id,
@@ -654,6 +669,44 @@ defmodule Angler.Statuses do
 
         {:ok, get!(status.id)}
     end
+  end
+
+  @doc """
+  Profiles who favourited `status_id`, newest first. Backs the "who liked this"
+  disclosure on the web detail page.
+  """
+  @spec list_likers(integer(), keyword()) :: [Profile.t()]
+  def list_likers(status_id, opts \\ []) when is_integer(status_id) do
+    limit = Keyword.get(opts, :limit, 60)
+
+    from(l in Angler.Likes.Like,
+      where: l.status_id == ^status_id,
+      join: p in Profile,
+      on: p.id == l.profile_id,
+      order_by: [desc: l.id],
+      limit: ^limit,
+      select: p
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Profiles who reblogged/boosted `status_id`, newest first. Backs the "who
+  boosted this" disclosure on the web detail page.
+  """
+  @spec list_boosters(integer(), keyword()) :: [Profile.t()]
+  def list_boosters(status_id, opts \\ []) when is_integer(status_id) do
+    limit = Keyword.get(opts, :limit, 60)
+
+    from(r in Angler.Reblogs.Reblog,
+      where: r.status_id == ^status_id,
+      join: p in Profile,
+      on: p.id == r.profile_id,
+      order_by: [desc: r.id],
+      limit: ^limit,
+      select: p
+    )
+    |> Repo.all()
   end
 
   ## Internals

@@ -406,7 +406,28 @@ defmodule Angler.OAuth do
         {:error, :invalid_grant}
 
       true ->
-        issue_token(user, client, Keyword.put(opts, :scopes, scopes))
+        case verify_second_factor(user, opts[:otp]) do
+          :ok -> issue_token(user, client, Keyword.put(opts, :scopes, scopes))
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  # When the account has a second factor, the password grant additionally
+  # requires a TOTP or recovery code passed as `otp`. WebAuthn can't run over a
+  # non-interactive token POST, but enrolling any factor always mints recovery
+  # codes, so a key-only user can still pass one here. Returns `:mfa_required`
+  # when the code is absent so the client can prompt for it.
+  defp verify_second_factor(user, otp) do
+    if Angler.Accounts.TwoFactor.any_factor?(user) do
+      cond do
+        otp in [nil, ""] -> {:error, :mfa_required}
+        Angler.Accounts.TwoFactor.verify_code(user, otp) == :ok -> :ok
+        Angler.Accounts.TwoFactor.verify_recovery_code(user, otp) == :ok -> :ok
+        true -> {:error, :invalid_grant}
+      end
+    else
+      :ok
     end
   end
 

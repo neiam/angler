@@ -8,7 +8,7 @@ defmodule Angler.Filters.Filter do
   alias Angler.Profiles.Profile
 
   @contexts ~w(home notifications public thread account)
-  @actions ~w(warn hide)
+  @actions ~w(blur warn hide)
 
   @primary_key {:id, :integer, autogenerate: false}
   schema "filters" do

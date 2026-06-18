@@ -4,6 +4,7 @@ defmodule AnglerWeb.MastodonAPI.Media do
   """
 
   alias Angler.Media.Asset
+  alias Angler.Media.License
   alias Angler.Media.Storage
 
   @default_blurhash "U4Rfzst8?bt7ogayj[j[~pfQ9Goe%Mj[WBay"
@@ -18,7 +19,8 @@ defmodule AnglerWeb.MastodonAPI.Media do
       "remote_url" => m.remote_url,
       "text_url" => asset_url(m),
       "description" => m.caption,
-      "blurhash" => m.blurhash || @default_blurhash
+      "blurhash" => m.blurhash || @default_blurhash,
+      "license" => render_license(m.license)
     }
 
     if m.width && m.height do
@@ -48,6 +50,17 @@ defmodule AnglerWeb.MastodonAPI.Media do
     do: Storage.url(m, :preview) || url
 
   defp preview_url(m), do: Storage.url(m, :preview) || Storage.url(m, :original)
+
+  # Pixelfed-shape license object (`{id, title, url}`) or `nil` for
+  # All Rights Reserved / unset, matching Pixelfed's `MediaTransformer`.
+  defp render_license(nil), do: nil
+
+  defp render_license(license) do
+    case License.get(license) do
+      nil -> nil
+      %{id: id, title: title, url: url} -> %{"id" => id, "title" => title, "url" => url}
+    end
+  end
 
   defp mastodon_type("image/gif"), do: "gifv"
   defp mastodon_type("image/" <> _), do: "image"

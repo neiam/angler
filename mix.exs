@@ -71,7 +71,10 @@ defmodule Angler.MixProject do
       {:oban, "~> 2.18"},
       {:mogrify, "~> 0.9"},
       {:blurhash, "~> 2.0"},
-      {:web_push_encryption, "~> 0.3"}
+      {:web_push_encryption, "~> 0.3"},
+      {:nimble_totp, "~> 1.0"},
+      {:eqrcode, "~> 0.2.1"},
+      {:wax_, "~> 0.7.0"}
     ]
   end
 

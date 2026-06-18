@@ -105,7 +105,7 @@ defmodule AnglerWeb.IndexLive do
     {posts, topic} = fetch(feed)
     if connected? and topic, do: Streaming.subscribe(topic)
     viewer_id = socket.assigns.current_profile && socket.assigns.current_profile.id
-    rendered = StatusJSON.render_many(posts, viewer_id)
+    rendered = StatusJSON.render_many(posts, viewer_id, context: "public")
 
     socket =
       socket

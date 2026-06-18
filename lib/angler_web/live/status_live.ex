@@ -13,6 +13,7 @@ defmodule AnglerWeb.StatusLive do
   alias Angler.Statuses.Status
   alias Angler.Statuses.Workers.StatusDeliver
   alias Angler.Timelines.Workers.FeedInsert
+  alias AnglerWeb.MastodonAPI.Account, as: AccountJSON
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
 
   @impl true
@@ -23,8 +24,12 @@ defmodule AnglerWeb.StatusLive do
          %Status{} = status <- Statuses.get(int_id),
          true <- status.profile && status.profile.username == username,
          true <- Statuses.visible_to?(status, viewer_id) do
-      rendered = StatusJSON.render(status, viewer_id)
-      comments = status |> Statuses.descendants(viewer_id) |> StatusJSON.render_many(viewer_id)
+      rendered = StatusJSON.render(status, viewer_id, context: "thread")
+
+      comments =
+        status
+        |> Statuses.descendants(viewer_id)
+        |> StatusJSON.render_many(viewer_id, context: "thread")
 
       {:ok,
        socket
@@ -32,7 +37,9 @@ defmodule AnglerWeb.StatusLive do
        |> assign(:status, rendered)
        |> assign(:comments, comments)
        |> assign(:reply_form, reply_form())
-       |> assign(:open_reply, nil)}
+       |> assign(:open_reply, nil)
+       |> assign(:open_interactions, nil)
+       |> assign(:interaction_accounts, [])}
     else
       _ ->
         {:ok,
@@ -41,7 +48,9 @@ defmodule AnglerWeb.StatusLive do
          |> assign(:status, nil)
          |> assign(:comments, [])
          |> assign(:reply_form, reply_form())
-         |> assign(:open_reply, nil)}
+         |> assign(:open_reply, nil)
+         |> assign(:open_interactions, nil)
+         |> assign(:interaction_accounts, [])}
     end
   end
 
@@ -54,6 +63,28 @@ defmodule AnglerWeb.StatusLive do
   def handle_event("toggle_reply", %{"id" => id}, socket) do
     open = if socket.assigns.open_reply == id, do: nil, else: id
     {:noreply, assign(socket, :open_reply, open)}
+  end
+
+  # Reveal / hide the list of accounts who liked or boosted the main post.
+  # The list is loaded lazily the first time a panel is opened.
+  def handle_event("toggle_interactions", %{"type" => type}, socket)
+      when type in ["likes", "boosts"] do
+    if socket.assigns.open_interactions == type do
+      {:noreply, socket |> assign(:open_interactions, nil) |> assign(:interaction_accounts, [])}
+    else
+      status_id = String.to_integer(socket.assigns.status["id"])
+
+      profiles =
+        case type do
+          "likes" -> Statuses.list_likers(status_id)
+          "boosts" -> Statuses.list_boosters(status_id)
+        end
+
+      {:noreply,
+       socket
+       |> assign(:open_interactions, type)
+       |> assign(:interaction_accounts, AccountJSON.render_many(profiles))}
+    end
   end
 
   def handle_event("reply", %{"reply" => %{"body" => body, "parent_id" => parent_id}}, socket) do
@@ -132,6 +163,48 @@ defmodule AnglerWeb.StatusLive do
     ~H"""
     <Layouts.app flash={@flash} current_user={@current_user} current_profile={@current_profile}>
       <.post_card status={@status} current_user={@current_user} />
+
+      <div class="mt-2 flex items-center gap-4 text-xs text-base-content/60">
+        <button
+          type="button"
+          phx-click="toggle_interactions"
+          phx-value-type="likes"
+          class={[
+            "flex items-center gap-1 hover:text-error",
+            @open_interactions == "likes" && "text-error font-medium"
+          ]}
+          title="Show who liked this"
+        >
+          <.icon name="hero-magnifying-glass-micro" class="size-4" />
+          <.icon name="hero-heart-micro" class="size-4" />
+          {@status["favourites_count"] || 0}
+        </button>
+        <button
+          type="button"
+          phx-click="toggle_interactions"
+          phx-value-type="boosts"
+          class={[
+            "flex items-center gap-1 hover:text-success",
+            @open_interactions == "boosts" && "text-success font-medium"
+          ]}
+          title="Show who boosted this"
+        >
+          <.icon name="hero-magnifying-glass-micro" class="size-4" />
+          <.icon name="hero-arrow-path-rounded-square-micro" class="size-4" />
+          {@status["reblogs_count"] || 0}
+        </button>
+      </div>
+
+      <div :if={@open_interactions} class="mt-2 space-y-2">
+        <p class="text-xs font-semibold text-base-content/70">
+          {if @open_interactions == "likes", do: "Liked by", else: "Boosted by"}
+        </p>
+        <p :if={@interaction_accounts == []} class="text-sm text-base-content/50">
+          Nobody yet.
+        </p>
+        <.account_row :for={account <- @interaction_accounts} account={account} />
+      </div>
+
       <div class="mt-2 text-xs text-base-content/50">
         <%= if local_account?(@status["account"]) do %>
           Permalink: <a href={@status["url"]} class="link link-hover">{@status["url"]}</a>

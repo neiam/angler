@@ -24,6 +24,7 @@ defmodule AnglerWeb.PublicComponents do
       assigns
       |> assign(:account, assigns.status["account"] || %{})
       |> assign(:media, assigns.status["media_attachments"] || [])
+      |> assign(:filtered, filtered_info(assigns.status))
 
     ~H"""
     <article id={@id} class="card bg-base-200 border border-base-300">
@@ -47,15 +48,22 @@ defmodule AnglerWeb.PublicComponents do
           </.link>
         </header>
 
-        <div :if={@status["spoiler_text"] not in [nil, ""]} class="text-sm font-medium">
-          {@status["spoiler_text"]}
-        </div>
-
-        <div :if={@status["content"] not in [nil, ""]} class="prose prose-sm max-w-none break-words">
-          {raw(@status["content"])}
-        </div>
-
-        <.media_grid :if={@media != []} media={@media} sensitive={@status["sensitive"]} />
+        <%= if @filtered do %>
+          <details class="rounded-box overflow-hidden border border-warning/40">
+            <summary class="cursor-pointer bg-base-300 px-3 py-2 text-sm">
+              <.icon name="hero-eye-slash-micro" class="size-4" />
+              Filtered: {@filtered.title} — click to show
+            </summary>
+            <div class={[
+              "space-y-3 p-2",
+              @filtered.action == "blur" && "blur-sm transition hover:blur-none"
+            ]}>
+              <.post_body status={@status} media={@media} />
+            </div>
+          </details>
+        <% else %>
+          <.post_body status={@status} media={@media} />
+        <% end %>
 
         <footer class="flex items-center gap-4 text-xs text-base-content/60">
           <.link
@@ -106,6 +114,33 @@ defmodule AnglerWeb.PublicComponents do
     </article>
     """
   end
+
+  # The caption + media of a post, shared by the plain and filtered renders.
+  attr :status, :map, required: true
+  attr :media, :list, required: true
+
+  defp post_body(assigns) do
+    ~H"""
+    <div :if={@status["spoiler_text"] not in [nil, ""]} class="text-sm font-medium">
+      {@status["spoiler_text"]}
+    </div>
+
+    <div :if={@status["content"] not in [nil, ""]} class="prose prose-sm max-w-none break-words">
+      {raw(@status["content"])}
+    </div>
+
+    <.media_grid :if={@media != []} media={@media} sensitive={@status["sensitive"]} />
+    """
+  end
+
+  # Pull the first Mastodon `filtered` entry into a compact `%{action, title}`
+  # the card gates on. `hide`-action posts never reach the client, so only
+  # `warn`/`blur` show up here.
+  defp filtered_info(%{"filtered" => [%{"filter" => filter} | _]}) do
+    %{action: filter["filter_action"] || "warn", title: filter["title"] || "filtered"}
+  end
+
+  defp filtered_info(_), do: nil
 
   @doc "Avatar image with an initials fallback when no avatar is set."
   attr :account, :map, required: true

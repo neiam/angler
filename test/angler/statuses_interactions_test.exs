@@ -206,4 +206,55 @@ defmodule Angler.StatusesInteractionsTest do
       )
     end
   end
+
+  ## Liker / booster lists
+
+  describe "list_likers/2" do
+    test "returns the profiles who favourited, newest first" do
+      alice = local!("alice")
+      bob = local!("bob")
+      carol = local!("carol")
+      s = local_status!(carol)
+
+      Statuses.favourite(alice, s)
+      Statuses.favourite(bob, s)
+
+      ids = s.id |> Statuses.list_likers() |> Enum.map(& &1.id)
+      assert ids == [bob.id, alice.id]
+    end
+
+    test "empty when nobody liked" do
+      s = local_status!(local!("carol"))
+      assert Statuses.list_likers(s.id) == []
+    end
+
+    test "respects the limit option" do
+      bob = local!("bob")
+      s = local_status!(bob)
+      Statuses.favourite(local!("alice"), s)
+      Statuses.favourite(local!("carol"), s)
+
+      assert length(Statuses.list_likers(s.id, limit: 1)) == 1
+    end
+  end
+
+  describe "list_boosters/2" do
+    test "returns the profiles who reblogged, newest first" do
+      alice = local!("alice")
+      bob = local!("bob")
+      carol = local!("carol")
+      s = local_status!(carol)
+
+      Statuses.reblog(alice, s)
+      Statuses.reblog(bob, s)
+
+      ids = s.id |> Statuses.list_boosters() |> Enum.map(& &1.id)
+      assert ids == [bob.id, alice.id]
+    end
+
+    test "empty when nobody boosted" do
+      s = local_status!(local!("carol"))
+      assert Statuses.list_boosters(s.id) == []
+    end
+  end
 end

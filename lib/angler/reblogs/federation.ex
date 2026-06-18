@@ -19,6 +19,7 @@ defmodule Angler.Reblogs.Federation do
              remote_url: activity_id
            }) do
       Statuses.inc_counter(status.id, :reblogs_count)
+      Angler.Timelines.Workers.FeedInsert.enqueue_reblog(status.id, profile.id)
 
       Notifications.notify(%{
         recipient_id: status.profile_id,
