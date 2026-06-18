@@ -34,9 +34,9 @@ defmodule Angler.Pagination.MastodonCursor do
   @spec parse(map(), pos_integer(), pos_integer()) :: cursor()
   def parse(params, default_limit, max_limit) when is_map(params) do
     %{
-      max_id: parse_int(params["max_id"]),
-      min_id: parse_int(params["min_id"]),
-      since_id: parse_int(params["since_id"]),
+      max_id: parse_cursor_id(params["max_id"]),
+      min_id: parse_cursor_id(params["min_id"]),
+      since_id: parse_cursor_id(params["since_id"]),
       limit: clamp_limit(parse_int(params["limit"]) || default_limit, max_limit)
     }
   end
@@ -118,6 +118,16 @@ defmodule Angler.Pagination.MastodonCursor do
   end
 
   ## Internals
+
+  # Cursor ids are positive snowflakes; clients (e.g. pixelfed-rn) send `0` as
+  # the initial page param to mean "from the start". Treat any non-positive id
+  # as unset so we don't emit `where id < 0` and return an empty first page.
+  defp parse_cursor_id(v) do
+    case parse_int(v) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> nil
+    end
+  end
 
   defp parse_int(nil), do: nil
   defp parse_int(""), do: nil
