@@ -200,5 +200,38 @@ defmodule AnglerWeb.MastodonAPI.TimelineControllerTest do
 
       assert json_response(conn, 200) == []
     end
+
+    test "max_id paginates against the status snowflake, not the join PK", ctx do
+      tag = Angler.Hashtags.ensure!("photography")
+
+      statuses =
+        for _ <- 1..3 do
+          s = insert_status!(ctx.alice)
+
+          Repo.insert!(%Angler.Statuses.StatusHashtag{
+            status_id: s.id,
+            hashtag_id: tag.id,
+            profile_id: ctx.alice.id,
+            status_visibility: "public",
+            inserted_at: DateTime.utc_now()
+          })
+
+          s
+        end
+
+      [_oldest, mid, newest] = Enum.sort_by(statuses, & &1.id)
+
+      # Page from the newest status: only ids strictly below max_id come back,
+      # newest-first. If the cursor were applied to status_hashtags.id this would
+      # wrongly return everything (or the same page forever).
+      conn =
+        ctx.conn
+        |> put_req_header("authorization", "Bearer " <> ctx.bearer)
+        |> get(~p"/api/v1/timelines/tag/photography?max_id=#{newest.id}")
+
+      ids = json_response(conn, 200) |> Enum.map(& &1["id"])
+      refute Integer.to_string(newest.id) in ids
+      assert hd(ids) == Integer.to_string(mid.id)
+    end
   end
 end

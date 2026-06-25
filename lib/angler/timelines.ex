@@ -84,13 +84,18 @@ defmodule Angler.Timelines do
   def hashtag(name, cursor, opts \\ []) when is_binary(name) and is_map(cursor) do
     name = name |> String.downcase() |> String.trim_leading("#")
 
+    # Status must be the FIRST binding: MastodonCursor.apply/3, filter_local/2
+    # and filter_only_media/2 all operate on the leading `[s]` binding. Starting
+    # from StatusHashtag instead made the cursor compare `max_id` against the
+    # join row's PK (a small auto-increment) rather than the status snowflake —
+    # so `id < max_id` was always true and the timeline never paginated.
     base =
-      from sh in StatusHashtag,
-        join: s in Status,
-        on: s.id == sh.status_id and is_nil(s.deleted_at),
+      from s in Status,
+        join: sh in StatusHashtag,
+        on: sh.status_id == s.id,
         join: h in Angler.Hashtags.Hashtag,
         on: h.id == sh.hashtag_id,
-        where: h.name == ^name and s.visibility in [:public, :unlisted],
+        where: h.name == ^name and s.visibility in [:public, :unlisted] and is_nil(s.deleted_at),
         select: s
 
     base = filter_local(base, opts)
