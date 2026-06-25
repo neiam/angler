@@ -38,6 +38,7 @@ defmodule AnglerWeb.Plugs.BearerAuth do
   @behaviour Plug
 
   import Plug.Conn
+  require Logger
 
   alias Angler.Accounts
   alias Angler.Auth.Scope
@@ -122,6 +123,15 @@ defmodule AnglerWeb.Plugs.BearerAuth do
     if Enum.all?(required, &Scope.has_scope?(scope, &1)) do
       conn
     else
+      # A 403 here is invisible to clients like pixelfed-rn that swallow the
+      # response body (a denied "follow" just looks like nothing happened), so
+      # leave a breadcrumb: what was needed vs. what the token actually carries.
+      Logger.warning(
+        "bearer_auth: insufficient scope for #{conn.method} #{conn.request_path} " <>
+          "(required=#{inspect(required)} granted=#{inspect(scope.scopes)} " <>
+          "profile_id=#{scope.profile && scope.profile.id})"
+      )
+
       forbidden(conn)
     end
   end

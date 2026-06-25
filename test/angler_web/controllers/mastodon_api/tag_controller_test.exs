@@ -18,7 +18,12 @@ defmodule AnglerWeb.MastodonAPI.TagControllerTest do
     {:ok, %{access: write}} = OAuth.issue_token(user, client, scopes: ["write"])
     {:ok, %{access: read}} = OAuth.issue_token(user, client, scopes: ["read"])
 
-    %{alice: alice, write: write, read: read}
+    # pixelfed-rn registers its app with exactly these scopes and follow runs
+    # through the :authenticated_write pipeline.
+    {:ok, %{access: mobile}} =
+      OAuth.issue_token(user, client, scopes: ["read", "write", "follow", "push"])
+
+    %{alice: alice, write: write, read: read, mobile: mobile}
   end
 
   defp auth(conn, token), do: put_req_header(conn, "authorization", "Bearer " <> token)
@@ -61,6 +66,18 @@ defmodule AnglerWeb.MastodonAPI.TagControllerTest do
       unfollow = ctx.conn |> auth(ctx.write) |> post(~p"/api/v1/tags/nature/unfollow")
       assert json_response(unfollow, 200)["following"] == false
       refute Following.following?(ctx.alice.id, tag.id)
+    end
+
+    test "mobile-scoped token (read write follow push) can follow, and show reflects it", ctx do
+      # Mirrors the app exactly: POST by tag name, then re-read with ?_pe=1.
+      follow = ctx.conn |> auth(ctx.mobile) |> post(~p"/api/v1/tags/nature/follow")
+      assert json_response(follow, 200)["following"] == true
+
+      show = ctx.conn |> auth(ctx.mobile) |> get(~p"/api/v1/tags/nature?_pe=1")
+      assert json_response(show, 200)["following"] == true
+
+      unfollow = ctx.conn |> auth(ctx.mobile) |> post(~p"/api/v1/tags/nature/unfollow")
+      assert json_response(unfollow, 200)["following"] == false
     end
 
     test "follow is idempotent", ctx do
