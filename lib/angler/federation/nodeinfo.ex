@@ -10,11 +10,14 @@ defmodule Angler.Federation.Nodeinfo do
   import Ecto.Query, only: [from: 2]
   alias Angler.Repo
 
-  # We report ourselves as `angler` (our own name + version) in the `software`
-  # block, and advertise the Pixelfed API level we implement under
-  # `metadata.compatible` so Pixelfed-aware peers and clients can still detect
-  # the compatibility surface.
-  @pixelfed_compat "0.12.5"
+  # The top-level `software` block reports the Pixelfed API surface we implement
+  # (`name: "pixelfed"`, a >= 0.12.3 version). The pixelfed-rn mobile app gates
+  # login on `software.name == "pixelfed"` AND `software.version >= 0.12.3` in
+  # its nodeinfo preflight, with no "compatible" fallback — reporting `angler`
+  # here makes it refuse to connect ("Invalid or outdated version"). Angler's
+  # real identity + version live under `metadata.software` (and the Pixelfed
+  # level is echoed in `metadata.compatible`) for peers that look deeper.
+  @pixelfed_compat "0.12.7"
 
   # Angler's version, read from the loaded application (works in releases where
   # Mix isn't available).
@@ -43,8 +46,8 @@ defmodule Angler.Federation.Nodeinfo do
     %{
       "version" => "2.0",
       "software" => %{
-        "name" => "angler",
-        "version" => version()
+        "name" => "pixelfed",
+        "version" => @pixelfed_compat
       },
       "protocols" => ["activitypub"],
       "services" => %{"outbound" => [], "inbound" => []},

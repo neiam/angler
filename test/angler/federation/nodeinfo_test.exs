@@ -18,12 +18,16 @@ defmodule Angler.Federation.NodeinfoTest do
       doc = Nodeinfo.document()
 
       assert doc["version"] == "2.0"
-      assert doc["software"]["name"] == "angler"
-      assert doc["software"]["version"] == Nodeinfo.version()
-      assert is_binary(doc["software"]["version"])
+      # Top-level software reports the Pixelfed API surface so the pixelfed-rn
+      # app's nodeinfo preflight (name == "pixelfed" && version >= 0.12.3) passes.
+      assert doc["software"]["name"] == "pixelfed"
+      assert doc["software"]["version"] == "0.12.7"
       assert doc["protocols"] == ["activitypub"]
-      # Pixelfed compatibility is advertised in metadata, not as the software name.
-      assert doc["metadata"]["compatible"]["pixelfed"] == "0.12.5"
+      # Angler's real identity + version live under metadata.software.
+      assert doc["metadata"]["software"]["name"] == "Angler"
+      assert doc["metadata"]["software"]["version"] == Nodeinfo.version()
+      assert is_binary(doc["metadata"]["software"]["version"])
+      assert doc["metadata"]["compatible"]["pixelfed"] == "0.12.7"
 
       usage = doc["usage"]
       assert is_map(usage["users"])
