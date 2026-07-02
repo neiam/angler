@@ -8,7 +8,7 @@ import Config
 config :angler, Angler.Repo,
   username: "postgres",
   password: "postgres",
-  hostname: "localhost",
+  hostname: System.get_env("POSTGRES_HOST") || "localhost",
   port: String.to_integer(System.get_env("POSTGRES_PORT") || "5432"),
   database: "angler_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
