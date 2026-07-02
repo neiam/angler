@@ -13,6 +13,10 @@ jobs:
     # requires the runner to support service containers (Docker/dind).
     runs-on: arc-runner-set
     env:
+      # setup-beam picks prebuilt OTP/Elixir by ImageOS. The arc-runner-set
+      # label makes the runner inject an unmappable ImageOS (arcrunner-set),
+      # so pin it here where the runner can't clobber it.
+      ImageOS: ubuntu24
       MIX_ENV: test
       # Cap the test DB pool (and, via test_helper, ExUnit's max_cases) below
       # the Postgres service's default max_connections (100). Big CI runners
