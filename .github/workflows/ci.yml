@@ -39,13 +39,9 @@ jobs:
       #   imagemagick (identify/convert/mogrify) + ffmpeg (ffmpeg/ffprobe) —
       #     the media pipeline shells out to these (Angler.Media.Workers.ImageProcess)
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make build-essential imagemagick ffmpeg
-      # act derives ImageOS from the runs-on label (arc-runner-set) and
-      # overrides job/workflow env, so set it via $GITHUB_ENV where
-      # setup-beam will read it. See erlef/setup-beam#447.
-      - run: echo "ImageOS=ubuntu24" >> "$GITHUB_ENV"
-
-
-      - uses: erlef/setup-beam@v1
+      # Forge fork of erlef/setup-beam: defaults ImageOS to ubuntu-24.04,
+      # since forgejo/act injects an unmappable ImageOS from the runs-on label.
+      - uses: https://gg.neiam.co/neiam/action-setup-beam@v1
         with:
           # Match the build image in the Dockerfile.
           elixir-version: "1.19.5"
