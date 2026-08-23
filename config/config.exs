@@ -76,6 +76,20 @@ config :angler, Angler.Accounts.Secrets,
 # Two-factor policy. `required: true` enforces enrollment after a grace period.
 config :angler, Angler.Accounts.TwoFactor, required: false
 
+# Prometheus metrics, exposed on port 9568 by Angler.MetricsPlug and scraped
+# from the pod annotations in argo-01-bos/angler/app.yml.
+#
+# `grafana: :disabled` is load-bearing, not boilerplate: PromEx would otherwise
+# upload its own dashboards on boot, and the dashboards for this fleet are
+# committed in deployment/grafana and pushed from there. `metrics_server:
+# :disabled` because that option is Cowboy-based — see Angler.MetricsPlug.
+config :angler, Angler.PromEx,
+  disabled: false,
+  manual_metrics_start_delay: :no_delay,
+  drop_metrics_groups: [],
+  grafana: :disabled,
+  metrics_server: :disabled
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

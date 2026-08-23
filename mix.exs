@@ -63,6 +63,12 @@ defmodule Angler.MixProject do
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
+      # Pinned to a minor, not just a major: the metric names these six apps
+      # share are what makes one dashboard describe all of them, and a
+      # plugin rename between minors would only show up as an empty panel.
+      # 1.12 wants ecto >= 3.14, which angler's lock does not have — lift
+      # this across the whole fleet at once or not at all.
+      {:prom_ex, "~> 1.11.0"},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},

@@ -12,6 +12,9 @@ defmodule Angler.Application do
     children =
       [
         AnglerWeb.Telemetry,
+        Angler.PromEx,
+        # The metrics listener, on its own port — see Angler.MetricsPlug.
+        {Bandit, plug: Angler.MetricsPlug, scheme: :http, port: 9568},
         Angler.Repo
       ] ++
         migrator_children() ++
