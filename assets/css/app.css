@@ -30,12 +30,20 @@
   --color-base-200: oklch(25.26% 0.014 253.1);
   --color-base-300: oklch(20.15% 0.012 254.09);
   --color-base-content: oklch(97.807% 0.029 256.847);
-  --color-primary: oklch(58% 0.233 277.117);
-  --color-primary-content: oklch(96% 0.018 272.314);
-  --color-secondary: oklch(58% 0.233 277.117);
-  --color-secondary-content: oklch(96% 0.018 272.314);
-  --color-accent: oklch(60% 0.25 292.717);
-  --color-accent-content: oklch(96% 0.016 293.756);
+  --color-primary: oklch(64% 0.076 19);
+  --color-primary-content: oklch(10% 0.010 19);
+  --color-secondary: oklch(58% 0.090 19);
+  --color-secondary-content: oklch(98% 0.010 19);
+  /* Dark rose, in the same hue family as primary/secondary (~15-19) rather
+     than the violet daisyUI ships. This is what `text-accent` paints: the
+     eyebrow over the headline, the feature icons and the step numbers. It
+     has to stay light enough to read against base-100 at 30% lightness, so
+     "dark rose" here is depth of hue and restraint of chroma, not a low
+     lightness -- a genuinely dark rose would be illegible on this ground.
+     Chroma sits above primary's 0.076 so an accent still reads as one.
+     The content colour follows primary, which is the same lightness. */
+  --color-accent: oklch(64% 0.135 15);
+  --color-accent-content: oklch(10% 0.012 15);
   --color-neutral: oklch(37% 0.044 257.287);
   --color-neutral-content: oklch(98% 0.003 247.858);
   --color-info: oklch(58% 0.158 241.966);
@@ -61,14 +69,14 @@
   default: true;
   prefersdark: false;
   color-scheme: "light";
-  --color-base-100: oklch(98% 0 0);
-  --color-base-200: oklch(96% 0.001 286.375);
-  --color-base-300: oklch(92% 0.004 286.32);
-  --color-base-content: oklch(21% 0.006 285.885);
-  --color-primary: oklch(70% 0.213 47.604);
-  --color-primary-content: oklch(98% 0.016 73.684);
-  --color-secondary: oklch(55% 0.027 264.364);
-  --color-secondary-content: oklch(98% 0.002 247.839);
+  --color-base-100: oklch(98% 0.008 24);
+  --color-base-200: oklch(96% 0.014 24);
+  --color-base-300: oklch(92% 0.022 24);
+  --color-base-content: oklch(25% 0.050 24);
+  --color-primary: oklch(64% 0.076 19);
+  --color-primary-content: oklch(98% 0.010 19);
+  --color-secondary: oklch(55% 0.060 19);
+  --color-secondary-content: oklch(98% 0.010 19);
   --color-accent: oklch(0% 0 0);
   --color-accent-content: oklch(100% 0 0);
   --color-neutral: oklch(44% 0.017 285.786);

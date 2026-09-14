@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html
+  lang="en"
+  data-system-light={Angler.Themes.system_light()}
+  data-system-dark={Angler.Themes.system_dark()}
+>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -12,20 +16,24 @@
     </script>
     <script>
       (() => {
-        const SYSTEM_DARK = "blueprint";
-        const SYSTEM_LIGHT = "blueprint";
+        // Read off <html> rather than written here: HEEx does not
+        // interpolate inside a <script>, it emits the expression verbatim.
+        // Angler.Themes is the one place the pair is named.
+        const root = document.documentElement;
+        const SYSTEM_DARK = root.dataset.systemDark;
+        const SYSTEM_LIGHT = root.dataset.systemLight;
         const mq = window.matchMedia("(prefers-color-scheme: dark)");
         const systemTheme = () => mq.matches ? SYSTEM_DARK : SYSTEM_LIGHT;
         const setTheme = (theme) => {
           if (theme === "system") {
             localStorage.removeItem("phx:theme");
-            document.documentElement.setAttribute("data-theme", systemTheme());
+            root.setAttribute("data-theme", systemTheme());
           } else {
             localStorage.setItem("phx:theme", theme);
-            document.documentElement.setAttribute("data-theme", theme);
+            root.setAttribute("data-theme", theme);
           }
         };
-        if (!document.documentElement.hasAttribute("data-theme")) {
+        if (!root.hasAttribute("data-theme")) {
           setTheme(localStorage.getItem("phx:theme") || "system");
         }
         mq.addEventListener("change", () => {

@@ -21,6 +21,21 @@ defmodule Angler.Themes do
   @spec default() :: theme()
   def default, do: "blueprint"
 
+  @doc """
+  The pair "system" resolves to, following the OS preference.
+
+  These are the two themes actually named `light` and `dark` — the ones
+  daisyUI declares with a matching `color-scheme`, so form controls,
+  scrollbars and the like are rendered by the browser to match. Any of the
+  other themes can be chosen explicitly; only these two are picked
+  automatically.
+  """
+  @spec system_light() :: theme()
+  def system_light, do: "light"
+
+  @spec system_dark() :: theme()
+  def system_dark, do: "dark"
+
   @spec valid?(theme()) :: boolean()
   def valid?(theme) when is_binary(theme), do: theme in all() or theme == "system"
   def valid?(_), do: false
