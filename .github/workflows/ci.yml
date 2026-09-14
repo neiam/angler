@@ -14,6 +14,10 @@ jobs:
     runs-on: arc-runner-set
     env:
       MIX_ENV: test
+      # Under forgejo-runner/act the job runs in a container, so the postgres
+      # service is reached by its service name, not localhost (which works on
+      # GitHub-hosted runners).
+      POSTGRES_HOST: postgres
       # Cap the test DB pool (and, via test_helper, ExUnit's max_cases) below
       # the Postgres service's default max_connections (100). Big CI runners
       # otherwise scale the pool to cores × 2 and exhaust connections.
@@ -39,8 +43,9 @@ jobs:
       #   imagemagick (identify/convert/mogrify) + ffmpeg (ffmpeg/ffprobe) —
       #     the media pipeline shells out to these (Angler.Media.Workers.ImageProcess)
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make build-essential imagemagick ffmpeg
-
-      - uses: erlef/setup-beam@v1
+      # Forge fork of erlef/setup-beam: defaults ImageOS to ubuntu-24.04,
+      # since forgejo/act injects an unmappable ImageOS from the runs-on label.
+      - uses: https://gg.neiam.co/neiam/action-setup-beam@v1
         with:
           # Match the build image in the Dockerfile.
           elixir-version: "1.19.5"
@@ -82,8 +87,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.GHCR_USER || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
@@ -123,5 +128,3 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
