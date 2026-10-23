@@ -1,10 +1,10 @@
 defmodule Angler.Push.Vapid do
   @moduledoc """
-  Helper around `:web_push_encryption`'s VAPID config.
+  Helper around the instance's VAPID config.
 
-  At runtime we read from `config :web_push_encryption, :vapid_details` —
-  set in `runtime.exs` from environment variables (`VAPID_PUBLIC_KEY`,
-  `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`). When the keys aren't configured,
+  At runtime we read from `config :angler, :vapid_details` —
+  set in `runtime.exs` from environment variables (`PUSH_VAPID_PUBLIC_KEY`,
+  `PUSH_VAPID_PRIVATE_KEY`, `PUSH_VAPID_SUBJECT`). When the keys aren't configured,
   `enabled?/0` returns false and push delivery becomes a no-op.
 
   `generate/0` produces a fresh ES256 keypair URL-safe-base64-encoded —
@@ -25,7 +25,7 @@ defmodule Angler.Push.Vapid do
   def public_key, do: get_key(:public_key)
 
   defp get_key(k) do
-    case Application.get_env(:web_push_encryption, :vapid_details) do
+    case Application.get_env(:angler, :vapid_details) do
       v when is_list(v) -> Keyword.get(v, k)
       v when is_map(v) -> Map.get(v, k)
       _ -> nil

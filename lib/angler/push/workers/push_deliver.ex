@@ -165,6 +165,6 @@ defmodule Angler.Push.Workers.PushDeliver do
   defp raw_token_for_token(payload, _token), do: payload
 
   defp sender do
-    Application.get_env(:angler, :push_sender, Angler.Push.Sender.WebPushEncryption)
+    Application.get_env(:angler, :push_sender, Angler.Push.Sender.WebPush)
   end
 end

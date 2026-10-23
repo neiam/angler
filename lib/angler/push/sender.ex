@@ -2,8 +2,8 @@ defmodule Angler.Push.Sender do
   @moduledoc """
   Behaviour around the actual WebPush HTTP send. Two impls:
 
-    * `Angler.Push.Sender.WebPushEncryption` — production. Encrypts via
-      `:web_push_encryption` and POSTs to the subscription endpoint.
+    * `Angler.Push.Sender.WebPush` — production. Encrypts with
+      `Angler.Push.WebPush` and POSTs to the subscription endpoint.
     * `Angler.Push.Sender.Test` — captures sends in `:persistent_term`
       so unit tests can assert on payloads without hitting the network.
   """
@@ -12,14 +12,14 @@ defmodule Angler.Push.Sender do
               {:ok, %{status_code: integer()}} | {:error, term()}
 end
 
-defmodule Angler.Push.Sender.WebPushEncryption do
+defmodule Angler.Push.Sender.WebPush do
   @moduledoc false
   @behaviour Angler.Push.Sender
 
   @impl true
   def send(body, subscription) do
-    case WebPushEncryption.send_web_push(body, subscription) do
-      {:ok, response} -> {:ok, %{status_code: response.status_code}}
+    case Angler.Push.WebPush.send_web_push(body, subscription) do
+      {:ok, response} -> {:ok, %{status_code: response.status}}
       {:error, reason} -> {:error, reason}
     end
   end

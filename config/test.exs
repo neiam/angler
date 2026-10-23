@@ -42,7 +42,7 @@ config :angler, Oban, testing: :manual
 # so `Vapid.enabled?/0` returns true and the worker actually fires.
 config :angler, :push_sender, Angler.Push.Sender.Test
 
-config :web_push_encryption, :vapid_details,
+config :angler, :vapid_details,
   subject: "mailto:test@angler.local",
   public_key:
     "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U",
