@@ -13,10 +13,30 @@ defmodule AnglerWeb.MastodonAPI.ConversationController do
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
   alias AnglerWeb.Plugs.BearerAuth
 
-  def index(conn, _params) do
+  def index(conn, params) do
     %{profile: profile} = BearerAuth.current_scope(conn)
-    rows = Conversations.list(profile.id)
+    cursor = Angler.Pagination.MastodonCursor.parse(params, 20, 40)
+    rows = Conversations.list(profile.id, cursor: cursor)
+
+    conn =
+      case Angler.Pagination.MastodonCursor.link_header(
+             rows,
+             url_without_cursor(conn),
+             :last_status_id
+           ) do
+        nil -> conn
+        link -> put_resp_header(conn, "link", link)
+      end
+
     json(conn, ConversationJSON.render_many(rows, profile.id))
+  end
+
+  defp url_without_cursor(conn) do
+    qs =
+      conn.query_params |> Map.drop(["max_id", "min_id", "since_id"]) |> Plug.Conn.Query.encode()
+
+    base = AnglerWeb.Endpoint.url() <> conn.request_path
+    if qs == "", do: base, else: base <> "?" <> qs
   end
 
   def read(conn, %{"id" => id}) do

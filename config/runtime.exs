@@ -351,6 +351,7 @@ config :angler, Oban,
        {"15 3 * * *", Angler.OAuth.Workers.PruneExpired},
        {"* * * * *", Angler.Statuses.Workers.ScheduledFire},
        {"* * * * *", Angler.Stories.Workers.Expire},
+       {"40 * * * *", Angler.Statuses.Workers.PruneIdempotencyKeys},
        # No-op unless Beagle discovery is enabled (see below).
        {"0 * * * *", Angler.Discover.Workers.BeagleDiscover}
      ]}

@@ -74,14 +74,18 @@ defmodule Angler.Conversations do
 
   @spec list(integer(), keyword()) :: [Conversation.t()]
   def list(owner_id, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 20)
+    cursor =
+      Keyword.get_lazy(opts, :cursor, fn ->
+        Angler.Pagination.MastodonCursor.parse(%{}, Keyword.get(opts, :limit, 20), 40)
+      end)
 
-    Repo.all(
-      from c in Conversation,
-        where: c.owner_id == ^owner_id,
-        order_by: [desc: c.id],
-        limit: ^limit
-    )
+    # Newest activity first, paged by the last status — what Mastodon does
+    # and upstream now matches (9c81a75ad). Ordering by row id put a
+    # months-old thread with a new reply below newer, quieter ones.
+    from(c in Conversation, where: c.owner_id == ^owner_id and not is_nil(c.last_status_id))
+    |> Angler.Pagination.MastodonCursor.apply(cursor, :last_status_id)
+    |> Repo.all()
+    |> Angler.Pagination.MastodonCursor.finalize_order(cursor, :last_status_id)
     |> Repo.preload([:last_status, last_status: :profile])
   end
 

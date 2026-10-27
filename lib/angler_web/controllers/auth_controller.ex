@@ -27,11 +27,12 @@ defmodule AnglerWeb.AuthController do
       Accounts.get_by_email(email) ->
         json(conn, %{"status" => "error", "message" => "Account already exists"})
 
-      Auth.verify_code(email, code) == :ok ->
-        json(conn, %{"status" => "success"})
-
       true ->
-        json(conn, %{"status" => "error"})
+        case Auth.verify_code(email, code) do
+          :ok -> json(conn, %{"status" => "success"})
+          :locked -> locked(conn)
+          :error -> json(conn, %{"status" => "error", "code" => "invalid_code"})
+        end
     end
   end
 
@@ -43,8 +44,22 @@ defmodule AnglerWeb.AuthController do
 
   # ---- POST /api/auth/onboarding ------------------------------------------
 
+  defp locked(conn) do
+    conn
+    |> put_status(:too_many_requests)
+    |> json(%{
+      "status" => "error",
+      "code" => "locked",
+      "message" => "Too many verification attempts. Please request a new code."
+    })
+  end
+
+  # The new app sends its own client_id/client_secret/scope so the token is
+  # issued to it (upstream 1cead5cf6); without them the first-party client is
+  # used, as before.
   def onboarding(conn, params) do
     with {:ok, attrs} <- normalize_onboarding(params),
+         {:ok, app} <- onboarding_client(params),
          :ok <- Username.validate(attrs.username),
          :ok <- ensure_email_unused(attrs.email),
          :ok <- ensure_username_available(attrs.username),
@@ -66,13 +81,31 @@ defmodule AnglerWeb.AuthController do
           }
         })
       else
-        issue_onboarding_token(conn, user, profile)
+        issue_onboarding_token(conn, user, profile, app)
       end
     else
       :error ->
         json(conn, %{
           "status" => "error",
+          "code" => "invalid_code",
           "message" => "Invalid verification code, please try again later."
+        })
+
+      :locked ->
+        locked(conn)
+
+      {:error, :invalid_scope} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{"status" => "error", "code" => "invalid_scope", "message" => "Invalid scope."})
+
+      {:error, :invalid_client} ->
+        conn
+        |> put_status(:unauthorized)
+        |> json(%{
+          "status" => "error",
+          "code" => "invalid_client",
+          "message" => "Invalid client credentials."
         })
 
       {:error, :validation, missing} ->
@@ -104,12 +137,49 @@ defmodule AnglerWeb.AuthController do
 
   ## Helpers
 
-  defp issue_onboarding_token(conn, user, profile) do
-    %{client: client} = OAuth.first_party_client!()
+  @onboarding_scopes ~w(read write follow push security:read security:write)
 
-    case OAuth.issue_token(user, client,
-           ip: client_ip(conn),
-           user_agent: List.first(get_req_header(conn, "user-agent"))
+  defp onboarding_client(%{"client_id" => id} = params) when is_binary(id) and id != "" do
+    with {:ok, scopes} <- onboarding_scopes(params["scope"]),
+         %OAuth.Client{} = client <- OAuth.get_client(id),
+         true <- OAuth.verify_client_secret(client, params["client_secret"]) do
+      {:ok, {client, scopes}}
+    else
+      {:error, :invalid_scope} = err -> err
+      _ -> {:error, :invalid_client}
+    end
+  end
+
+  defp onboarding_client(_), do: {:ok, nil}
+
+  defp onboarding_scopes(scope) when scope in [nil, ""], do: {:ok, OAuth.default_scopes()}
+
+  defp onboarding_scopes(scope) when is_binary(scope) do
+    scopes = scope |> String.replace("+", " ") |> String.split(" ", trim: true) |> Enum.uniq()
+
+    if scopes != [] and Enum.all?(scopes, &(&1 in @onboarding_scopes)),
+      do: {:ok, scopes},
+      else: {:error, :invalid_scope}
+  end
+
+  defp onboarding_scopes(_), do: {:error, :invalid_scope}
+
+  defp issue_onboarding_token(conn, user, profile, app) do
+    {client, token_opts} =
+      case app do
+        {client, scopes} ->
+          {client, [scopes: scopes]}
+
+        nil ->
+          %{client: client} = OAuth.first_party_client!()
+          {client, []}
+      end
+
+    case OAuth.issue_token(
+           user,
+           client,
+           [ip: client_ip(conn), user_agent: List.first(get_req_header(conn, "user-agent"))] ++
+             token_opts
          ) do
       {:ok, %{access: access, refresh: refresh, token: token}} ->
         json(conn, %{
@@ -130,6 +200,15 @@ defmodule AnglerWeb.AuthController do
             "username" => profile.username
           },
           "account" => render_account(profile)
+        })
+
+      _ when app != nil ->
+        json(conn, %{
+          "status" => "error",
+          "code" => "account_created_token_failed",
+          "message" =>
+            "Your account was created but we could not sign you in automatically. " <>
+              "Please sign in with your email and password."
         })
 
       _ ->

@@ -77,6 +77,35 @@ defmodule Angler.Statuses.FederationTest do
       assert %Status{visibility: :unlisted} = Statuses.get_by_uri(uri)
     end
 
+    test "followers-only with a mention is :private, not a DM", ctx do
+      uri = "http://remote.test/notes/fo"
+
+      activity =
+        create_note(uri,
+          to: ["http://remote.test/users/bob/followers"],
+          cc: ["http://localhost/users/alice"]
+        )
+
+      assert :ok = Federation.handle_create(activity, ctx.bob.remote_url)
+      assert %Status{visibility: :private} = Statuses.get_by_uri(uri)
+    end
+
+    test "only mentions is :direct, and so is no audience at all", ctx do
+      dm = "http://remote.test/notes/dm"
+      bare = "http://remote.test/notes/bare"
+
+      :ok =
+        Federation.handle_create(
+          create_note(dm, to: ["http://localhost/users/alice"]),
+          ctx.bob.remote_url
+        )
+
+      :ok = Federation.handle_create(create_note(bare, to: []), ctx.bob.remote_url)
+
+      assert %Status{visibility: :direct} = Statuses.get_by_uri(dm)
+      assert %Status{visibility: :direct} = Statuses.get_by_uri(bare)
+    end
+
     test "extracts hashtags from object.tag", ctx do
       uri = "http://remote.test/notes/4"
 

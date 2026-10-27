@@ -39,6 +39,54 @@ defmodule AnglerWeb.MastodonAPI.StatusCreateTest do
       assert json_response(conn, 403)
     end
 
+    test "a repeated Idempotency-Key returns the original status", ctx do
+      post_with_key = fn key, text ->
+        ctx.conn
+        |> put_req_header("authorization", "Bearer " <> ctx.write_token)
+        |> put_req_header("idempotency-key", key)
+        |> post(~p"/api/v1/statuses", %{"status" => text})
+        |> json_response(200)
+      end
+
+      first = post_with_key.("abc", "once")
+      again = post_with_key.("abc", "once")
+      other = post_with_key.("def", "once")
+
+      assert again["id"] == first["id"]
+      refute other["id"] == first["id"]
+      assert Angler.Repo.aggregate(Angler.Statuses.Status, :count) == 2
+    end
+
+    test "a key whose first request is still running gets 409", ctx do
+      :claimed = Angler.Statuses.Idempotency.claim(ctx.user.id, "busy")
+
+      conn =
+        ctx.conn
+        |> put_req_header("authorization", "Bearer " <> ctx.write_token)
+        |> put_req_header("idempotency-key", "busy")
+        |> post(~p"/api/v1/statuses", %{"status" => "dup"})
+
+      assert json_response(conn, 409)
+    end
+
+    test "a failed post releases its key", ctx do
+      auth = fn conn ->
+        conn
+        |> put_req_header("authorization", "Bearer " <> ctx.write_token)
+        |> put_req_header("idempotency-key", "retry-me")
+      end
+
+      assert ctx.conn
+             |> auth.()
+             |> post(~p"/api/v1/statuses", %{"status" => ""})
+             |> json_response(422)
+
+      assert ctx.conn
+             |> auth.()
+             |> post(~p"/api/v1/statuses", %{"status" => "ok"})
+             |> json_response(200)
+    end
+
     test "200 + Mastodon-shape body for a text-only post", ctx do
       conn =
         ctx.conn

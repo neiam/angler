@@ -33,7 +33,7 @@ defmodule Angler.Auth.AppRegister do
   @doc false
   def resend_changeset(register, attrs) do
     register
-    |> cast(attrs, [:verify_code_hash, :uses, :email_delivered_at])
+    |> cast(attrs, [:verify_code_hash, :verify_code_attempts, :uses, :email_delivered_at])
     |> validate_required([:verify_code_hash])
   end
 end

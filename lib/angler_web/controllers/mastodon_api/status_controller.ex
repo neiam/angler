@@ -3,8 +3,9 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
   Mastodon-compatible status endpoints: show, create, plus the interaction
   set (favourite / unfavourite / reblog / unreblog / bookmark / unbookmark).
 
-  `Idempotency-Key` header on POST /statuses is accept-and-ignore for now
-  (TODO: small idempotency_keys table + Oban prune; documented in plans).
+  `Idempotency-Key` on POST /statuses returns the original status for a
+  repeat and 409 while the first request is still running
+  (`Angler.Statuses.Idempotency`).
   """
 
   use AnglerWeb, :controller
@@ -14,7 +15,7 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
   alias Angler.Bookmarks
   alias Angler.Repo
   alias Angler.Statuses
-  alias Angler.Statuses.{Pinning, Scheduled, Scheduling, Status}
+  alias Angler.Statuses.{Idempotency, Pinning, Scheduled, Scheduling, Status}
   alias Angler.Statuses.Workers.StatusDeliver
   alias Angler.Timelines.Workers.FeedInsert
   alias AnglerWeb.MastodonAPI.Account
@@ -254,7 +255,44 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
         end
 
       true ->
-        do_create(conn, profile, params)
+        with_idempotency(conn, &do_create(&1, profile, params))
+    end
+  end
+
+  defp with_idempotency(conn, create) do
+    %{user: user, profile: profile} = BearerAuth.current_scope(conn)
+
+    case get_req_header(conn, "idempotency-key") do
+      [key | _] when key != "" ->
+        case Idempotency.claim(user.id, key) do
+          :claimed ->
+            conn = create.(conn)
+
+            if conn.status == 200 and is_integer(conn.assigns[:created_status_id]) do
+              Idempotency.complete(user.id, key, conn.assigns.created_status_id)
+            else
+              Idempotency.release(user.id, key)
+            end
+
+            conn
+
+          {:existing, status_id} ->
+            case Statuses.get(status_id) do
+              %Status{deleted_at: nil} = status ->
+                json(conn, StatusJSON.render(status, profile.id))
+
+              _ ->
+                # The original was deleted since; post anew.
+                Idempotency.release(user.id, key)
+                create.(conn)
+            end
+
+          :in_flight ->
+            conn |> put_status(:conflict) |> json(%{"error" => "Request already in progress."})
+        end
+
+      _ ->
+        create.(conn)
     end
   end
 
@@ -265,6 +303,7 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
         StatusDeliver.enqueue_for(status)
 
         conn
+        |> assign(:created_status_id, status.id)
         |> put_status(:ok)
         |> json(StatusJSON.render(status, profile.id))
 

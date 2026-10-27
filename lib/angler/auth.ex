@@ -18,6 +18,8 @@ defmodule Angler.Auth do
   alias Angler.Repo
 
   @code_max_attempts 5
+  # Wrong guesses allowed per issued code (upstream locks after 10).
+  @code_max_guesses 10
   # Pixelfed allows codes for 90 days; we tighten to 24h. Operators who want a
   # longer window can override via Angler.Config later.
   @code_ttl_seconds 24 * 60 * 60
@@ -56,6 +58,7 @@ defmodule Angler.Auth do
         register
         |> AppRegister.resend_changeset(%{
           verify_code_hash: hash,
+          verify_code_attempts: 0,
           uses: register.uses + 1,
           email_delivered_at: attrs.email_delivered_at
         })
@@ -73,18 +76,30 @@ defmodule Angler.Auth do
   Does **not** delete or mutate the registration row — onboarding does that.
   Mirrors Pixelfed's `verifyCode`.
   """
-  @spec verify_code(String.t(), String.t()) :: :ok | :error
+  @spec verify_code(String.t(), String.t()) :: :ok | :error | :locked
   def verify_code(email, code) when is_binary(email) and is_binary(code) do
     email = String.downcase(email)
     expected_hash = hash_code(code)
     cutoff = DateTime.add(DateTime.utc_now(), -@code_ttl_seconds, :second)
 
     case Repo.get_by(AppRegister, email: email) do
+      %AppRegister{verify_code_attempts: n} when n >= @code_max_guesses ->
+        :locked
+
       %AppRegister{} = register ->
         cond do
-          DateTime.compare(register.inserted_at, cutoff) != :gt -> :error
-          not Plug.Crypto.secure_compare(expected_hash, register.verify_code_hash) -> :error
-          true -> :ok
+          DateTime.compare(register.inserted_at, cutoff) != :gt ->
+            :error
+
+          not Plug.Crypto.secure_compare(expected_hash, register.verify_code_hash) ->
+            # Count the miss: a 6-digit code is otherwise guessable.
+            from(r in AppRegister, where: r.id == ^register.id)
+            |> Repo.update_all(inc: [verify_code_attempts: 1])
+
+            :error
+
+          true ->
+            :ok
         end
 
       _ ->

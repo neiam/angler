@@ -41,6 +41,26 @@ defmodule AnglerWeb.MastodonAPI.ConversationControllerTest do
     assert acct["username"] == "bob"
   end
 
+  test "GET /conversations pages by latest activity with a Link header", ctx do
+    {:ok, _carol} = Angler.Profiles.create_profile(%{username: "carol"})
+
+    {:ok, _} =
+      Statuses.create_local(ctx.alice, %{"status" => "yo @carol", "visibility" => "direct"})
+
+    # A new message in the older thread moves it back to the top.
+    {:ok, _} =
+      Statuses.create_local(ctx.alice, %{"status" => "again @bob", "visibility" => "direct"})
+
+    conn = auth(ctx.conn, ctx.read) |> get(~p"/api/v1/conversations", %{"limit" => "1"})
+    [newest] = json_response(conn, 200)
+    assert newest["last_status"]["content"] =~ "again"
+
+    [link] = get_resp_header(conn, "link")
+    [_, next] = Regex.run(~r/<([^>]+)>; rel="next"/, link)
+    [older] = auth(ctx.conn, ctx.read) |> get(next) |> json_response(200)
+    assert [%{"username" => "carol"}] = older["accounts"]
+  end
+
   test "POST /conversations/:id/read flips unread", ctx do
     [conv] = Angler.Conversations.list(ctx.alice.id)
 

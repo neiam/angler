@@ -207,7 +207,7 @@ defmodule Angler.Statuses.Federation do
   ## Internals
 
   defp build_attrs(object, %Profile{} = author) do
-    visibility = visibility_from_audience(object)
+    visibility = visibility_from_audience(object, author.followers_url)
 
     %{
       profile_id: author.id,
@@ -233,7 +233,12 @@ defmodule Angler.Statuses.Federation do
   #   to:[followers], cc:[] → :unlisted (Public missing, only followers)
   #   to:[mentions], cc:[] → :direct
   #   else → :private (only followers / locked)
-  defp visibility_from_audience(object) do
+  # Any followers collection in the audience makes it followers-only, even
+  # with mentions alongside: Mastodon addresses a followers-only post that
+  # mentions someone as to:[followers], cc:[mention], and that used to be
+  # stored as a DM. No audience at all is not public — keep it to the
+  # author and anyone named (upstream drops such notes).
+  defp visibility_from_audience(object, followers_url) do
     to = List.wrap(object["to"])
     cc = List.wrap(object["cc"])
     all = to ++ cc
@@ -241,11 +246,15 @@ defmodule Angler.Statuses.Federation do
     cond do
       @public_uri in to -> :public
       @public_uri in cc -> :unlisted
-      all == [] -> :public
-      Enum.all?(all, &String.ends_with?(&1, "/followers")) -> :private
+      Enum.any?(all, &followers_collection?(&1, followers_url)) -> :private
       true -> :direct
     end
   end
+
+  defp followers_collection?(uri, followers_url) when is_binary(uri),
+    do: uri == followers_url or String.ends_with?(uri, "/followers")
+
+  defp followers_collection?(_, _), do: false
 
   defp type_from_attachments(atts) when is_list(atts) and atts != [] do
     cond do
