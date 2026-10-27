@@ -62,7 +62,11 @@ defmodule AnglerWeb.MastodonAPI.ConversationControllerTest do
   end
 
   test "POST /conversations/:id/read flips unread", ctx do
-    [conv] = Angler.Conversations.list(ctx.alice.id)
+    [conv] =
+      Angler.Conversations.list_mastodon(
+        ctx.alice.id,
+        Angler.Pagination.MastodonCursor.parse(%{}, 20, 40)
+      )
 
     conn =
       auth(ctx.conn, ctx.write)
@@ -72,15 +76,19 @@ defmodule AnglerWeb.MastodonAPI.ConversationControllerTest do
     assert body["unread"] == false
   end
 
-  test "DELETE /conversations/:id removes the row", ctx do
-    [conv] = Angler.Conversations.list(ctx.alice.id)
+  test "DELETE /conversations/:id hides it for the viewer", ctx do
+    [conv] =
+      Angler.Conversations.list_mastodon(
+        ctx.alice.id,
+        Angler.Pagination.MastodonCursor.parse(%{}, 20, 40)
+      )
 
     conn =
       auth(ctx.conn, ctx.write)
       |> delete(~p"/api/v1/conversations/#{Integer.to_string(conv.id)}")
 
     assert json_response(conn, 200) == %{}
-    assert Angler.Conversations.list(ctx.alice.id) == []
+    assert json_response(auth(ctx.conn, ctx.read) |> get(~p"/api/v1/conversations"), 200) == []
   end
 
   test "GET /timelines/direct returns the last status of each thread", ctx do

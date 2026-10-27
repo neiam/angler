@@ -65,6 +65,8 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
       },
       "languages" => ["en"],
       "configuration" => %{
+        # The new Pixelfed app's DM limits (upstream ApiV2Controller).
+        "direct_messages" => direct_messages_block(),
         "urls" => %{"streaming" => nil, "status" => nil},
         "vapid" => %{"public_key" => nil},
         "accounts" => %{"max_featured_tags" => 0},
@@ -146,13 +148,7 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
           "min_password_length" => 8
         },
         "collections" => %{"max_collection_length" => Angler.Collections.max_items()},
-        # DMs are ordinary direct statuses here, under the status limits;
-        # group chats need the v0.15 DM API, which Angler doesn't have yet.
-        "direct_messages" => %{
-          "max_characters" => @max_caption_chars,
-          "max_media_attachments" => @max_media_attachments,
-          "group_chats" => %{"enabled" => false, "max_participants" => 0}
-        },
+        "direct_messages" => direct_messages_block(),
         "media" => %{
           "image_size_limit" => @max_image_bytes,
           "max_album_limit" => @max_media_attachments,
@@ -172,6 +168,18 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
   # in nodeinfo's metadata.software.
   defp version,
     do: "3.5.3 (compatible; Pixelfed #{Angler.Federation.Nodeinfo.pixelfed_compat()})"
+
+  # Limits of the v1.1 conversation API (DirectConversationController).
+  defp direct_messages_block do
+    %{
+      "max_characters" => 2000,
+      "max_media_attachments" => 4,
+      "group_chats" => %{
+        "enabled" => Application.get_env(:angler, :dm_groups_enabled, true) == true,
+        "max_participants" => Angler.Conversations.max_participants()
+      }
+    }
+  end
 
   defp media_attachments_block do
     %{

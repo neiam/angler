@@ -12,11 +12,10 @@ defmodule Angler.Application do
     children =
       [
         AnglerWeb.Telemetry,
-        Angler.PromEx,
-        # The metrics listener, on its own port — see Angler.MetricsPlug.
-        {Bandit, plug: Angler.MetricsPlug, scheme: :http, port: 9568},
-        Angler.Repo
+        Angler.PromEx
       ] ++
+        metrics_listener() ++
+        [Angler.Repo] ++
         migrator_children() ++
         [
           {Angler.Snowflake, Application.get_env(:angler, Angler.Snowflake, [])},
@@ -35,6 +34,16 @@ defmodule Angler.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Angler.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # The metrics listener, on its own port — see Angler.MetricsPlug. Off in
+  # test (`metrics_port: nil`), where a fixed port stops two suites — say in
+  # separate checkouts — from running at once.
+  defp metrics_listener do
+    case Application.get_env(:angler, :metrics_port, 9568) do
+      nil -> []
+      port -> [{Bandit, plug: Angler.MetricsPlug, scheme: :http, port: port}]
+    end
   end
 
   # libcluster is only added to the supervision tree when a topology is

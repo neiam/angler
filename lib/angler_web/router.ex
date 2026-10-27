@@ -307,6 +307,10 @@ defmodule AnglerWeb.Router do
     get "/collections/self", CollectionController, :for_self
 
     get "/direct/thread", DirectThreadController, :thread
+    get "/direct/unread_count", DirectConversationController, :unread_count
+    get "/direct/conversations", DirectConversationController, :index
+    get "/direct/conversations/:id", DirectConversationController, :show
+    get "/direct/conversations/:id/messages", DirectConversationController, :messages
 
     get "/stories/carousel", StoriesController, :carousel
     get "/stories/self-carousel", StoriesController, :self_carousel
@@ -382,6 +386,17 @@ defmodule AnglerWeb.Router do
     post "/collections/remove", CollectionController, :delete_id
 
     post "/direct/thread/send", DirectThreadController, :send
+    post "/direct/conversations", DirectConversationController, :create
+    post "/direct/conversations/:id/messages", DirectConversationController, :send_message
+
+    delete "/direct/conversations/:id/messages/:message_id",
+           DirectConversationController,
+           :delete_message
+
+    for action <- ~w(read accept mute unmute hide unhide leave)a do
+      post "/direct/conversations/:id/#{action}", DirectConversationController, action
+    end
+
     delete "/direct/thread/message", DirectThreadController, :delete_message
     post "/direct/thread/read", DirectThreadController, :read
     post "/direct/thread/mute", DirectThreadController, :mute

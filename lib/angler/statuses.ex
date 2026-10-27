@@ -479,7 +479,17 @@ defmodule Angler.Statuses do
     end)
 
     Angler.Streaming.broadcast_status_delete(deleted.id, deleted)
+    dm_deleted(deleted.id)
     {:ok, deleted}
+  end
+
+  # A deleted DM leaves its conversation pointing at the newest remaining
+  # message, and off unread counts.
+  defp dm_deleted(status_id) do
+    case Angler.Conversations.conversation_id_for(status_id) do
+      nil -> :ok
+      cid -> Angler.Conversations.message_deleted(cid, status_id)
+    end
   end
 
   ## Federation-facing writes
@@ -538,7 +548,15 @@ defmodule Angler.Statuses do
       from(s in Status, where: s.uri == ^uri and is_nil(s.deleted_at))
       |> Repo.update_all(set: [deleted_at: DateTime.utc_now()])
 
-    if n > 0, do: decrement_author_count_for(uri)
+    if n > 0 do
+      decrement_author_count_for(uri)
+
+      case Repo.one(from s in Status, where: s.uri == ^uri, select: s.id) do
+        nil -> :ok
+        id -> dm_deleted(id)
+      end
+    end
+
     :ok
   end
 

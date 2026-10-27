@@ -1,34 +1,27 @@
 defmodule AnglerWeb.MastodonAPI.Conversation do
   @moduledoc """
-  Mastodon `Conversation` JSON shape:
+  Mastodon `Conversation` JSON from the viewer's participant row:
 
-      { "id": "...",
+      { "id": "<participant row id>",
         "unread": true,
-        "accounts": [Account, ...],
+        "accounts": [Account, ...],   # everyone but the viewer
         "last_status": Status | null }
   """
 
-  alias Angler.Conversations.Conversation
-  alias Angler.Profiles.Profile
-  alias Angler.Repo
+  alias Angler.Conversations.Participant
   alias AnglerWeb.MastodonAPI.{Account, Status}
-  import Ecto.Query, only: [from: 2]
 
-  @spec render(Conversation.t(), integer() | nil) :: map()
-  def render(%Conversation{} = c, viewer_id \\ nil) do
-    accounts =
-      case c.participant_ids do
-        [] -> []
-        ids -> Repo.all(from p in Profile, where: p.id in ^ids)
-      end
-
+  @spec render(Participant.t(), integer() | nil) :: map()
+  def render(%Participant{conversation: conversation} = row, viewer_id \\ nil) do
     %{
-      "id" => Integer.to_string(c.id),
-      "unread" => c.unread,
-      "accounts" => Enum.map(accounts, &Account.render/1),
+      "id" => Integer.to_string(row.id),
+      "unread" => row.unread_count > 0,
+      "accounts" =>
+        conversation.participants
+        |> Enum.reject(&(&1.profile_id == row.profile_id))
+        |> Enum.map(&Account.render(&1.profile)),
       "last_status" =>
-        case c.last_status do
-          %Ecto.Association.NotLoaded{} -> nil
+        case conversation.last_message do
           nil -> nil
           status -> Status.render(status, viewer_id)
         end

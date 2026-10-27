@@ -17,15 +17,12 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
 
   use AnglerWeb, :controller
 
-  import Ecto.Query, only: [from: 2]
-
   alias Angler.Conversations
   alias Angler.Media
   alias Angler.Profiles
   alias Angler.Profiles.{BlocksMutes, Profile}
-  alias Angler.Repo
   alias Angler.Statuses
-  alias Angler.Statuses.{Mention, Status}
+  alias Angler.Statuses.Status
   alias AnglerWeb.MastodonAPI.Media, as: MediaJSON
   alias AnglerWeb.Plugs.BearerAuth
 
@@ -38,11 +35,22 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
          %Profile{} = peer <- Profiles.get_profile(pid) do
       max_id = parse_id(params["max_id"]) |> ok_or_nil()
       min_id = parse_id(params["min_id"]) |> ok_or_nil()
+      conversation = Conversations.between(viewer.id, peer.id)
 
-      messages = fetch_messages(viewer.id, peer.id, max_id, min_id)
+      messages =
+        case conversation do
+          nil ->
+            []
+
+          c ->
+            {rows, _} = Conversations.messages(c.id, viewer.id, 8, max_id: max_id, min_id: min_id)
+            rows
+        end
 
       json(conn, %{
         "id" => Integer.to_string(peer.id),
+        # The DM v2 conversation this thread is (upstream adds it).
+        "conversation_id" => conversation && Integer.to_string(conversation.id),
         "name" => peer.name || peer.username,
         "username" => peer.username,
         "avatar" => peer.avatar_path || "",
@@ -55,39 +63,6 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
     else
       _ -> not_found(conn)
     end
-  end
-
-  defp fetch_messages(viewer_id, peer_id, max_id, min_id) do
-    base =
-      from s in Status,
-        where: s.visibility == :direct and is_nil(s.deleted_at),
-        order_by: [desc: s.id],
-        limit: 8,
-        select: s
-
-    with_participants =
-      from s in base,
-        join: m in Mention,
-        on: m.status_id == s.id,
-        where:
-          (s.profile_id == ^viewer_id and m.profile_id == ^peer_id) or
-            (s.profile_id == ^peer_id and m.profile_id == ^viewer_id),
-        distinct: s.id
-
-    q =
-      cond do
-        min_id ->
-          from s in with_participants, where: s.id > ^min_id, order_by: [asc: s.id]
-
-        max_id ->
-          from s in with_participants, where: s.id < ^max_id
-
-        true ->
-          with_participants
-      end
-
-    Repo.all(q)
-    |> Repo.preload([:profile, mentions: :profile, media_attachments: []])
   end
 
   ## POST /direct/thread/send
@@ -108,8 +83,13 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
       }
 
       case Statuses.create_local(actor, attrs) do
-        {:ok, status} -> json(conn, render_message(status, actor.id))
-        {:error, reason} -> validation_error(conn, %{"_" => [to_string(reason)]})
+        {:ok, status} ->
+          # A DM to a remote account has to be delivered; this never was.
+          Angler.Statuses.Workers.StatusDeliver.enqueue_for(status)
+          json(conn, render_message(status, actor.id))
+
+        {:error, reason} ->
+          validation_error(conn, %{"_" => [to_string(reason)]})
       end
     else
       {:error, :blocked} -> conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
@@ -149,9 +129,10 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
     %{profile: viewer} = BearerAuth.current_scope(conn)
 
     with {:ok, pid} <- parse_id(params["pid"]) do
-      Conversations.list(viewer.id)
-      |> Enum.filter(fn c -> c.participant_ids == [pid] end)
-      |> Enum.each(fn c -> Conversations.mark_read(viewer.id, c.id) end)
+      with %{id: cid} <- Conversations.between(viewer.id, pid),
+           %{} = row <- Conversations.get(viewer.id, cid) do
+        Conversations.mark_read(row)
+      end
 
       json(conn, [200])
     else

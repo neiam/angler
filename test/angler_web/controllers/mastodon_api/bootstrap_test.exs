@@ -71,7 +71,12 @@ defmodule AnglerWeb.MastodonAPI.BootstrapTest do
       assert is_boolean(body["signup"]["mobile_registration"])
       assert is_boolean(body["features"]["stories"])
       assert body["limits"]["statuses"]["max_characters"] > 0
-      assert body["limits"]["direct_messages"]["group_chats"]["enabled"] == false
+
+      assert body["limits"]["direct_messages"]["group_chats"] == %{
+               "enabled" => true,
+               "max_participants" => 10
+             }
+
       assert "image/jpeg" in body["limits"]["media"]["supported_mime_types"]
     end
   end

@@ -16,11 +16,18 @@ defmodule AnglerWeb.MastodonAPI.ConversationController do
   def index(conn, params) do
     %{profile: profile} = BearerAuth.current_scope(conn)
     cursor = Angler.Pagination.MastodonCursor.parse(params, 20, 40)
-    rows = Conversations.list(profile.id, cursor: cursor)
+
+    rows =
+      profile.id
+      |> Conversations.list_mastodon(cursor)
+      |> Enum.sort_by(& &1.conversation.last_message_id, :desc)
+
+    # Paged on the last message id, like upstream; rows are participant rows.
+    keyed = Enum.map(rows, &%{last_status_id: &1.conversation.last_message_id})
 
     conn =
       case Angler.Pagination.MastodonCursor.link_header(
-             rows,
+             keyed,
              url_without_cursor(conn),
              :last_status_id
            ) do
@@ -43,20 +50,25 @@ defmodule AnglerWeb.MastodonAPI.ConversationController do
     %{profile: profile} = BearerAuth.current_scope(conn)
 
     with {:ok, int_id} <- parse_id(id),
-         {:ok, conv} <- Conversations.mark_read(profile.id, int_id) do
-      conv = Angler.Repo.preload(conv, last_status: :profile)
-      json(conn, ConversationJSON.render(conv, profile.id))
+         %{} = row <- Conversations.get_mastodon(profile.id, int_id) do
+      row = Conversations.mark_read(row)
+
+      json(
+        conn,
+        ConversationJSON.render(Conversations.get_mastodon(profile.id, row.id), profile.id)
+      )
     else
       _ -> conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
     end
   end
 
+  # Mastodon "remove conversation" hides it for the viewer, as upstream.
   def delete(conn, %{"id" => id}) do
     %{profile: profile} = BearerAuth.current_scope(conn)
 
     with {:ok, int_id} <- parse_id(id),
-         %_{} <- Conversations.get(profile.id, int_id) do
-      :ok = Conversations.delete(profile.id, int_id)
+         %{} = row <- Conversations.get_mastodon(profile.id, int_id) do
+      Conversations.hide(row)
       json(conn, %{})
     else
       _ -> conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})

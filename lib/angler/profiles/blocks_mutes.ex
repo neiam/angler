@@ -45,6 +45,12 @@ defmodule Angler.Profiles.BlocksMutes do
     :ok
   end
 
+  @doc "Profiles that block `target_id`."
+  @spec blocked_by_ids(integer()) :: [integer()]
+  def blocked_by_ids(target_id) do
+    Repo.all(from b in Block, where: b.target_id == ^target_id, select: b.profile_id)
+  end
+
   @spec blocked?(integer(), integer()) :: boolean()
   def blocked?(actor_id, target_id) do
     Repo.exists?(from b in Block, where: b.profile_id == ^actor_id and b.target_id == ^target_id)
