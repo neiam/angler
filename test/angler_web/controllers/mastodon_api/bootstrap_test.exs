@@ -37,7 +37,10 @@ defmodule AnglerWeb.MastodonAPI.BootstrapTest do
 
       assert is_binary(body["uri"])
       assert is_binary(body["title"])
-      assert is_binary(body["version"])
+      # Upstream's format, which client libraries parse.
+      assert body["version"] ==
+               "3.5.3 (compatible; Pixelfed #{Angler.Federation.Nodeinfo.pixelfed_compat()})"
+
       assert body["urls"]["streaming_api"] == nil
       assert is_map(body["stats"])
       assert is_integer(body["stats"]["user_count"])

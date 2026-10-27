@@ -9,7 +9,6 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
   alias Angler.Instance
   alias AnglerWeb.MastodonAPI.Account
 
-  @version "0.1.0 (compatible; Angler 0.1.0)"
   @max_caption_chars 5000
   @max_media_attachments 10
   @max_image_bytes 25 * 1_048_576
@@ -26,7 +25,7 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
       "short_description" => Instance.short_description(),
       "description" => Instance.description(),
       "email" => Instance.contact_email(),
-      "version" => @version,
+      "version" => version(),
       "urls" => %{"streaming_api" => nil},
       "stats" => %{
         "user_count" => stats.user_count,
@@ -53,7 +52,7 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
     json(conn, %{
       "domain" => host(),
       "title" => Instance.title(),
-      "version" => @version,
+      "version" => version(),
       "source_url" => "https://github.com/gmorell/angler",
       "description" => Instance.short_description(),
       "usage" => %{
@@ -165,6 +164,14 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
       }
     })
   end
+
+  # Upstream's exact format, "<mastodon api> (compatible; Pixelfed <x>)":
+  # Mastodon client libraries read the leading number as the Mastodon API
+  # level and gate features on it, and Pixelfed clients look for the
+  # Pixelfed release in the parentheses. Angler's own name and version are
+  # in nodeinfo's metadata.software.
+  defp version,
+    do: "3.5.3 (compatible; Pixelfed #{Angler.Federation.Nodeinfo.pixelfed_compat()})"
 
   defp media_attachments_block do
     %{
