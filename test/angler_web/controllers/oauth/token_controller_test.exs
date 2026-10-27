@@ -88,7 +88,7 @@ defmodule AnglerWeb.OAuth.TokenControllerTest do
         })
       end
 
-      for _ <- 1..10,
+      for _ <- 1..5,
           do: assert(json_response(attempt.("wrong"), 400)["error"] == "invalid_grant")
 
       # Even the right password is refused while throttled.
@@ -96,6 +96,37 @@ defmodule AnglerWeb.OAuth.TokenControllerTest do
 
       Angler.RateLimit.reset(key)
       assert json_response(attempt.("verysecret123"), 200)
+    end
+
+    test "the throttle keys on the forwarded client, not the proxy", %{conn: conn} = ctx do
+      # The test peer, 127.0.0.1, is a trusted proxy by default.
+      attacker = {203, 0, 113, 7}
+      victim = {198, 51, 100, 9}
+
+      for ip <- [attacker, victim, {127, 0, 0, 1}] do
+        key = AnglerWeb.LoginThrottle.key(ip, "alice@example.com")
+        on_exit(fn -> Angler.RateLimit.reset(key) end)
+      end
+
+      attempt = fn forwarded_for, password ->
+        conn
+        |> put_req_header("x-forwarded-for", forwarded_for)
+        |> post(~p"/oauth/token", %{
+          "grant_type" => "password",
+          "client_id" => ctx.client_id,
+          "client_secret" => ctx.client_secret,
+          "username" => "alice@example.com",
+          "password" => password
+        })
+      end
+
+      for _ <- 1..5,
+          do: assert(json_response(attempt.("203.0.113.7", "wrong"), 400))
+
+      assert json_response(attempt.("203.0.113.7", "verysecret123"), 429)
+
+      # Another client, through the same proxy, still has its own budget.
+      assert json_response(attempt.("198.51.100.9, 10.0.0.5", "verysecret123"), 200)
     end
 
     test "401 invalid_client on wrong secret", %{conn: conn} = ctx do

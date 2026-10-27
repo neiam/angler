@@ -259,12 +259,8 @@ defmodule AnglerWeb.AuthController do
     DateTime.diff(at, DateTime.utc_now(), :second)
   end
 
-  defp client_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [first | _] -> first |> String.split(",") |> List.first() |> String.trim()
-      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
-    end
-  end
+  # AnglerWeb.Plugs.RemoteIp has already resolved the proxy chain.
+  defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
 
   defp render_account(profile) do
     %{

@@ -5,17 +5,18 @@ defmodule AnglerWeb.LoginThrottle do
   password grant.
 
   Keyed on the lowercased handle plus client IP, like upstream's
-  `email|ip` throttle. Upstream allows 5 failures an hour; behind a proxy
-  `remote_ip` may be the proxy's for everyone, which turns the key into
-  per-account, so the budget here is looser (10 per 15 minutes) to keep a
-  stranger from locking someone out for long.
+  `email|ip` throttle, with upstream's budget of 5 failures an hour.
+  The IP is the real client's: `AnglerWeb.Plugs.RemoteIp` resolves the
+  ingress proxy's `X-Forwarded-For` for HTTP requests, and the login
+  LiveView does the same for its socket, so a stranger's failures lock
+  out only the stranger's address, not the account.
   """
 
   alias Angler.Accounts
   alias Angler.RateLimit
 
-  @limit 10
-  @window_s 900
+  @limit 5
+  @window_s 3600
 
   @spec key(Plug.Conn.t() | :inet.ip_address() | nil, String.t()) :: term()
   def key(%Plug.Conn{remote_ip: ip}, handle), do: key(ip, handle)
