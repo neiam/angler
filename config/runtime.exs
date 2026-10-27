@@ -85,6 +85,12 @@ if config_env() == :prod do
         strategy: Cluster.Strategy.Kubernetes,
         config: [
           mode: :ip,
+          # Peers are found by listing *pods* with the selector. The
+          # default (:endpoints) filters Endpoints objects by it, and
+          # those carry their Service's labels, not the pods' — so an
+          # unlabelled headless Service finds nobody, silently. The pods
+          # carry the label, and the app's Role already lists them.
+          kubernetes_ip_lookup_mode: :pods,
           # Both keys are required by libcluster 3.5 even in :endpoints
           # lookup mode — it filters endpoints by selector.
           kubernetes_selector: "name=angler",
@@ -306,14 +312,14 @@ if config_env() != :test do
     pixelfed_directory_sk: System.get_env("PIXELFED_DIRECTORY_SK")
 
   ## Web Push (VAPID). Public key is surfaced to the FE so it can build
-  ## the subscription. Both keys + subject are passed to web_push_encryption
-  ## for actual delivery. If no VAPID is configured, push delivery is a
+  ## the subscription. Both keys + subject are what Angler.Push.WebPush
+  ## signs deliveries with. If no VAPID is configured, push delivery is a
   ## no-op (config/test.exs configures a fixed test keypair).
   case {System.get_env("PUSH_VAPID_PUBLIC_KEY"), System.get_env("PUSH_VAPID_PRIVATE_KEY")} do
     {pub, priv} when is_binary(pub) and is_binary(priv) and pub != "" and priv != "" ->
       config :angler, push_vapid_public_key: pub
 
-      config :web_push_encryption, :vapid_details,
+      config :angler, :vapid_details,
         subject: System.get_env("PUSH_VAPID_SUBJECT", "mailto:admin@localhost"),
         public_key: pub,
         private_key: priv

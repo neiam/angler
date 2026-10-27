@@ -13,8 +13,6 @@ defmodule Angler.Federation.HTTPSignature do
   See plans/federation/queues/inbox_validator.md for the surrounding context.
   """
 
-  require Logger
-
   @doc """
   Verify an inbound signature.
 

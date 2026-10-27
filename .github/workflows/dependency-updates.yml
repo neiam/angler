@@ -1,0 +1,71 @@
+name: dependency-updates
+# Security updates as a pull request: scripts/dependency-update finds the
+# Hex dependencies with a known vulnerability (osv-scanner, against OSV)
+# that a newer version fixes, bumps them, and keeps one pull request —
+# deps/security-hex — refreshed in place, closing it once there's
+# nothing left to fix. The pull request is opened by the forge's CI
+# account (gg-security) with this job's own token; its CI (audit.yml,
+# and ci.yml's build and tests) is what shows the fixes landed.
+#
+# Daily, before the nightly audit, and by hand from the Actions page
+# (`gg ci dispatch dependency-updates`).
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write # push the deps/security-hex branch
+  pull-requests: write # open, refresh and close its pull request
+
+# A newer push supersedes this run: on a branch or PR the run in
+# progress is cancelled; on master it finishes, and only a run still
+# waiting is replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  update:
+    # The runners ci.yml uses.
+    runs-on: arc-runner-set
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The deps/security-hex branch too, to tell whether a refresh
+          # changed anything before pushing it.
+          fetch-depth: 0
+
+      # ARC's default runner image is bare; scripts/dependency-update
+      # needs python3.
+      - name: python3
+        run: command -v python3 || (sudo apt-get update && sudo apt-get install -y --no-install-recommends python3)
+
+      # The same toolchain ci.yml and the Dockerfile build with: a lockfile
+      # is only as good as the resolver that wrote it. Through the forge's
+      # fork of erlef/setup-beam, as in ci.yml, which defaults ImageOS to
+      # ubuntu-24.04 where forgejo/act would inject an unmappable one.
+      - uses: https://gg.neiam.co/neiam/action-setup-beam@v1
+        with:
+          elixir-version: "1.20.4"
+          otp-version: "28.5.0.8"
+
+      - name: Hex
+        run: mix local.hex --force
+
+      # Pinned and checked, as in audit.yml; bump both together.
+      - name: Fetch osv-scanner
+        env:
+          OSV_VERSION: v2.6.0
+          OSV_SHA256: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+        run: |
+          curl -sSfL -o /tmp/osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SHA256}  /tmp/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-scanner
+
+      - name: Update
+        env:
+          OSV_SCANNER: /tmp/osv-scanner
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/dependency-update --base "${{ github.ref_name }}"

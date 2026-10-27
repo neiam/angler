@@ -6,8 +6,17 @@ on:
     tags: ["v*"]
   pull_request:
 
+# A newer push supersedes this run: on a branch or PR the run in
+# progress is cancelled; on master it finishes, and only a run still
+# waiting is replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
+  # GitHub only; the forge runs its copy in .forgejo/workflows/image.yml.
   test:
+    if: github.server_url == 'https://github.com'
     # Self-hosted ARC runners (same as ../dabping). Swap for `ubuntu-latest`
     # if you'd rather use GitHub-hosted runners. The Postgres service container
     # requires the runner to support service containers (Docker/dind).
@@ -48,8 +57,8 @@ jobs:
       - uses: https://gg.neiam.co/neiam/action-setup-beam@v1
         with:
           # Match the build image in the Dockerfile.
-          elixir-version: "1.19.5"
-          otp-version: "28.1.1"
+          elixir-version: "1.20.4"
+          otp-version: "28.5.0.8"
 
       - uses: actions/cache@v4
         with:
@@ -66,7 +75,11 @@ jobs:
       # this "what CI runs".
       - run: mix precommit
 
+  # The public registries from GitHub only. The forge reads
+  # .github/workflows too, and there .forgejo/workflows/image.yml
+  # publishes to the forge's own registry instead.
   image:
+    if: github.server_url == 'https://github.com'
     needs: test
     runs-on: arc-runner-set
     permissions:

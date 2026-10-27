@@ -18,7 +18,6 @@ defmodule Angler.Statuses.Workers.StatusDeliver do
     unique: [period: 60, fields: [:args], keys: [:status_id, :inbox_url]]
 
   import Ecto.Query, warn: false
-  require Logger
 
   alias Angler.Federation.Activity
   alias Angler.Federation.HTTPSignature

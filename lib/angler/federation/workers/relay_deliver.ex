@@ -17,8 +17,6 @@ defmodule Angler.Federation.Workers.RelayDeliver do
     queue: :federation_outbound,
     max_attempts: 8
 
-  require Logger
-
   alias Angler.Federation.Activity
   alias Angler.Federation.HTTPSignature
   alias Angler.Federation.InstanceActor
