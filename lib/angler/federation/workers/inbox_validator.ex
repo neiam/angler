@@ -8,7 +8,16 @@ defmodule Angler.Federation.Workers.InboxValidator do
 
   use Oban.Worker,
     queue: :federation_inbound,
-    max_attempts: 3
+    max_attempts: 4
+
+  # First contact with an actor we can't fetch right now (timeout, 5xx) is
+  # retried rather than dropped: the sender already got its 202 and won't
+  # send again (upstream RetriesWhenActorUnavailable). Same cadence.
+  @actor_retry_delays [180, 900, 3600]
+
+  @impl Oban.Worker
+  def backoff(%Oban.Job{attempt: attempt}),
+    do: Enum.at(@actor_retry_delays, attempt - 1, List.last(@actor_retry_delays))
 
   alias Angler.Federation.Activity
   alias Angler.Federation.Actor
@@ -39,6 +48,8 @@ defmodule Angler.Federation.Workers.InboxValidator do
 
   @impl Oban.Worker
   def perform(%Oban.Job{
+        attempt: attempt,
+        max_attempts: max_attempts,
         args:
           %{
             "headers" => headers,
@@ -47,6 +58,7 @@ defmodule Angler.Federation.Workers.InboxValidator do
             "path" => path
           } = args
       }) do
+    retry? = attempt < max_attempts
     raw_body = Base.decode64!(raw_b64)
     actor_url = Map.get(payload, "actor")
 
@@ -63,11 +75,19 @@ defmodule Angler.Federation.Workers.InboxValidator do
         log_rejected(payload, actor_url, :defederated)
 
       true ->
-        verify_and_dispatch(headers, raw_body, payload, actor_url, path, args["recipient_id"])
+        verify_and_dispatch(
+          headers,
+          raw_body,
+          payload,
+          actor_url,
+          path,
+          args["recipient_id"],
+          retry?
+        )
     end
   end
 
-  defp verify_and_dispatch(headers, raw_body, payload, actor_url, path, recipient_id) do
+  defp verify_and_dispatch(headers, raw_body, payload, actor_url, path, recipient_id, retry?) do
     headers_list = Enum.into(headers, [])
     # Only a key owned by the claimed actor verifies — a valid signature from
     # anyone else's key is not this actor speaking.
@@ -92,8 +112,10 @@ defmodule Angler.Federation.Workers.InboxValidator do
               {:error, _} -> log_rejected(payload, actor_url, reason)
             end
 
-          _ ->
-            log_rejected(payload, actor_url, reason)
+          {:error, fetch_error} ->
+            if retry? and Angler.Federation.HTTP.transient_error?(fetch_error),
+              do: {:error, {:actor_unavailable, fetch_error}},
+              else: log_rejected(payload, actor_url, reason)
         end
     end
   end

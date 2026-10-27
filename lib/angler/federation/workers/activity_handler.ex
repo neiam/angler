@@ -54,6 +54,14 @@ defmodule Angler.Federation.Workers.ActivityHandler do
     Likes.Federation.handle_undo_like(activity, actor_url)
   end
 
+  defp dispatch(%{"type" => "Block"} = activity, actor_url) do
+    Profiles.Federation.handle_block(activity, actor_url)
+  end
+
+  defp dispatch(%{"type" => "Undo", "object" => %{"type" => "Block"}} = activity, actor_url) do
+    Profiles.Federation.handle_undo_block(activity, actor_url)
+  end
+
   defp dispatch(%{"type" => "Undo", "object" => %{"type" => "Announce"}} = activity, actor_url) do
     Reblogs.Federation.handle_undo_announce(activity, actor_url)
   end

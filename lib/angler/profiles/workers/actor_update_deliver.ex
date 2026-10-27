@@ -6,6 +6,10 @@ defmodule Angler.Profiles.Workers.ActorUpdateDeliver do
 
   One job per `(profile, inbox)` — mirrors `StatusDeliver` — so retries are
   isolated. `enqueue_for/1` fans out over the profile's remote followers.
+
+  `enqueue_for(profile, "delete")` sends `Delete Person` instead, when the
+  account is deleted, so followers' servers drop it rather than keep a
+  ghost (upstream 967ab88ec).
   """
 
   use Oban.Worker,
@@ -21,27 +25,30 @@ defmodule Angler.Profiles.Workers.ActorUpdateDeliver do
   alias Angler.Profiles.Profile
   alias Angler.Repo
 
-  @doc "Enqueue one Update delivery per remote follower inbox of `profile`."
-  @spec enqueue_for(Profile.t()) :: :ok
-  def enqueue_for(%Profile{domain: nil} = profile) do
-    Enum.each(follower_inboxes(profile), &enqueue(profile.id, &1))
+  @doc "Enqueue one Update (or Delete) delivery per remote follower inbox of `profile`."
+  @spec enqueue_for(Profile.t(), String.t()) :: :ok
+  def enqueue_for(profile, kind \\ "update")
+
+  def enqueue_for(%Profile{domain: nil} = profile, kind) when kind in ["update", "delete"] do
+    Enum.each(follower_inboxes(profile), &enqueue(profile.id, &1, kind))
     :ok
   end
 
-  def enqueue_for(_), do: :ok
+  def enqueue_for(_, _), do: :ok
 
-  @spec enqueue(integer(), String.t()) :: {:ok, Oban.Job.t()} | {:error, term()}
-  def enqueue(profile_id, inbox_url) when is_integer(profile_id) and is_binary(inbox_url) do
-    %{"profile_id" => profile_id, "inbox_url" => inbox_url}
+  @spec enqueue(integer(), String.t(), String.t()) :: {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue(profile_id, inbox_url, kind \\ "update")
+      when is_integer(profile_id) and is_binary(inbox_url) do
+    %{"profile_id" => profile_id, "inbox_url" => inbox_url, "kind" => kind}
     |> __MODULE__.new()
     |> Oban.insert()
   end
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"profile_id" => profile_id, "inbox_url" => inbox_url}}) do
+  def perform(%Oban.Job{args: %{"profile_id" => profile_id, "inbox_url" => inbox_url} = args}) do
     case Repo.get(Profile, profile_id) do
-      %Profile{domain: nil} = profile -> deliver(profile, inbox_url)
-      # Profile deleted or somehow remote between enqueue and run.
+      %Profile{domain: nil} = profile -> deliver(profile, inbox_url, args["kind"] || "update")
+      # Profile purged or somehow remote between enqueue and run.
       _ -> :ok
     end
   end
@@ -60,8 +67,12 @@ defmodule Angler.Profiles.Workers.ActorUpdateDeliver do
     |> Enum.uniq()
   end
 
-  defp deliver(%Profile{} = profile, inbox_url) do
-    activity = ActorBuilder.update_activity(profile)
+  defp deliver(%Profile{} = profile, inbox_url, kind) do
+    activity =
+      if kind == "delete",
+        do: ActorBuilder.delete_activity(profile),
+        else: ActorBuilder.update_activity(profile)
+
     body = Jason.encode!(activity)
     uri = URI.parse(inbox_url)
     actor_url = Profiles.actor_url(profile)
@@ -106,7 +117,7 @@ defmodule Angler.Profiles.Workers.ActorUpdateDeliver do
     Activity.changeset(%{
       direction: :outbound,
       activity_id: activity_id,
-      activity_type: "Update",
+      activity_type: if(String.ends_with?(activity_id, "#delete"), do: "Delete", else: "Update"),
       actor_url: actor_url,
       target_inbox: inbox_url,
       raw_body: body,

@@ -149,6 +149,9 @@ defmodule AnglerWeb.Router do
 
     # User-facing AP actor docs and inboxes.
     get "/users/:username", Federation.UserActorController, :show
+    get "/users/:username/outbox", Federation.UserActorController, :outbox
+    get "/users/:username/followers", Federation.UserActorController, :followers
+    get "/users/:username/following", Federation.UserActorController, :following
     post "/users/:username/inbox", Federation.InboxController, :user
 
     # Shared inbox for activities addressed to multiple local users.

@@ -179,9 +179,25 @@ defmodule Angler.Accounts do
         {:error, :invalid_password}
 
       true ->
-        {:ok, set_self_status(user, "delete")}
+        deleted = set_self_status(user, "delete")
+        federate_account_delete(user)
+        {:ok, deleted}
     end
   end
+
+  @doc "Tell the deleted account's remote followers' servers it is gone."
+  @spec federate_account_delete(User.t()) :: :ok
+  def federate_account_delete(%User{profile_id: pid}) when is_integer(pid) do
+    case Repo.get(Profile, pid) do
+      %Profile{} = profile ->
+        Angler.Profiles.Workers.ActorUpdateDeliver.enqueue_for(profile, "delete")
+
+      nil ->
+        :ok
+    end
+  end
+
+  def federate_account_delete(_), do: :ok
 
   defp set_self_status(%User{} = user, status) do
     {:ok, updated} =

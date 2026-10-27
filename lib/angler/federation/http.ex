@@ -45,6 +45,7 @@ defmodule Angler.Federation.HTTP do
              | :too_large
              | :bad_content_type
              | :bad_status
+             | {:unavailable, pos_integer()}
              | :bad_json
              | term()}
   def fetch(url, opts \\ []) when is_binary(url) do
@@ -76,6 +77,18 @@ defmodule Angler.Federation.HTTP do
       |> Req.post()
     end
   end
+
+  @doc """
+  Whether a `fetch/2` error looks temporary — timeouts, refused or reset
+  connections, DNS failure, 408/429/5xx — as opposed to the remote saying
+  no (404, 410, 401, a bad document) or our own guards refusing.
+  """
+  @spec transient_error?(term()) :: boolean()
+  def transient_error?({:unavailable, _status}), do: true
+  def transient_error?(:unresolvable), do: true
+  def transient_error?(%Req.TransportError{}), do: true
+  def transient_error?(%Mint.TransportError{}), do: true
+  def transient_error?(_), do: false
 
   ## Internals
 
@@ -234,6 +247,9 @@ defmodule Angler.Federation.HTTP do
   end
 
   defp check_status(s) when s in 200..299, do: :ok
+  # 408/429/5xx mean "try again later"; the inbox retries first contact on
+  # those (`transient_error?/1`), and drops the rest.
+  defp check_status(s) when s in [408, 429] or s in 500..599, do: {:error, {:unavailable, s}}
   defp check_status(_), do: {:error, :bad_status}
 
   defp check_content_type(headers, allowed) do

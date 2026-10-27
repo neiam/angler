@@ -65,6 +65,25 @@ defmodule Angler.Federation.ActorBuilder do
     }
   end
 
+  @doc """
+  A `Delete` of the actor itself, for account deletion. The object is the
+  bare `{id, type}` and it goes to followers, without Public, as upstream
+  sends it (967ab88ec, cfc5c9387).
+  """
+  @spec delete_activity(Profile.t()) :: map()
+  def delete_activity(%Profile{} = p) do
+    actor_url = actor_url(p)
+
+    %{
+      "@context" => @context,
+      "id" => actor_url <> "#delete",
+      "type" => "Delete",
+      "actor" => actor_url,
+      "to" => [actor_url <> "/followers"],
+      "object" => %{"id" => actor_url, "type" => "Person"}
+    }
+  end
+
   @doc "The canonical actor URL for a local profile."
   @spec actor_url(Profile.t()) :: String.t()
   def actor_url(%Profile{username: username}), do: base() <> "/users/" <> username

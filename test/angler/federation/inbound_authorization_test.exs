@@ -295,4 +295,46 @@ defmodule Angler.Federation.InboundAuthorizationTest do
       refute Likes.get_by_remote_url("#{ctx.bob.remote_url}/likes/1")
     end
   end
+
+  describe "Block" do
+    test "a remote Block records the block and drops follows; Undo lifts it", ctx do
+      %Follower{}
+      |> Follower.changeset(%{
+        profile_id: ctx.alice.id,
+        following_id: ctx.bob.id,
+        accepted_at: DateTime.utc_now()
+      })
+      |> Repo.insert!()
+
+      alice_url = AnglerWeb.Endpoint.url() <> "/users/alice"
+
+      block = %{
+        "type" => "Block",
+        "id" => "http://remote.test/blocks/1",
+        "actor" => ctx.bob.remote_url,
+        "object" => alice_url
+      }
+
+      assert :ok = Profiles.Federation.handle_block(block, ctx.bob.remote_url)
+      assert Angler.Profiles.BlocksMutes.blocked?(ctx.bob.id, ctx.alice.id)
+      refute Angler.Follows.get_follower(ctx.alice.id, ctx.bob.id)
+
+      :ok =
+        Profiles.Federation.handle_undo_block(
+          %{"type" => "Undo", "object" => block},
+          ctx.bob.remote_url
+        )
+
+      refute Angler.Profiles.BlocksMutes.blocked?(ctx.bob.id, ctx.alice.id)
+    end
+
+    test "only the blocker can undo its block", ctx do
+      alice_url = AnglerWeb.Endpoint.url() <> "/users/alice"
+      block = %{"type" => "Block", "actor" => ctx.bob.remote_url, "object" => alice_url}
+      :ok = Profiles.Federation.handle_block(block, ctx.bob.remote_url)
+
+      :ok = Profiles.Federation.handle_undo_block(%{"object" => block}, ctx.mallory.remote_url)
+      assert Angler.Profiles.BlocksMutes.blocked?(ctx.bob.id, ctx.alice.id)
+    end
+  end
 end

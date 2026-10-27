@@ -1,11 +1,12 @@
 defmodule Angler.Profiles.Federation do
   @moduledoc """
   Inbound activity handlers for profile-affecting verbs:
-  `Update Person`, `Delete Person`.
+  `Update Person`, `Delete Person`, `Block`, `Undo Block`.
   """
 
   alias Angler.Federation.Actor
-  alias Angler.Profiles.Profile
+  alias Angler.Profiles
+  alias Angler.Profiles.{BlocksMutes, Profile}
   alias Angler.Repo
 
   @doc """
@@ -43,6 +44,52 @@ defmodule Angler.Profiles.Federation do
         |> Repo.update!()
 
         :ok
+    end
+  end
+
+  @doc """
+  A remote actor blocked a local one (upstream 39532e8ba): record the block,
+  which also drops follows both ways, so their posts stop reaching each
+  other here. Mastodon sends this when a user blocks someone on another
+  server.
+  """
+  @spec handle_block(map(), String.t()) :: :ok | {:error, atom()}
+  def handle_block(%{"object" => target_url}, actor_url) when is_binary(target_url) do
+    with {:ok, target} <- local_target(target_url),
+         {:ok, blocker} <- Actor.resolve(actor_url),
+         {:ok, _} <- BlocksMutes.block(blocker, target) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :unknown_target}
+    end
+  end
+
+  def handle_block(_, _), do: {:error, :bad_block_payload}
+
+  @spec handle_undo_block(map(), String.t()) :: :ok | {:error, atom()}
+  def handle_undo_block(%{"object" => %{"object" => target_url}}, actor_url)
+      when is_binary(target_url) do
+    with {:ok, target} <- local_target(target_url),
+         %Profile{} = blocker <- Repo.get_by(Profile, remote_url: actor_url) do
+      BlocksMutes.unblock(blocker, target)
+    else
+      _ -> :ok
+    end
+  end
+
+  def handle_undo_block(_, _), do: {:error, :bad_undo_block_payload}
+
+  defp local_target(url) do
+    case String.split(url, AnglerWeb.Endpoint.url() <> "/users/", parts: 2) do
+      ["", username] ->
+        case Profiles.get_local_by_username(username) do
+          %Profile{} = p -> {:ok, p}
+          nil -> :error
+        end
+
+      _ ->
+        :error
     end
   end
 end

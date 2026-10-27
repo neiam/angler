@@ -424,6 +424,7 @@ defmodule Angler.Admin.Pixelfed do
     if Application.get_env(:angler, :account_deletion_enabled, true) do
       user |> Ecto.Changeset.change(status: "delete") |> Repo.update!()
       user.profile |> Ecto.Changeset.change(status: "delete") |> Repo.update!()
+      Angler.Accounts.federate_account_delete(user)
       log!(actor, "user.delete", "user", user.id, %{})
       {:ok, %{user | status: "delete"}}
     else

@@ -82,4 +82,30 @@ defmodule Angler.Federation.ActorUpdateTest do
       refute_enqueued(worker: ActorUpdateDeliver)
     end
   end
+
+  describe "account deletion" do
+    test "sends Delete Person to each remote follower" do
+      {:ok, %{user: user, profile: alice}} =
+        Angler.Accounts.register(%{
+          username: "alice",
+          email: "a@example.com",
+          password: "verysecret123"
+        })
+
+      bob = remote!("bob")
+      follows!(bob, alice)
+
+      {:ok, _} = Angler.Accounts.delete_own_account(user, "verysecret123")
+
+      assert_enqueued(
+        worker: ActorUpdateDeliver,
+        args: %{"profile_id" => alice.id, "inbox_url" => bob.inbox_url, "kind" => "delete"}
+      )
+
+      activity = ActorBuilder.delete_activity(alice)
+      assert activity["type"] == "Delete"
+      assert activity["object"] == %{"id" => ActorBuilder.actor_url(alice), "type" => "Person"}
+      refute "https://www.w3.org/ns/activitystreams#Public" in activity["to"]
+    end
+  end
 end
