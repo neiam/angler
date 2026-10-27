@@ -85,6 +85,12 @@ if config_env() == :prod do
         strategy: Cluster.Strategy.Kubernetes,
         config: [
           mode: :ip,
+          # Peers are found by listing *pods* with the selector. The
+          # default (:endpoints) filters Endpoints objects by it, and
+          # those carry their Service's labels, not the pods' — so an
+          # unlabelled headless Service finds nobody, silently. The pods
+          # carry the label, and the app's Role already lists them.
+          kubernetes_ip_lookup_mode: :pods,
           # Both keys are required by libcluster 3.5 even in :endpoints
           # lookup mode — it filters endpoints by selector.
           kubernetes_selector: "name=angler",
