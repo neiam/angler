@@ -6,19 +6,82 @@
 # No secrets. The forge injects CI_REGISTRY and accepts the per-job
 # github.token for push to this repository's own image path.
 #
-# No test gate: this workflow can't `needs:` ci.yml's test job (mix precommit),
-# and the Dockerfile compiles the release itself.
-name: image
+# Tests gate the image, as on GitHub: ci.yml's test job (mix precommit) is
+# copied in above the image job, guarded to the forge. The .github copies
+# of those jobs are skipped here, so they run once.
+name: ci (forge)
 
 on:
   push:
     branches: [master]
     tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  image:
+  test:
     if: github.server_url != 'https://github.com'
+    # Self-hosted ARC runners (same as ../dabping). Swap for `ubuntu-latest`
+    # if you'd rather use GitHub-hosted runners. The Postgres service container
+    # requires the runner to support service containers (Docker/dind).
+    runs-on: arc-runner-set
+    env:
+      MIX_ENV: test
+      # Under forgejo-runner/act the job runs in a container, so the postgres
+      # service is reached by its service name, not localhost (which works on
+      # GitHub-hosted runners).
+      POSTGRES_HOST: postgres
+      # Cap the test DB pool (and, via test_helper, ExUnit's max_cases) below
+      # the Postgres service's default max_connections (100). Big CI runners
+      # otherwise scale the pool to cores × 2 and exhaust connections.
+      POOL_SIZE: "40"
+    services:
+      postgres:
+        image: docker.io/postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # ARC's default runner image is bare. Install:
+      #   make + build-essential — native deps / Makefile-driven builds
+      #   imagemagick (identify/convert/mogrify) + ffmpeg (ffmpeg/ffprobe) —
+      #     the media pipeline shells out to these (Angler.Media.Workers.ImageProcess)
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make build-essential imagemagick ffmpeg
+      # Forge fork of erlef/setup-beam: defaults ImageOS to ubuntu-24.04,
+      # since forgejo/act injects an unmappable ImageOS from the runs-on label.
+      - uses: https://gg.neiam.co/neiam/action-setup-beam@v1
+        with:
+          # Match the build image in the Dockerfile.
+          elixir-version: "1.20.4"
+          otp-version: "28.5.0.8"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - run: mix deps.get
+
+      # `mix precommit` = compile --warnings-as-errors, deps.unlock --unused,
+      # format, test (which creates + migrates the test DB). The README calls
+      # this "what CI runs".
+      - run: mix precommit
+
+  image:
+    needs: [test]
+    if: github.server_url != 'https://github.com' && github.event_name != 'pull_request'
     runs-on: arc-runner-set
     permissions:
       contents: read
@@ -36,10 +99,38 @@ jobs:
           username: gitgud-actions
           password: ${{ github.token }}
 
+      # Public registries, off on the forge (GitHub pushes them). To push
+      # from here too, uncomment these logins and the extra `images:` lines.
+      # - name: Log in to GHCR
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ vars.GHCR_USER || github.actor }}
+      #     password: ${{ secrets.GHCR_TOKEN }}
+      #
+      # - name: Log in to Docker Hub
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: docker.io
+      #     username: ${{ secrets.DOCKERHUB_USER }}
+      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
+      #
+      # - name: Log in to Quay
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: quay.io
+      #     username: ${{ secrets.QUAY_USERNAME }}
+      #     password: ${{ secrets.QUAY_TOKEN }}
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ vars.CI_REGISTRY }}/${{ github.repository }}
+          # metadata-action skips '#' lines in its inputs.
+          images: |
+            ${{ vars.CI_REGISTRY }}/${{ github.repository }}
+            # ghcr.io/${{ github.repository }}
+            # docker.io/neiam/angler
+            # quay.io/neiam/angler
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
