@@ -8,6 +8,7 @@ defmodule AnglerWeb.LoginLive do
   use AnglerWeb, :live_view
 
   alias AnglerWeb.LoginThrottle
+  alias AnglerWeb.Plugs.RemoteIp
 
   @impl true
   def mount(params, _session, socket) do
@@ -16,11 +17,7 @@ defmodule AnglerWeb.LoginLive do
     else
       # The live check reports whether credentials are right, so it is
       # throttled like the form POST — keyed on the same client IP.
-      ip =
-        case connected?(socket) && get_connect_info(socket, :peer_data) do
-          %{address: address} -> address
-          _ -> nil
-        end
+      ip = if connected?(socket), do: client_ip(socket)
 
       {:ok,
        socket
@@ -51,6 +48,21 @@ defmodule AnglerWeb.LoginLive do
            form: to_form(params)
          )}
     end
+  end
+
+  # The socket's peer is the ingress proxy; resolve it the same way the
+  # RemoteIp plug does for HTTP requests.
+  defp client_ip(socket) do
+    peer =
+      case get_connect_info(socket, :peer_data) do
+        %{address: address} -> address
+        _ -> nil
+      end
+
+    forwarded_for =
+      for {"x-forwarded-for", value} <- get_connect_info(socket, :x_headers) || [], do: value
+
+    RemoteIp.from(peer, forwarded_for)
   end
 
   defp sanitize_next(<<"/", _::binary>> = path), do: path

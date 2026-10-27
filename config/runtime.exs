@@ -23,6 +23,14 @@ end
 config :angler, AnglerWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Reverse proxies whose X-Forwarded-For is believed (AnglerWeb.Plugs.RemoteIp),
+# as comma-separated CIDRs. Unset: loopback, RFC 1918 and IPv6 ULA.
+if trusted_proxies = System.get_env("TRUSTED_PROXIES") do
+  config :angler,
+         :trusted_proxies,
+         trusted_proxies |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+end
+
 if config_env() == :prod do
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
   pool_size = String.to_integer(System.get_env("POOL_SIZE") || "10")
