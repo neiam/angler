@@ -36,7 +36,9 @@ defmodule Angler.Pagination.MastodonCursorTest do
     test "treats non-positive cursor ids as unset" do
       # pixelfed-rn sends `max_id=0` as the initial infinite-query page param to
       # mean "from the start"; it must not become `where id < 0`.
-      cursor = MastodonCursor.parse(%{"max_id" => "0", "min_id" => "0", "since_id" => "-1"}, 20, 40)
+      cursor =
+        MastodonCursor.parse(%{"max_id" => "0", "min_id" => "0", "since_id" => "-1"}, 20, 40)
+
       assert cursor.max_id == nil
       assert cursor.min_id == nil
       assert cursor.since_id == nil
