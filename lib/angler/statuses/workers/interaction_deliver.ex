@@ -13,8 +13,6 @@ defmodule Angler.Statuses.Workers.InteractionDeliver do
     max_attempts: 8,
     unique: [period: 60, fields: [:args], keys: [:verb, :activity_id, :inbox_url]]
 
-  require Logger
-
   alias Angler.Federation.Activity
   alias Angler.Federation.HTTPSignature
   alias Angler.Profiles

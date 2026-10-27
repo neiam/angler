@@ -172,10 +172,7 @@ defmodule AnglerWeb.AuthController do
   defp valid_email?(email) when is_binary(email),
     do: Regex.match?(~r/^[^\s@]+@[^\s@]+$/, email)
 
-  defp valid_email?(_), do: false
-
   defp valid_code?(code) when is_binary(code), do: Regex.match?(~r/^\d{6}$/, code)
-  defp valid_code?(_), do: false
 
   defp seconds_until(nil), do: nil
 
