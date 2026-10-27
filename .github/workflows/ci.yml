@@ -66,7 +66,11 @@ jobs:
       # this "what CI runs".
       - run: mix precommit
 
+  # The public registries from GitHub only. The forge reads
+  # .github/workflows too, and there .forgejo/workflows/image.yml
+  # publishes to the forge's own registry instead.
   image:
+    if: github.server_url == 'https://github.com'
     needs: test
     runs-on: arc-runner-set
     permissions:
