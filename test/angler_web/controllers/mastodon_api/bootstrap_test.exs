@@ -60,6 +60,19 @@ defmodule AnglerWeb.MastodonAPI.BootstrapTest do
     end
   end
 
+  describe "GET /api/v2.1/config" do
+    test "200 anonymous, with the app bootstrap config", %{conn: conn} do
+      body = json_response(get(conn, ~p"/api/v2.1/config"), 200)
+
+      assert body["version"] == Angler.Federation.Nodeinfo.pixelfed_compat()
+      assert is_boolean(body["signup"]["mobile_registration"])
+      assert is_boolean(body["features"]["stories"])
+      assert body["limits"]["statuses"]["max_characters"] > 0
+      assert body["limits"]["direct_messages"]["group_chats"]["enabled"] == false
+      assert "image/jpeg" in body["limits"]["media"]["supported_mime_types"]
+    end
+  end
+
   describe "GET /api/v1/instance/peers" do
     test "200 with []", %{conn: conn} do
       assert [] = json_response(get(conn, ~p"/api/v1/instance/peers"), 200)

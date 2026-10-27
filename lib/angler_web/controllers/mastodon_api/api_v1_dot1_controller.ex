@@ -52,19 +52,42 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
   def emails_from_pixelfed(conn, _params), do: json(conn, [])
 
   ## GET /api/v1.1/accounts/apps-and-applications
-  def apps_and_applications(conn, _params) do
+  # Upstream (5e0171cf1) added `filter=active|revoked|all`, `limit` (≤40)
+  # and `max_id` paging with a Link header, plus a `status` field.
+  def apps_and_applications(conn, params) do
     %{user: user, token: current} = BearerAuth.current_scope(conn)
+    limit = params["limit"] |> parse_int(25) |> min(40) |> max(1)
+    now = DateTime.utc_now()
 
-    rows =
-      Repo.all(
-        from t in Token,
-          join: c in Client,
-          on: c.id == t.client_id,
-          where: t.user_id == ^user.id,
-          order_by: [desc: t.id],
-          limit: 25,
-          select: %{token: t, client: c}
-      )
+    query =
+      from t in Token,
+        join: c in Client,
+        on: c.id == t.client_id,
+        where: t.user_id == ^user.id,
+        order_by: [desc: t.id],
+        limit: ^limit,
+        select: %{token: t, client: c}
+
+    query =
+      case params["filter"] do
+        "active" ->
+          from [t, _] in query,
+            where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^now)
+
+        "revoked" ->
+          from [t, _] in query, where: not is_nil(t.revoked_at)
+
+        _ ->
+          query
+      end
+
+    query =
+      case parse_int(params["max_id"], nil) do
+        nil -> query
+        max_id -> from [t, _] in query, where: t.id < ^max_id
+      end
+
+    rows = Repo.all(query)
 
     body =
       Enum.map(rows, fn %{token: t, client: c} ->
@@ -74,6 +97,7 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
           "name" => c.name,
           "scopes" => t.scopes,
           "revoked" => not is_nil(t.revoked_at),
+          "status" => token_status(t, now),
           "created_at" => DateTime.to_iso8601(t.inserted_at),
           "expires_at" =>
             case t.expires_at do
@@ -83,7 +107,61 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
         }
       end)
 
+    conn =
+      case List.last(rows) do
+        %{token: last} when length(rows) == limit ->
+          next =
+            AnglerWeb.Endpoint.url() <>
+              conn.request_path <>
+              "?" <>
+              URI.encode_query(
+                conn.query_params
+                |> Map.take(["filter", "limit"])
+                |> Map.put("max_id", Integer.to_string(last.id))
+              )
+
+          put_resp_header(conn, "link", ~s(<#{next}>; rel="next"))
+
+        _ ->
+          conn
+      end
+
     json(conn, body)
+  end
+
+  defp token_status(%Token{revoked_at: %DateTime{}}, _now), do: "revoked"
+
+  defp token_status(%Token{expires_at: %DateTime{} = at}, now) do
+    if DateTime.compare(at, now) == :gt, do: "active", else: "expired"
+  end
+
+  defp token_status(_, _), do: "active"
+
+  ## POST /api/v1.1/accounts/apps-and-applications/:id/revoke
+  #
+  # Revoke one of the user's app sessions — access and refresh token, which
+  # share a row. Not the one making the request (upstream answers 422).
+  def revoke_app(conn, %{"id" => id}) do
+    %{user: user, token: current} = BearerAuth.current_scope(conn)
+
+    with {:ok, token_id} <- parse_id(id),
+         %Token{user_id: uid} = token when uid == user.id <- Repo.get(Token, token_id) do
+      if token.id == current.id do
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{"error" => "You can't revoke the session you're using."})
+      else
+        Angler.OAuth.revoke(token)
+
+        json(conn, %{
+          "id" => Integer.to_string(token.id),
+          "revoked" => true,
+          "status" => "revoked"
+        })
+      end
+    else
+      _ -> conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
+    end
   end
 
   ## GET /api/v1.1/accounts/mutuals/:id
@@ -451,6 +529,15 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
 
   defp parse_id(id) when is_integer(id), do: {:ok, id}
   defp parse_id(_), do: :error
+
+  defp parse_int(v, default) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} -> n
+      _ -> default
+    end
+  end
+
+  defp parse_int(_, default), do: default
 
   defp validation_error(conn, errors) when is_map(errors) do
     conn

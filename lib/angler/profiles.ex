@@ -99,16 +99,28 @@ defmodule Angler.Profiles do
         get_local_by_username(username)
 
       [username, domain] ->
-        Repo.one(
-          from p in Profile,
-            where:
-              p.username == ^username and p.domain == ^String.downcase(domain) and
-                is_nil(p.status)
-        )
+        if local_domain?(domain),
+          do: get_local_by_username(username),
+          else: lookup_remote_acct(username, domain)
     end
   end
 
   def lookup_acct(_), do: nil
+
+  # `user@<this instance>` is a local account (upstream 52207c0ab); local
+  # rows have no domain, so the remote query would never find it.
+  defp local_domain?(domain) do
+    String.downcase(domain) == AnglerWeb.Endpoint.url() |> URI.parse() |> Map.get(:host)
+  end
+
+  defp lookup_remote_acct(username, domain) do
+    Repo.one(
+      from p in Profile,
+        where:
+          p.username == ^username and p.domain == ^String.downcase(domain) and
+            is_nil(p.status)
+    )
+  end
 
   @doc """
   Prefix-search local profiles by username or display name.

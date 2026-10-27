@@ -41,7 +41,7 @@ defmodule AnglerWeb.MastodonAPI.Account do
       "statuses_count" => p.statuses_count,
       "last_status_at" => format_ts(p.last_status_at),
       "emojis" => [],
-      "moved" => nil,
+      "moved" => moved(p),
       "fields" => []
     }
 
@@ -78,8 +78,29 @@ defmodule AnglerWeb.MastodonAPI.Account do
       "note_text" => p.bio_text || strip_tags(p.bio || ""),
       "header_bg" => p.header_path || @default_header,
       "last_fetched_at" => format_ts(p.last_fetched_at),
+      # Drives the story ring in the Pixelfed app (upstream bbd7618c4). Only
+      # local stories exist here, so remote accounts never have one.
+      "has_story" => is_nil(p.domain) and Angler.Stories.has_active?(p.id),
       "settings" => settings(p, opts)
     }
+  end
+
+  # The account this one moved to, in the short shape upstream renders
+  # (94b8fea32). Only fetched when set, which is rare.
+  defp moved(%Profile{moved_to_id: nil}), do: nil
+
+  defp moved(%Profile{moved_to_id: id}) do
+    case Profiles.get_profile(id) do
+      %Profile{} = target ->
+        %{
+          "id" => Integer.to_string(target.id),
+          "acct" => acct(target),
+          "avatar" => target.avatar_path || @default_avatar
+        }
+
+      nil ->
+        nil
+    end
   end
 
   defp is_admin?(opts) do
@@ -108,9 +129,23 @@ defmodule AnglerWeb.MastodonAPI.Account do
       "show_atom" => sget(s, "show_atom", false),
       "show_profile_follower_count" => sget(s, "show_profile_follower_count", true),
       "show_profile_following_count" => sget(s, "show_profile_following_count", true),
-      "video_autoplay" => sget(s, "video_autoplay", true)
+      "video_autoplay" => sget(s, "video_autoplay", true),
+      # Compose defaults the app pre-selects (upstream 59f57b110).
+      "default_scope" => sget(s, "default_scope", "public"),
+      "default_license" => license_id(sget(s, "default_license", 1))
     }
   end
+
+  defp license_id(n) when is_integer(n), do: n
+
+  defp license_id(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n
+      _ -> 1
+    end
+  end
+
+  defp license_id(_), do: 1
 
   defp sget(s, key, default) when is_map(s), do: Map.get(s, key, default)
   defp sget(_, _, default), do: default

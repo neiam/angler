@@ -36,6 +36,52 @@ defmodule AnglerWeb.MastodonAPI.DiscoverController do
     json(conn, Enum.map(profiles, &Account.render/1))
   end
 
+  ## /api/v1.2/discover/accounts/popular
+  #
+  # Paged with an opaque `cursor` (the last row's followers_count + id) in
+  # the Link header, like upstream.
+  def accounts_popular_v2(conn, params) do
+    viewer_id = viewer_id(conn)
+    limit = params["limit"] |> to_int(16) |> min(40) |> max(1)
+    profiles = Discover.accounts_popular_page(viewer_id, limit, decode_cursor(params["cursor"]))
+
+    conn =
+      case List.last(profiles) do
+        %{} = last when length(profiles) == limit ->
+          cursor = Base.url_encode64("#{last.followers_count}:#{last.id}", padding: false)
+          query = URI.encode_query(%{"limit" => limit, "cursor" => cursor})
+          next = AnglerWeb.Endpoint.url() <> conn.request_path <> "?" <> query
+          put_resp_header(conn, "link", ~s(<#{next}>; rel="next"))
+
+        _ ->
+          conn
+      end
+
+    json(conn, Enum.map(profiles, &Account.render/1))
+  end
+
+  defp decode_cursor(c) when is_binary(c) do
+    with {:ok, raw} <- Base.url_decode64(c, padding: false),
+         [count, id] <- String.split(raw, ":"),
+         {count, ""} <- Integer.parse(count),
+         {id, ""} <- Integer.parse(id) do
+      {count, id}
+    else
+      _ -> nil
+    end
+  end
+
+  defp decode_cursor(_), do: nil
+
+  defp to_int(v, default) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} -> n
+      _ -> default
+    end
+  end
+
+  defp to_int(_, default), do: default
+
   ## /api/v1.1/discover/posts/trending
 
   def trending_posts(conn, params) do

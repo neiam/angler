@@ -167,6 +167,15 @@ defmodule AnglerWeb.MastodonAPI.PixelfedV1MirrorTest do
       assert v["username"] == "bob"
       assert is_binary(v["seen_at"])
 
+      # Same endpoint under v1.2, where upstream also serves it.
+      v12 =
+        ctx.conn
+        |> auth(ctx.read)
+        |> get(~p"/api/v1.2/stories/viewers?sid=#{Integer.to_string(story.id)}")
+        |> json_response(200)
+
+      assert v12 == body
+
       %{client: c2} = OAuth.first_party_client!()
       {:ok, %{access: bob_read}} = OAuth.issue_token(bob_user, c2, scopes: ["read"])
 

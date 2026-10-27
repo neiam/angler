@@ -80,6 +80,11 @@ defmodule AnglerWeb.MastodonAPI.CollectionController do
 
   ## Writes
 
+  # Upstream routes `collections/add` to `storeId`: add `post_id` to
+  # `collection_id` — it's what the app calls when you add a post to a
+  # collection. A bare call (no ids) still creates a draft collection.
+  def add(conn, %{"collection_id" => _, "post_id" => _} = params), do: store_id(conn, params)
+
   def add(conn, _params) do
     %{profile: profile} = BearerAuth.current_scope(conn)
     {:ok, c} = Collections.create(profile.id)

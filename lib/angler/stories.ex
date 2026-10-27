@@ -197,6 +197,17 @@ defmodule Angler.Stories do
     end
   end
 
+  @doc "Whether the profile has a live (published, unexpired) story."
+  @spec has_active?(integer()) :: boolean()
+  def has_active?(profile_id) when is_integer(profile_id) do
+    now = DateTime.utc_now()
+
+    Repo.exists?(
+      from s in Story,
+        where: s.profile_id == ^profile_id and s.active == true and s.expires_at > ^now
+    )
+  end
+
   defp active_stories_for(profile_id) do
     now = DateTime.utc_now()
 

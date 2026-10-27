@@ -216,6 +216,15 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
 
   ## GET /accounts/:id/statuses
 
+  # Mastodon clients fetch a profile's pins as `statuses?pinned=true`, and
+  # took every post as pinned while it was ignored. Pins are capped and
+  # unpaged, so only the first page has any.
+  def statuses(conn, %{"pinned" => pinned} = params) when pinned in ["true", "1"] do
+    if params["max_id"] in [nil, ""],
+      do: pinned(conn, params),
+      else: json(conn, [])
+  end
+
   def statuses(conn, %{"id" => id} = params) do
     viewer_id = viewer_id(conn)
     cursor = MastodonCursor.parse(params, 20, 40)

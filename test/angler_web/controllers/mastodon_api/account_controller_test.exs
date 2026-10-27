@@ -65,6 +65,27 @@ defmodule AnglerWeb.MastodonAPI.AccountControllerTest do
       assert Map.has_key?(body, "last_fetched_at")
       assert Map.has_key?(body, "location")
       assert Map.has_key?(body, "website")
+      assert body["has_story"] == false
+      assert body["moved"] == nil
+      assert body["settings"]["default_scope"] == "public"
+      assert body["settings"]["default_license"] == 1
+    end
+
+    test "moved renders the target account's short form", ctx do
+      {:ok, target} = Angler.Profiles.create_profile(%{username: "newhome"})
+
+      ctx.profile
+      |> Ecto.Changeset.change(moved_to_id: target.id)
+      |> Angler.Repo.update!()
+
+      body =
+        ctx.conn
+        |> put_req_header("authorization", "Bearer " <> ctx.access)
+        |> get(~p"/api/v1/accounts/verify_credentials")
+        |> json_response(200)
+
+      assert body["moved"]["id"] == Integer.to_string(target.id)
+      assert body["moved"]["acct"] == "newhome"
     end
 
     test "200 without _pe omits extension fields (back-compat)", ctx do

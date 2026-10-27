@@ -15,6 +15,10 @@ defmodule Angler.Federation.Nodeinfo do
   # level is echoed in `metadata.compatible`) for peers that look deeper.
   @pixelfed_compat "0.12.7"
 
+  @doc "The Pixelfed release whose API surface Angler reports implementing."
+  @spec pixelfed_compat() :: String.t()
+  def pixelfed_compat, do: @pixelfed_compat
+
   # Angler's version, read from the loaded application (works in releases where
   # Mix isn't available).
   @spec version() :: String.t()

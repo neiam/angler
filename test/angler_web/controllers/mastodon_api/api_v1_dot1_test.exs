@@ -67,6 +67,37 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Test do
       # The token we used to authenticate IS in the list, but it's not necessarily
       # `current_session: true` because the issue_token+verify path bumps last_used.
       assert Enum.any?(body, & &1["current_session"])
+      assert Enum.all?(body, &(&1["status"] == "active"))
+    end
+
+    test "POST /accounts/apps-and-applications/:id/revoke revokes another session", ctx do
+      {:ok, %{token: other}} = OAuth.issue_token(ctx.user, ctx.client, scopes: ["read"])
+
+      body =
+        ctx.conn
+        |> auth(ctx.write)
+        |> post(~p"/api/v1.1/accounts/apps-and-applications/#{other.id}/revoke")
+        |> json_response(200)
+
+      assert body["revoked"] == true
+
+      revoked =
+        ctx.conn
+        |> auth(ctx.read)
+        |> get(~p"/api/v1.1/accounts/apps-and-applications", %{"filter" => "revoked"})
+        |> json_response(200)
+
+      assert [%{"id" => id, "status" => "revoked"}] = revoked
+      assert id == Integer.to_string(other.id)
+    end
+
+    test "revoking the session in use is refused", ctx do
+      current = Angler.Repo.get_by!(Angler.OAuth.Token, user_id: ctx.user.id, scopes: ["write"])
+
+      assert ctx.conn
+             |> auth(ctx.write)
+             |> post(~p"/api/v1.1/accounts/apps-and-applications/#{current.id}/revoke")
+             |> json_response(422)
     end
 
     test "GET /accounts/username/:username returns the full account", ctx do

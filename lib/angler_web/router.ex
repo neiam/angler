@@ -136,6 +136,7 @@ defmodule AnglerWeb.Router do
     get "/api/v1/instance", MastodonAPI.InstanceController, :show_v1
     get "/api/v1/instance/peers", MastodonAPI.InstanceController, :peers
     get "/api/v2/instance", MastodonAPI.InstanceController, :show_v2
+    get "/api/v2.1/config", MastodonAPI.InstanceController, :app_config
     get "/api/v2/streaming/config", StreamingController, :config
   end
 
@@ -341,6 +342,7 @@ defmodule AnglerWeb.Router do
     delete "/accounts/avatar", ApiV1Dot1Controller, :delete_avatar
     delete "/accounts/header", ApiV1Dot1Controller, :delete_header
     post "/accounts/change-password", ApiV1Dot1Controller, :change_password
+    post "/accounts/apps-and-applications/:id/revoke", ApiV1Dot1Controller, :revoke_app
     post "/accounts/email", ApiV1Dot1Controller, :change_email
     post "/accounts/disable", ApiV1Dot1Controller, :disable_account
     post "/accounts/delete", ApiV1Dot1Controller, :delete_account
@@ -397,6 +399,8 @@ defmodule AnglerWeb.Router do
 
     get "/stories/carousel", StoriesV12Controller, :carousel_next
     get "/stories/mention-autocomplete", StoriesV12Controller, :mention_autocomplete
+    get "/stories/viewers", StoriesController, :viewers
+    get "/discover/accounts/popular", DiscoverController, :accounts_popular_v2
   end
 
   scope "/api/v1.2", AnglerWeb.MastodonAPI do
@@ -459,6 +463,7 @@ defmodule AnglerWeb.Router do
     delete "/accounts/avatar", ApiV1Dot1Controller, :delete_avatar
     delete "/accounts/header", ApiV1Dot1Controller, :delete_header
     post "/accounts/change-password", ApiV1Dot1Controller, :change_password
+    post "/accounts/apps-and-applications/:id/revoke", ApiV1Dot1Controller, :revoke_app
     post "/accounts/email", ApiV1Dot1Controller, :change_email
     post "/accounts/disable", ApiV1Dot1Controller, :disable_account
     post "/accounts/delete", ApiV1Dot1Controller, :delete_account

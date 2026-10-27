@@ -118,6 +118,54 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
     }
   end
 
+  @doc """
+  `GET /api/v2.1/config` — the bootstrap config the new Pixelfed app and
+  web UI read before anything else (upstream `AppService::getConfig`,
+  9d82d7637). `version` is the Pixelfed release we report compatibility
+  with, the same number nodeinfo advertises.
+  """
+  def app_config(conn, _params) do
+    json(conn, %{
+      "version" => Angler.Federation.Nodeinfo.pixelfed_compat(),
+      "oauth" => true,
+      "signup" => %{
+        "curated" => false,
+        "mobile_registration" =>
+          Instance.open_registration?() and
+            Application.get_env(:angler, :in_app_registration_enabled, false) == true
+      },
+      "features" => %{
+        "stories" => Angler.Stories.enabled?(),
+        "video" => true,
+        "timelines" => %{"local" => true, "network" => true}
+      },
+      "limits" => %{
+        "account" => %{
+          "max_avatar_size" => div(@max_image_bytes, 1024),
+          "max_bio_length" => 200,
+          "max_name_length" => 30,
+          "min_password_length" => 8
+        },
+        "collections" => %{"max_collection_length" => Angler.Collections.max_items()},
+        # DMs are ordinary direct statuses here, under the status limits;
+        # group chats need the v0.15 DM API, which Angler doesn't have yet.
+        "direct_messages" => %{
+          "max_characters" => @max_caption_chars,
+          "max_media_attachments" => @max_media_attachments,
+          "group_chats" => %{"enabled" => false, "max_participants" => 0}
+        },
+        "media" => %{
+          "image_size_limit" => @max_image_bytes,
+          "max_album_limit" => @max_media_attachments,
+          "max_alt_text_length" => 1500,
+          "supported_mime_types" => media_attachments_block()["supported_mime_types"],
+          "video_size_limit" => @max_video_bytes
+        },
+        "statuses" => %{"max_characters" => @max_caption_chars}
+      }
+    })
+  end
+
   defp media_attachments_block do
     %{
       "supported_mime_types" =>

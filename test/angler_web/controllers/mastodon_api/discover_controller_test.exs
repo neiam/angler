@@ -85,6 +85,27 @@ defmodule AnglerWeb.MastodonAPI.DiscoverControllerTest do
 
   ## /api/v1.1/discover/accounts/popular
 
+  describe "GET /api/v1.2/discover/accounts/popular" do
+    test "pages through the pool with a Link cursor", ctx do
+      for {name, n} <- [{"bob", 100}, {"dan", 25}, {"eve", 10}] do
+        {:ok, p} = Profiles.create_profile(%{username: name})
+        Angler.Repo.update!(Ecto.Changeset.change(p, followers_count: n))
+      end
+
+      conn =
+        ctx.conn
+        |> auth(ctx.read)
+        |> get(~p"/api/v1.2/discover/accounts/popular", %{"limit" => "2"})
+
+      assert ["bob", "dan"] == conn |> json_response(200) |> Enum.map(& &1["username"])
+      [link] = get_resp_header(conn, "link")
+      [_, next] = Regex.run(~r/<([^>]+)>; rel="next"/, link)
+
+      page2 = ctx.conn |> auth(ctx.read) |> get(next) |> json_response(200)
+      assert ["eve"] == Enum.map(page2, & &1["username"])
+    end
+  end
+
   describe "GET /api/v1.1/discover/accounts/popular" do
     test "ranks by followers_count, excludes viewer + follows", ctx do
       {:ok, bob} = Profiles.create_profile(%{username: "bob"})

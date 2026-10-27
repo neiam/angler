@@ -279,10 +279,11 @@ defmodule AnglerWeb.MastodonAPI.V11RemainderTest do
         })
         |> json_response(200)
 
+      # The upstream route: `add` with ids adds the post (storeId).
       _ =
         ctx.conn
         |> auth(ctx.write)
-        |> post(~p"/api/v1.1/collections/store_id", %{
+        |> post(~p"/api/v1.1/collections/add", %{
           "collection_id" => cid,
           "post_id" => Integer.to_string(photo2.id)
         })

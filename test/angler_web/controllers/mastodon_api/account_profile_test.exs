@@ -135,6 +135,15 @@ defmodule AnglerWeb.MastodonAPI.AccountProfileTest do
       assert json_response(conn, 200)["username"] == "alice"
     end
 
+    test "200 by acct with this instance's domain", ctx do
+      host = AnglerWeb.Endpoint.url() |> URI.parse() |> Map.get(:host)
+
+      conn =
+        auth(ctx.conn, ctx.read) |> get(~p"/api/v1/accounts/lookup", %{"acct" => "alice@#{host}"})
+
+      assert json_response(conn, 200)["username"] == "alice"
+    end
+
     test "404 unknown", ctx do
       conn = auth(ctx.conn, ctx.read) |> get(~p"/api/v1/accounts/lookup?acct=nobody")
       assert json_response(conn, 404)
@@ -181,6 +190,22 @@ defmodule AnglerWeb.MastodonAPI.AccountProfileTest do
       ids = Enum.map(body, & &1["id"])
       assert Integer.to_string(s_pub.id) in ids
       refute Enum.any?(body, &(&1["visibility"] == "private"))
+    end
+
+    test "pinned=true returns only the pins", ctx do
+      {:ok, a} = Statuses.create_local(ctx.alice, %{"status" => "pinned one"}, broadcast: false)
+      {:ok, _b} = Statuses.create_local(ctx.alice, %{"status" => "not pinned"}, broadcast: false)
+      {:ok, _} = Angler.Statuses.Pinning.pin(ctx.alice, a)
+
+      path = ~p"/api/v1/accounts/#{Integer.to_string(ctx.alice.id)}/statuses"
+
+      body = auth(ctx.conn, ctx.read) |> get(path, %{"pinned" => "true"}) |> json_response(200)
+      assert Enum.map(body, & &1["id"]) == [Integer.to_string(a.id)]
+
+      assert [] ==
+               auth(ctx.conn, ctx.read)
+               |> get(path, %{"pinned" => "true", "max_id" => Integer.to_string(a.id)})
+               |> json_response(200)
     end
   end
 

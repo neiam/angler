@@ -121,16 +121,59 @@ defmodule Angler.Discover do
         order_by: [desc: p.followers_count, asc: p.id],
         limit: 30
 
-    profiles = Repo.all(base)
-    follows = if viewer_id, do: viewer_follows(viewer_id), else: MapSet.new()
-    hidden = hidden_profile_ids(viewer_id) |> MapSet.new()
+    base
+    |> Repo.all()
+    |> Enum.reject(&excluded?(&1, popular_exclusions(viewer_id)))
+    |> Enum.take(limit)
+  end
 
-    profiles
-    |> Enum.reject(fn p ->
-      p.id == viewer_id or MapSet.member?(follows, p.id) or MapSet.member?(hidden, p.id)
+  @doc """
+  A page of popular accounts for `/api/v1.2/discover/accounts/popular`
+  (upstream `discoverAccountsPopularV2`): a pool of the 200 most-followed
+  public accounts, minus the viewer, who they follow or have asked to, and
+  who they block or mute, walked in `(followers_count, id)` order. `cursor`
+  is the last row of the previous page.
+  """
+  @spec accounts_popular_page(integer() | nil, pos_integer(), {integer(), integer()} | nil) ::
+          [Profile.t()]
+  def accounts_popular_page(viewer_id, limit, cursor) do
+    query =
+      from p in Profile,
+        where: p.is_private == false and is_nil(p.status) and is_nil(p.domain),
+        order_by: [desc: p.followers_count, desc: p.id],
+        limit: 200
+
+    exclusions = popular_exclusions(viewer_id)
+
+    query
+    |> Repo.all()
+    |> Enum.reject(&excluded?(&1, exclusions))
+    |> Enum.filter(fn p ->
+      case cursor do
+        nil -> true
+        {count, id} -> p.followers_count < count or (p.followers_count == count and p.id < id)
+      end
     end)
     |> Enum.take(limit)
   end
+
+  defp popular_exclusions(nil), do: MapSet.new()
+
+  defp popular_exclusions(viewer_id) do
+    requested =
+      Repo.all(
+        from r in Angler.Follows.FollowRequest,
+          where: r.following_id == ^viewer_id,
+          select: r.profile_id
+      )
+
+    viewer_follows(viewer_id)
+    |> MapSet.union(MapSet.new(requested))
+    |> MapSet.union(MapSet.new(hidden_profile_ids(viewer_id)))
+    |> MapSet.put(viewer_id)
+  end
+
+  defp excluded?(%Profile{id: id}, exclusions), do: MapSet.member?(exclusions, id)
 
   ## Trending hashtags
 
