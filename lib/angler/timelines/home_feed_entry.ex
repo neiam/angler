@@ -13,6 +13,8 @@ defmodule Angler.Timelines.HomeFeedEntry do
   schema "home_feed_entries" do
     belongs_to :profile, Angler.Profiles.Profile, type: :integer
     belongs_to :status, Angler.Statuses.Status, type: :integer
+    # Set when a boost put the status here; the feed shows it as that boost.
+    belongs_to :reblog, Angler.Reblogs.Reblog
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 end

@@ -231,22 +231,28 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
 
     with {:ok, int_id} <- parse_id(id),
          %Profile{} = profile <- Profiles.get_profile(int_id) do
-      base = author_visible_query(profile.id, viewer_id)
-      base = filter_account_options(base, params)
+      pe? = Map.has_key?(params, "_pe")
 
-      rows =
-        base
-        |> MastodonCursor.apply(cursor, :id)
-        |> Repo.all()
-        |> MastodonCursor.finalize_order(cursor, :id)
+      posts =
+        if truthy?(params["only_reposts"]),
+          do: [],
+          else:
+            profile.id
+            |> author_visible_query(viewer_id)
+            |> filter_account_options(params)
+            |> MastodonCursor.apply(cursor, :id)
+            |> Repo.all()
+
+      rows = merge_by_id(posts, account_boosts(profile.id, params, cursor, pe?), cursor)
+      keyed = Enum.map(rows, &%{id: item_id(&1)})
 
       conn =
-        case MastodonCursor.link_header(rows, current_url_without_cursor(conn), :id) do
+        case MastodonCursor.link_header(keyed, current_url_without_cursor(conn), :id) do
           nil -> conn
           v -> put_resp_header(conn, "link", v)
         end
 
-      json(conn, StatusJSON.render_many(rows, viewer_id))
+      json(conn, StatusJSON.render_many(rows, viewer_id, pe: pe?))
     else
       _ -> conn |> put_status(:not_found) |> json(%{"error" => "Record not found"})
     end
@@ -333,6 +339,51 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
         preload: [:profile, mentions: :profile, status_hashtags: :hashtag, media_attachments: []]
     end
   end
+
+  # The account's boosts, paged on their wrapper ids alongside its posts.
+  # Mastodon clients get them unless `exclude_reblogs`; the Pixelfed app's
+  # profile grid only with `only_reposts` (upstream 9e33bed63). Media,
+  # reply and pinned filters are about the account's own posts.
+  defp account_boosts(profile_id, params, cursor, pe?) do
+    wanted? =
+      truthy?(params["only_reposts"]) or
+        (not pe? and not truthy?(params["exclude_reblogs"]) and not truthy?(params["only_media"]) and
+           not truthy?(params["exclude_replies"]))
+
+    if wanted? do
+      from(r in Angler.Reblogs.Reblog,
+        join: s in Status,
+        on: s.id == r.status_id and is_nil(s.deleted_at) and s.visibility in [:public, :unlisted],
+        where: r.profile_id == ^profile_id and not is_nil(r.reblog_status_id),
+        preload: [
+          :profile,
+          status:
+            {s, [:profile, mentions: :profile, status_hashtags: :hashtag, media_attachments: []]}
+        ]
+      )
+      |> MastodonCursor.apply(cursor, :reblog_status_id)
+      |> Repo.all()
+    else
+      []
+    end
+  end
+
+  defp merge_by_id(posts, boosts, cursor) do
+    all = posts ++ boosts
+
+    if is_integer(cursor.min_id),
+      do:
+        all
+        |> Enum.sort_by(&item_id/1, :asc)
+        |> Enum.take(cursor.limit)
+        |> Enum.sort_by(&item_id/1, :desc),
+      else: all |> Enum.sort_by(&item_id/1, :desc) |> Enum.take(cursor.limit)
+  end
+
+  defp item_id(%Angler.Reblogs.Reblog{reblog_status_id: id}), do: id
+  defp item_id(%Status{id: id}), do: id
+
+  defp truthy?(v), do: v in ["true", "1", true]
 
   defp filter_account_options(q, params) do
     q

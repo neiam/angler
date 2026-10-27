@@ -13,6 +13,7 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
   import Ecto.Query, only: [from: 2]
 
   alias Angler.Bookmarks
+  alias Angler.Reblogs
   alias Angler.Repo
   alias Angler.Statuses
   alias Angler.Statuses.{Idempotency, Pinning, Scheduled, Scheduling, Status}
@@ -76,13 +77,32 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
 
   def show(conn, %{"id" => id}) do
     with {:ok, snowflake} <- parse_id(id),
-         %Status{} = status <- Statuses.get(snowflake),
+         item when not is_nil(item) <-
+           Statuses.get(snowflake) || Reblogs.get_by_wrapper_id(snowflake),
          viewer_id = viewer_id(conn),
-         true <- Statuses.visible_to?(status, viewer_id) || :forbidden do
-      json(conn, StatusJSON.render(status, viewer_id))
+         true <- Statuses.visible_to?(boosted(item), viewer_id) || :forbidden do
+      json(conn, StatusJSON.render(item, viewer_id))
     else
       :forbidden -> not_found(conn)
       _ -> not_found(conn)
+    end
+  end
+
+  defp boosted(%Angler.Reblogs.Reblog{status: status}), do: status
+  defp boosted(%Status{} = status), do: status
+
+  # Clients act on whichever id they were shown; a boost's wrapper id means
+  # the post it boosts.
+  defp get_target(id) do
+    case Statuses.get(id) do
+      %Status{} = status ->
+        status
+
+      nil ->
+        case Reblogs.get_by_wrapper_id(id) do
+          %{status: %Status{id: sid}} -> Statuses.get(sid)
+          nil -> nil
+        end
     end
   end
 
@@ -352,14 +372,11 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
     end)
   end
 
+  # Mastodon answers a boost with the new wrapper status.
   def reblog(conn, params) do
     interact(conn, params, fn status, profile ->
-      case Statuses.reblog(profile, status) do
-        {:error, :unrebloggable} ->
-          {:error, :unrebloggable}
-
-        other ->
-          other
+      with {:ok, _} <- Statuses.reblog(profile, status) do
+        {:ok, Repo.get_by!(Angler.Reblogs.Reblog, profile_id: profile.id, status_id: status.id)}
       end
     end)
   end
@@ -391,13 +408,20 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
     %{profile: profile} = BearerAuth.current_scope(conn)
 
     with {:ok, snowflake} <- parse_id(id),
-         %Status{} = status <- Statuses.get(snowflake),
+         %Status{} = status <- get_target(snowflake),
          true <- Statuses.visible_to?(status, profile.id) || :forbidden,
-         {:ok, _updated} <- fun.(status, profile) do
+         {:ok, updated} <- fun.(status, profile) do
       # Always re-render from a fresh read so counters + viewer overlay are
-      # accurate after the action.
-      fresh = Statuses.get(snowflake)
-      json(conn, StatusJSON.render(fresh, profile.id))
+      # accurate after the action. A boost answers with its wrapper.
+      fresh = Statuses.get(status.id)
+
+      case updated do
+        %Angler.Reblogs.Reblog{} = reblog ->
+          json(conn, StatusJSON.render(%{reblog | status: fresh}, profile.id))
+
+        _ ->
+          json(conn, StatusJSON.render(fresh, profile.id))
+      end
     else
       :forbidden ->
         not_found(conn)

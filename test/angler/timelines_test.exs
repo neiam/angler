@@ -157,8 +157,15 @@ defmodule Angler.TimelinesTest do
       # The boost surfaces in both the booster's and the booster's follower's home.
       {alice_home, _} = Timelines.home(ctx.alice.id, default_cursor())
       {carol_home, _} = Timelines.home(carol.id, default_cursor())
-      assert Enum.map(alice_home, & &1.id) == [old.id]
-      assert Enum.map(carol_home, & &1.id) == [old.id]
+      # Shown as the boost, by alice.
+      assert [%Angler.Reblogs.Reblog{profile_id: aid, status: %{id: oid}}] = alice_home
+      assert {aid, oid} == {ctx.alice.id, old.id}
+      assert [%Angler.Reblogs.Reblog{status: %{id: ^oid}}] = carol_home
+
+      # With boosts off, carol (who doesn't follow bob) doesn't get it at all,
+      # and alice still sees nothing she wouldn't otherwise.
+      {carol_plain, _} = Timelines.home(carol.id, default_cursor(), include_reblogs: false)
+      assert carol_plain == []
     end
 
     test "boosting an old post bumps it to the top of the timeline", ctx do
@@ -177,7 +184,7 @@ defmodule Angler.TimelinesTest do
       Oban.drain_queue(queue: :feed)
 
       {home, _} = Timelines.home(ctx.alice.id, default_cursor())
-      assert Enum.map(home, & &1.id) == [s1.id, s2.id]
+      assert Enum.map(home, &boosted_id/1) == [s1.id, s2.id]
     end
 
     test "skips :direct visibility", ctx do
@@ -418,4 +425,7 @@ defmodule Angler.TimelinesTest do
       assert {[], _} = Timelines.hashtag("photography", default_cursor())
     end
   end
+
+  defp boosted_id(%Angler.Reblogs.Reblog{status: s}), do: s.id
+  defp boosted_id(s), do: s.id
 end

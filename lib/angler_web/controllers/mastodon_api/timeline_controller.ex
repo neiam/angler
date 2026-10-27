@@ -17,13 +17,34 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
 
   ## GET /timelines/home
 
+  # Boosts: `include_reblogs` / `photos_reblogs_only` when sent, else the
+  # user's timeline settings (`/api/v2.1/account/timeline/settings`). The
+  # Pixelfed app follows the reblogs setting, off by default as upstream;
+  # Mastodon clients expect boosts, so for them it defaults on.
   def home(conn, params) do
-    %{profile: profile} = BearerAuth.current_scope(conn)
+    %{profile: profile, user: user} = BearerAuth.current_scope(conn)
     cursor = MastodonCursor.parse(params, @default_limit, @max_limit)
+    pe? = pe?(params)
+    web = Angler.Accounts.Settings.get(user.id).web || %{}
 
-    {statuses, cursor_rows} = Timelines.home(profile.id, cursor)
-    respond(conn, statuses, cursor_rows, profile.id, "home")
+    opts = [
+      include_reblogs:
+        bool_param(
+          params["include_reblogs"],
+          if(pe?, do: web["enable_reblogs"] == true, else: true)
+        ),
+      photos_reblogs_only:
+        bool_param(params["photos_reblogs_only"], web["photo_reblogs_only"] == true)
+    ]
+
+    {statuses, cursor_rows} = Timelines.home(profile.id, cursor, opts)
+    respond(conn, statuses, cursor_rows, profile.id, "home", pe: pe?)
   end
+
+  defp pe?(params), do: Map.has_key?(params, "_pe")
+
+  defp bool_param(nil, default), do: default
+  defp bool_param(v, _default), do: v in [true, "true", "1", 1]
 
   ## GET /timelines/public
 
@@ -59,8 +80,8 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
 
   ## Internals
 
-  defp respond(conn, statuses, cursor_rows, viewer_id, context) do
-    rendered = StatusJSON.render_many(statuses, viewer_id, context: context)
+  defp respond(conn, statuses, cursor_rows, viewer_id, context, opts \\ []) do
+    rendered = StatusJSON.render_many(statuses, viewer_id, [context: context] ++ opts)
 
     conn =
       case MastodonCursor.link_header(cursor_rows, current_url_without_cursor(conn), :id) do

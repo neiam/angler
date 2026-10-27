@@ -130,6 +130,13 @@ defmodule Angler.Timelines.Workers.FeedInsert do
   # for these recipients first so the re-inserted row earns a fresh bigserial
   # `id` (timeline order) and a current `inserted_at` (reads as "new").
   defp fan_out_reblog(%Status{id: status_id}, actor_id) do
+    reblog_id =
+      Repo.one(
+        from r in Angler.Reblogs.Reblog,
+          where: r.profile_id == ^actor_id and r.status_id == ^status_id,
+          select: r.id
+      )
+
     follower_ids =
       from(f in Follower,
         where: f.profile_id == ^actor_id and not is_nil(f.accepted_at),
@@ -148,7 +155,7 @@ defmodule Angler.Timelines.Workers.FeedInsert do
 
     rows =
       Enum.map(recipient_ids, fn rid ->
-        %{profile_id: rid, status_id: status_id, inserted_at: now}
+        %{profile_id: rid, status_id: status_id, reblog_id: reblog_id, inserted_at: now}
       end)
 
     if rows != [] do

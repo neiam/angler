@@ -128,9 +128,27 @@ defmodule AnglerWeb.MastodonAPI.StatusInteractionsTest do
           ~p"/api/v1/statuses/#{Integer.to_string(ctx.status.id)}/reblog"
         )
 
+      # Mastodon answers with the wrapper: the booster's status, carrying
+      # the boosted post (and its counts) in `reblog`.
       body = json_response(conn, 200)
       assert body["reblogged"] == true
-      assert body["reblogs_count"] == 1
+      assert body["reblog"]["id"] == Integer.to_string(ctx.status.id)
+      assert body["reblog"]["reblogs_count"] == 1
+      refute body["id"] == body["reblog"]["id"]
+
+      # The wrapper id resolves, and acting on it acts on the post.
+      assert ctx.conn
+             |> put_req_header("authorization", "Bearer " <> ctx.read)
+             |> get(~p"/api/v1/statuses/#{body["id"]}")
+             |> json_response(200)
+             |> get_in(["reblog", "id"]) == body["reblog"]["id"]
+
+      unboosted =
+        post_with(ctx.conn, ctx.write, ~p"/api/v1/statuses/#{body["id"]}/unreblog")
+        |> json_response(200)
+
+      assert unboosted["id"] == Integer.to_string(ctx.status.id)
+      assert unboosted["reblogged"] == false
     end
 
     test "422 on private status", ctx do

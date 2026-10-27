@@ -19,6 +19,7 @@ defmodule AnglerWeb.MastodonAPI.Status do
   alias Angler.Repo
   alias Angler.Media.Asset
   alias Angler.Polls
+  alias Angler.Reblogs.Reblog
   alias Angler.Statuses.{Mention, Status, StatusHashtag, ViewerOverlay}
   alias AnglerWeb.MastodonAPI.{Account, Media}
   alias AnglerWeb.MastodonAPI.Poll, as: PollJSON
@@ -31,8 +32,12 @@ defmodule AnglerWeb.MastodonAPI.Status do
   fields are all `false` — appropriate for anonymous reads or for when the
   caller will overlay later in batch.
   """
-  @spec render(Status.t(), integer() | nil, keyword()) :: map()
+  @spec render(Status.t() | Reblog.t(), integer() | nil, keyword()) :: map()
   def render(status, viewer_id \\ nil, opts \\ [])
+
+  def render(%Reblog{status: %Status{} = status} = reblog, viewer_id, opts) do
+    wrap(reblog, render(status, viewer_id, opts), opts)
+  end
 
   def render(%Status{} = status, viewer_id, opts) do
     status =
@@ -64,28 +69,92 @@ defmodule AnglerWeb.MastodonAPI.Status do
   def render_many(statuses, viewer_id \\ nil, opts \\ [])
   def render_many([], _, _), do: []
 
-  def render_many(statuses, nil, _opts) do
-    Enum.map(statuses, &render(&1, nil))
+  def render_many(statuses, nil, opts) do
+    Enum.map(statuses, &render(&1, nil, opts))
   end
 
-  def render_many(statuses, viewer_id, opts) when is_integer(viewer_id) do
+  # Items are statuses or boosts (`%Reblog{}` with `status` loaded); a
+  # boost is judged by — and overlaid from — the post it boosts.
+  def render_many(items, viewer_id, opts) when is_integer(viewer_id) do
+    statuses = Enum.map(items, &boosted/1)
     overlays = ViewerOverlay.batch(viewer_id, Enum.map(statuses, & &1.id))
     actions = Matching.actions_for(viewer_id, statuses, opts[:context])
 
-    statuses
+    items
     # `hide`-action matches are removed from the list entirely; `warn`/`blur`
     # stay but get a `filtered` marker the client/UI gates on.
-    |> Enum.reject(fn status ->
-      match = Map.get(actions, status.id)
+    |> Enum.reject(fn item ->
+      match = Map.get(actions, boosted(item).id)
       match && match.action == "hide"
     end)
-    |> Enum.map(fn status ->
-      base = render(status, nil)
+    |> Enum.map(fn item ->
+      status = boosted(item)
 
-      base
-      |> apply_viewer_overlay(Map.get(overlays, status.id, ViewerOverlay.empty()))
-      |> apply_filtered(Map.get(actions, status.id))
+      rendered =
+        status
+        |> render(nil)
+        |> apply_viewer_overlay(Map.get(overlays, status.id, ViewerOverlay.empty()))
+        |> apply_filtered(Map.get(actions, status.id))
+
+      case item do
+        %Reblog{} = reblog -> wrap(reblog, rendered, opts)
+        _ -> rendered
+      end
     end)
+  end
+
+  defp boosted(%Reblog{status: %Status{} = s}), do: s
+  defp boosted(%Status{} = s), do: s
+
+  @doc """
+  A boost as a Mastodon wrapper status: the booster's, carrying the post in
+  `reblog`. Its id is the boost's own (`reblogs.reblog_status_id`). The
+  Pixelfed app (`pe: true`) gets upstream's flattened form instead: the post
+  itself, with `reblogged_by` naming the booster (bfbc54989).
+  """
+  @spec wrap(Reblog.t(), map(), keyword()) :: map()
+  def wrap(%Reblog{} = reblog, rendered, opts \\ []) do
+    reblog = Repo.preload(reblog, :profile)
+    booster = Account.render(reblog.profile)
+
+    if Keyword.get(opts, :pe, false) do
+      Map.put(rendered, "reblogged_by", booster)
+    else
+      %{
+        "id" => Integer.to_string(reblog.reblog_status_id),
+        "created_at" => format_ts(reblog.inserted_at),
+        "in_reply_to_id" => nil,
+        "in_reply_to_account_id" => nil,
+        "sensitive" => false,
+        "spoiler_text" => "",
+        "visibility" => rendered["visibility"],
+        "language" => nil,
+        "uri" => reblog.remote_url || rendered["uri"],
+        "url" => rendered["url"],
+        "replies_count" => 0,
+        "reblogs_count" => 0,
+        "favourites_count" => 0,
+        "edited_at" => nil,
+        "favourited" => rendered["favourited"],
+        "reblogged" => rendered["reblogged"],
+        "muted" => rendered["muted"],
+        "bookmarked" => rendered["bookmarked"],
+        "pinned" => false,
+        "content" => "",
+        "pf_type" => "share",
+        "content_text" => "",
+        "reblog" => rendered,
+        "application" => nil,
+        "mentions" => [],
+        "emojis" => [],
+        "card" => nil,
+        "poll" => nil,
+        "media_attachments" => [],
+        "account" => booster,
+        "tags" => [],
+        "filtered" => rendered["filtered"]
+      }
+    end
   end
 
   defp render_base(%Status{} = status) do

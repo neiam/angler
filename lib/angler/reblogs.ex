@@ -23,6 +23,17 @@ defmodule Angler.Reblogs do
     )
   end
 
+  @doc "The boost whose wrapper status has this id, with booster and post loaded."
+  @spec get_by_wrapper_id(integer()) :: Reblog.t() | nil
+  def get_by_wrapper_id(id) when is_integer(id) do
+    from(r in Reblog, where: r.reblog_status_id == ^id, preload: [:profile, :status])
+    |> Repo.one()
+    |> case do
+      %Reblog{status: %{deleted_at: nil}} = r -> r
+      _ -> nil
+    end
+  end
+
   @doc "Remove a reblog by `(profile_id, status_id)`. Returns count removed."
   @spec delete(integer(), integer()) :: integer()
   def delete(profile_id, status_id) do
