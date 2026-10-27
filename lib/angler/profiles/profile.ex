@@ -122,12 +122,41 @@ defmodule Angler.Profiles.Profile do
       :avatar_path,
       :header_path
     ])
+    |> strip_control_chars(:name)
+    |> web_website_only()
     |> validate_length(:name, max: 30)
     |> validate_length(:bio_text, max: 200)
     |> validate_length(:website, max: 120)
     |> validate_length(:location, max: 60)
     |> normalize_pronouns()
     |> render_bio()
+  end
+
+  # Control characters (NULs, newlines) and bidi overrides let a display name
+  # spoof or break whatever renders it (upstream strips them too). Joiners
+  # stay — emoji sequences need them.
+  defp strip_control_chars(changeset, field) do
+    update_change(changeset, field, fn
+      v when is_binary(v) ->
+        String.replace(v, ~r/[\p{Cc}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u, "")
+
+      v ->
+        v
+    end)
+  end
+
+  # The website is rendered as a link, so only http(s) URLs are kept — a
+  # `javascript:` one would run on click. Anything else is cleared, as
+  # upstream does (1d72f1b43), rather than rejected.
+  defp web_website_only(changeset) do
+    update_change(changeset, :website, fn
+      v when is_binary(v) ->
+        v = String.trim(v)
+        if Regex.match?(~r{\Ahttps?://[^\s/]+}i, v), do: v, else: nil
+
+      v ->
+        v
+    end)
   end
 
   # Pixelfed caps pronouns at 4 non-empty entries.

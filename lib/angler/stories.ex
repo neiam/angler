@@ -526,17 +526,31 @@ defmodule Angler.Stories do
       %Story{can_reply: false} ->
         {:error, :replies_disabled}
 
-      %Story{profile_id: author_id} ->
-        author = Repo.get!(Profile, author_id)
+      %Story{profile_id: author_id} = story ->
+        # Only a live story, from someone who follows the author, with no
+        # block either way (upstream StoryApiV1Controller::comment).
+        if commentable?(story, sender) do
+          author = Repo.get!(Profile, author_id)
 
-        Statuses.create_local(sender, %{
-          "status" => "@" <> author.username <> " " <> text,
-          "visibility" => "direct"
-        })
+          Statuses.create_local(sender, %{
+            "status" => "@" <> author.username <> " " <> text,
+            "visibility" => "direct"
+          })
+        else
+          {:error, :not_found}
+        end
     end
   end
 
   def comment(_, _, _), do: {:error, :empty_comment}
+
+  defp commentable?(%Story{profile_id: author_id} = story, %Profile{id: sender_id}) do
+    story.active == true and
+      DateTime.compare(story.expires_at, DateTime.utc_now()) == :gt and
+      match?(%{accepted_at: %DateTime{}}, Angler.Follows.get_follower(author_id, sender_id)) and
+      not Angler.Profiles.BlocksMutes.blocked?(author_id, sender_id) and
+      not Angler.Profiles.BlocksMutes.blocked?(sender_id, author_id)
+  end
 
   ## Expiry (called by the cron worker)
 

@@ -24,8 +24,16 @@ defmodule AnglerWeb.SessionController do
 
   def create(conn, %{"username" => handle, "password" => password} = params) do
     next = sanitize_next(params["next"])
+    limit_key = AnglerWeb.LoginThrottle.key(conn, handle)
 
-    case Accounts.authenticate(handle, password) do
+    case AnglerWeb.LoginThrottle.authenticate(limit_key, handle, password) do
+      :rate_limited ->
+        render(conn, :new,
+          error: "Too many failed attempts. Try again in a few minutes.",
+          next: next,
+          username: handle
+        )
+
       {:ok, user} ->
         if TwoFactor.any_factor?(user) do
           # Password OK but a second factor is required — stash a *pending*

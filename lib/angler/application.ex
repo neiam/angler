@@ -25,6 +25,7 @@ defmodule Angler.Application do
         cluster_children(topologies) ++
         [
           {Phoenix.PubSub, name: Angler.PubSub},
+          Angler.RateLimit,
           {Oban, Application.fetch_env!(:angler, Oban)},
           # Start to serve requests, typically the last entry
           AnglerWeb.Endpoint

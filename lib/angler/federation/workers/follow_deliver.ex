@@ -196,7 +196,7 @@ defmodule Angler.Federation.Workers.FollowDeliver do
         [{"Content-Type", "application/activity+json"}, {"Accept", "application/activity+json"}]
       )
 
-    case Req.post(
+    case Angler.Federation.HTTP.deliver(
            [
              url: inbox_url,
              headers: headers,

@@ -40,21 +40,38 @@ defmodule AnglerWeb.TwoFactorChallengeLive do
     {:noreply, assign(socket, mode: String.to_existing_atom(mode), error: nil)}
   end
 
+  # 5 tries per 15 minutes per pending login (upstream 8cebb24c0): a TOTP
+  # code has 10^6 values, so an unthrottled form is guessable.
+  @two_factor_limit 5
+  @two_factor_window_s 900
+
   def handle_event("verify", %{"code" => code}, socket) do
     user = socket.assigns.user
+    limit_key = {:two_factor, user.id}
 
     result =
-      case socket.assigns.mode do
-        :totp -> TwoFactor.verify_code(user, String.trim(code))
-        :recovery -> TwoFactor.verify_recovery_code(user, code)
+      cond do
+        not Angler.RateLimit.allowed?(limit_key, @two_factor_limit, @two_factor_window_s) ->
+          :rate_limited
+
+        socket.assigns.mode == :totp ->
+          TwoFactor.verify_code(user, String.trim(code))
+
+        true ->
+          TwoFactor.verify_recovery_code(user, code)
       end
 
     case result do
+      :rate_limited ->
+        {:noreply, assign(socket, :error, "Too many attempts. Wait a few minutes and try again.")}
+
       :ok ->
+        Angler.RateLimit.reset(limit_key)
         token = Phoenix.Token.sign(socket, @token_salt, user.id)
         {:noreply, redirect(socket, to: ~p"/login/two-factor/complete?#{[token: token]}")}
 
       {:error, _} ->
+        Angler.RateLimit.fail(limit_key, @two_factor_window_s)
         {:noreply, assign(socket, :error, "That code didn't match. Try again.")}
     end
   end
@@ -74,7 +91,7 @@ defmodule AnglerWeb.TwoFactorChallengeLive do
           <% end %>
         </p>
 
-        <.form for={%{}} phx-submit="verify" class="space-y-4">
+        <.form for={%{}} id="two-factor-form" phx-submit="verify" class="space-y-4">
           <input
             type="text"
             name="code"

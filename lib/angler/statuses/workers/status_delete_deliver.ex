@@ -61,7 +61,7 @@ defmodule Angler.Statuses.Workers.StatusDeleteDeliver do
         ]
       )
 
-    case Req.post(
+    case Angler.Federation.HTTP.deliver(
            [
              url: inbox_url,
              headers: headers,

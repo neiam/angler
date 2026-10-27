@@ -26,7 +26,9 @@ defmodule AnglerWeb.Admin.AdminNamespaceTest do
     {:ok, user} = user |> Ecto.Changeset.change(is_admin: true) |> Repo.update()
 
     %{client: c} = OAuth.first_party_client!()
-    {:ok, %{access: bearer}} = OAuth.issue_token(user, c, scopes: ["read", "write"])
+
+    {:ok, %{access: bearer}} =
+      OAuth.issue_token(user, c, scopes: ["read", "write", "admin:read", "admin:write"])
 
     %{user: user, profile: profile, bearer: bearer}
   end
@@ -57,6 +59,20 @@ defmodule AnglerWeb.Admin.AdminNamespaceTest do
 
     test "missing bearer → 401", %{conn: conn} do
       assert json_response(get(conn, ~p"/api/v1/admin/reports"), 401)
+    end
+
+    test "an admin's token without admin scopes → 403", %{conn: conn} do
+      %{user: admin} = register_admin!()
+      %{client: c} = OAuth.first_party_client!()
+      {:ok, %{access: bearer}} = OAuth.issue_token(admin, c, scopes: ["read", "write"])
+
+      assert json_response(auth(conn, bearer) |> get(~p"/api/v1/admin/reports"), 403)
+
+      assert json_response(
+               auth(conn, bearer)
+               |> post(~p"/api/v1/admin/domain_blocks", %{"domain" => "x.test"}),
+               403
+             )
     end
   end
 

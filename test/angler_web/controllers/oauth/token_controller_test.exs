@@ -74,6 +74,30 @@ defmodule AnglerWeb.OAuth.TokenControllerTest do
       assert json_response(resp, 400)["error"] == "invalid_grant"
     end
 
+    test "429 after repeated failures, until the window passes", %{conn: conn} = ctx do
+      key = AnglerWeb.LoginThrottle.key({127, 0, 0, 1}, "alice@example.com")
+      on_exit(fn -> Angler.RateLimit.reset(key) end)
+
+      attempt = fn password ->
+        post(conn, ~p"/oauth/token", %{
+          "grant_type" => "password",
+          "client_id" => ctx.client_id,
+          "client_secret" => ctx.client_secret,
+          "username" => "alice@example.com",
+          "password" => password
+        })
+      end
+
+      for _ <- 1..10,
+          do: assert(json_response(attempt.("wrong"), 400)["error"] == "invalid_grant")
+
+      # Even the right password is refused while throttled.
+      assert json_response(attempt.("verysecret123"), 429)["error"] == "too_many_attempts"
+
+      Angler.RateLimit.reset(key)
+      assert json_response(attempt.("verysecret123"), 200)
+    end
+
     test "401 invalid_client on wrong secret", %{conn: conn} = ctx do
       resp =
         post(conn, ~p"/oauth/token", %{

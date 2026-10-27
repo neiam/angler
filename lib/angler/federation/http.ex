@@ -4,8 +4,9 @@ defmodule Angler.Federation.HTTP do
 
   Wraps `Req.get/2` with safety checks:
   * Scheme must be `https` (or `http` only when `Mix.env() == :test`)
-  * Resolved host must not be in an RFC 1918 / loopback / link-local range —
-    blocks SSRF into private infrastructure
+  * Resolved host must not be in a private, loopback, link-local, CGNAT,
+    multicast or reserved range — blocks SSRF into private infrastructure.
+    Redirects are followed by hand so every hop is re-checked.
   * Host must not be in the banned-domain set
   * Response Content-Type must be in the allowlist (default: AP / JSON-LD)
   * Body capped at 1 MiB
@@ -24,6 +25,7 @@ defmodule Angler.Federation.HTTP do
   )
 
   @max_body_bytes 1_048_576
+  @max_redirects 3
 
   @doc """
   Fetch a URL and return `{:ok, parsed_json}` on success.
@@ -50,22 +52,7 @@ defmodule Angler.Federation.HTTP do
     allowed = Keyword.get(opts, :content_types, @ap_content_types)
     max_bytes = Keyword.get(opts, :max_bytes, @max_body_bytes)
 
-    with {:ok, %URI{scheme: scheme, host: host} = uri} <- parse_uri(url),
-         :ok <- check_scheme(scheme),
-         :ok <- check_banned(host),
-         :ok <- check_resolved_host(host),
-         req_headers <- maybe_sign_get(uri, accept, opts[:signed_with]),
-         {:ok, resp} <-
-           [
-             url: url,
-             headers: req_headers,
-             max_redirects: 3,
-             receive_timeout: 10_000,
-             connect_options: [timeout: 5_000],
-             decode_body: false
-           ]
-           |> Keyword.merge(req_overrides())
-           |> Req.get(),
+    with {:ok, resp} <- get_following_redirects(url, accept, opts[:signed_with], @max_redirects),
          :ok <- check_status(resp.status),
          :ok <- check_content_type(resp.headers, allowed),
          :ok <- check_size(resp.body, max_bytes),
@@ -74,7 +61,60 @@ defmodule Angler.Federation.HTTP do
     end
   end
 
+  @doc """
+  POST to a remote inbox under the same URL guards as `fetch/2` (scheme,
+  banned domain, private address). `req_opts` are passed to `Req.post/1`;
+  redirects are never followed, since a redirected POST would be replayed as a
+  GET against wherever the peer points it.
+  """
+  @spec deliver(keyword()) :: {:ok, Req.Response.t()} | {:error, term()}
+  def deliver(req_opts) when is_list(req_opts) do
+    with {:ok, _uri} <- check_url(Keyword.fetch!(req_opts, :url)) do
+      req_opts
+      |> Keyword.merge(redirect: false)
+      |> Keyword.merge(req_overrides())
+      |> Req.post()
+    end
+  end
+
   ## Internals
+
+  defp get_following_redirects(url, accept, signed_with, hops_left) do
+    with {:ok, uri} <- check_url(url),
+         {:ok, resp} <-
+           [
+             url: url,
+             headers: maybe_sign_get(uri, accept, signed_with),
+             redirect: false,
+             receive_timeout: 10_000,
+             connect_options: [timeout: 5_000],
+             decode_body: false
+           ]
+           |> Keyword.merge(req_overrides())
+           |> Req.get() do
+      case {resp.status, header(resp.headers, "location")} do
+        {status, location} when status in [301, 302, 303, 307, 308] and location != nil ->
+          if hops_left > 0 do
+            next = uri |> URI.merge(location |> List.wrap() |> List.first()) |> URI.to_string()
+            get_following_redirects(next, accept, signed_with, hops_left - 1)
+          else
+            {:error, :too_many_redirects}
+          end
+
+        _ ->
+          {:ok, resp}
+      end
+    end
+  end
+
+  defp check_url(url) do
+    with {:ok, %URI{scheme: scheme, host: host} = uri} <- parse_uri(url),
+         :ok <- check_scheme(scheme),
+         :ok <- check_banned(host),
+         :ok <- check_resolved_host(host) do
+      {:ok, uri}
+    end
+  end
 
   defp parse_uri(url) do
     case URI.parse(url) do
@@ -129,19 +169,69 @@ defmodule Angler.Federation.HTTP do
     end
   end
 
-  # IPv4 ranges
-  defp private_ip?({10, _, _, _}), do: true
-  defp private_ip?({127, _, _, _}), do: true
-  defp private_ip?({169, 254, _, _}), do: true
-  defp private_ip?({172, b, _, _}) when b >= 16 and b <= 31, do: true
-  defp private_ip?({192, 168, _, _}), do: true
-  defp private_ip?({0, _, _, _}), do: true
-  # IPv6 ranges
-  defp private_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
-  defp private_ip?({0xFC00, _, _, _, _, _, _, _}), do: true
-  defp private_ip?({0xFD00, _, _, _, _, _, _, _}), do: true
-  defp private_ip?({0xFE80, _, _, _, _, _, _, _}), do: true
-  defp private_ip?(_), do: false
+  # IPv4 ranges that are never a federation peer: this-network, private,
+  # CGNAT, loopback, link-local, IETF/doc/benchmark nets, multicast, reserved.
+  @private_v4 [
+    {{0, 0, 0, 0}, 8},
+    {{10, 0, 0, 0}, 8},
+    {{100, 64, 0, 0}, 10},
+    {{127, 0, 0, 0}, 8},
+    {{169, 254, 0, 0}, 16},
+    {{172, 16, 0, 0}, 12},
+    {{192, 0, 0, 0}, 24},
+    {{192, 0, 2, 0}, 24},
+    {{192, 88, 99, 0}, 24},
+    {{192, 168, 0, 0}, 16},
+    {{198, 18, 0, 0}, 15},
+    {{198, 51, 100, 0}, 24},
+    {{203, 0, 113, 0}, 24},
+    {{224, 0, 0, 0}, 4},
+    {{240, 0, 0, 0}, 4}
+  ]
+
+  # IPv6: unspecified, loopback, discard, IETF/Teredo, documentation, ULA,
+  # link-local, multicast. IPv4-mapped and NAT64 addresses are checked by
+  # their embedded IPv4 address below.
+  @private_v6 [
+    {{0, 0, 0, 0, 0, 0, 0, 0}, 128},
+    {{0, 0, 0, 0, 0, 0, 0, 1}, 128},
+    {{0x100, 0, 0, 0, 0, 0, 0, 0}, 64},
+    {{0x2001, 0, 0, 0, 0, 0, 0, 0}, 23},
+    {{0x2001, 0xDB8, 0, 0, 0, 0, 0, 0}, 32},
+    {{0xFC00, 0, 0, 0, 0, 0, 0, 0}, 7},
+    {{0xFE80, 0, 0, 0, 0, 0, 0, 0}, 10},
+    {{0xFF00, 0, 0, 0, 0, 0, 0, 0}, 8}
+  ]
+
+  @doc false
+  # Public for tests.
+  @spec private_ip?(:inet.ip_address()) :: boolean()
+  def private_ip?({_, _, _, _} = ip), do: Enum.any?(@private_v4, &in_cidr?(ip, &1, 8))
+
+  # ::ffff:a.b.c.d (IPv4-mapped) and 64:ff9b::a.b.c.d (NAT64)
+  def private_ip?({0, 0, 0, 0, 0, 0xFFFF, hi, lo}), do: private_ip?(embedded_v4(hi, lo))
+  def private_ip?({0x64, 0xFF9B, 0, 0, 0, 0, hi, lo}), do: private_ip?(embedded_v4(hi, lo))
+
+  def private_ip?({_, _, _, _, _, _, _, _} = ip),
+    do: Enum.any?(@private_v6, &in_cidr?(ip, &1, 16))
+
+  def private_ip?(_), do: false
+
+  defp embedded_v4(hi, lo), do: {div(hi, 256), rem(hi, 256), div(lo, 256), rem(lo, 256)}
+
+  defp in_cidr?(ip, {net, prefix}, bits_per_part) do
+    width = tuple_size(ip) * bits_per_part
+    shift = width - prefix
+
+    Bitwise.bsr(to_int(ip, bits_per_part), shift) ==
+      Bitwise.bsr(to_int(net, bits_per_part), shift)
+  end
+
+  defp to_int(tuple, bits_per_part) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.reduce(0, fn part, acc -> Bitwise.bsl(acc, bits_per_part) + part end)
+  end
 
   defp check_status(s) when s in 200..299, do: :ok
   defp check_status(_), do: {:error, :bad_status}
@@ -180,7 +270,7 @@ defmodule Angler.Federation.HTTP do
     {:ok, headers} =
       Angler.Federation.HTTPSignature.sign(
         :get,
-        uri.path || "/",
+        request_target(uri),
         uri.host,
         "",
         key_id,
@@ -190,6 +280,11 @@ defmodule Angler.Federation.HTTP do
 
     Enum.map(headers, fn {k, v} -> {String.downcase(k), v} end)
   end
+
+  # `(request-target)` covers the query string too; signing the bare path
+  # fails verification on authorized-fetch servers (upstream ed63be4d4).
+  defp request_target(%URI{path: path, query: nil}), do: path || "/"
+  defp request_target(%URI{path: path, query: q}), do: (path || "/") <> "?" <> q
 
   defp test_env? do
     # Avoids compile-time Mix dependency in production builds.

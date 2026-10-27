@@ -44,6 +44,7 @@ defmodule Angler.DataCase do
     # one test's rows being read by another). Start each test from a clean slate.
     Angler.Instance.clear_stats_cache()
     Angler.Hashtags.clear_usage_counts_cache()
+    Angler.RateLimit.reset_all()
   end
 
   @doc """

@@ -52,15 +52,17 @@ defmodule AnglerWeb.Router do
     plug AnglerWeb.Plugs.BearerAuth, scopes: ["write"]
   end
 
+  # Admin routes need both the role and the admin scope, so a plain
+  # read/write token held by an admin can't reach them (as upstream).
   pipeline :admin_read do
     plug :accepts, ["json"]
-    plug AnglerWeb.Plugs.BearerAuth
+    plug AnglerWeb.Plugs.BearerAuth, scopes: ["admin:read"]
     plug AnglerWeb.Plugs.AdminAuth, role: :moderator
   end
 
   pipeline :admin_write do
     plug :accepts, ["json"]
-    plug AnglerWeb.Plugs.BearerAuth
+    plug AnglerWeb.Plugs.BearerAuth, scopes: ["admin:write"]
     plug AnglerWeb.Plugs.AdminAuth, role: :admin
   end
 

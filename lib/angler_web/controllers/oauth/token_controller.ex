@@ -44,12 +44,24 @@ defmodule AnglerWeb.OAuth.TokenController do
       scopes = parse_scopes(params["scope"], client.scopes)
       otp = params["otp"] || params["code"] || params["two_factor_code"]
 
-      case OAuth.issue_password_token(username, password, client, scopes, otp: otp) do
-        {:ok, %{token: token, access: access, refresh: refresh}} ->
-          send_token(conn, token, access, refresh)
+      limit_key = AnglerWeb.LoginThrottle.key(conn, username)
 
-        {:error, reason} ->
-          send_error(conn, reason)
+      if AnglerWeb.LoginThrottle.allowed?(limit_key) do
+        case OAuth.issue_password_token(username, password, client, scopes, otp: otp) do
+          {:ok, %{token: token, access: access, refresh: refresh}} ->
+            AnglerWeb.LoginThrottle.succeeded(limit_key)
+            send_token(conn, token, access, refresh)
+
+          # Asking for the second factor isn't a failed guess.
+          {:error, :mfa_required} ->
+            send_error(conn, :mfa_required)
+
+          {:error, reason} ->
+            AnglerWeb.LoginThrottle.failed(limit_key)
+            send_error(conn, reason)
+        end
+      else
+        send_error(conn, "too_many_attempts")
       end
     else
       {:error, reason} -> send_error(conn, reason)
@@ -165,6 +177,7 @@ defmodule AnglerWeb.OAuth.TokenController do
 
   defp error_status("invalid_client"), do: 401
   defp error_status("mfa_required"), do: 401
+  defp error_status("too_many_attempts"), do: 429
   defp error_status(_), do: 400
 
   defp describe("invalid_request"), do: "request was missing a required parameter"
@@ -172,5 +185,6 @@ defmodule AnglerWeb.OAuth.TokenController do
   defp describe("invalid_grant"), do: "the credentials or code are invalid or expired"
   defp describe("unsupported_grant_type"), do: "the requested grant type is not supported"
   defp describe("mfa_required"), do: "a two-factor code is required; resend with an otp parameter"
+  defp describe("too_many_attempts"), do: "too many failed attempts; try again later"
   defp describe(_), do: "internal error"
 end

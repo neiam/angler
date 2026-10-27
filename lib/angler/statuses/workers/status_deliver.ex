@@ -82,7 +82,7 @@ defmodule Angler.Statuses.Workers.StatusDeliver do
         ]
       )
 
-    case Req.post(
+    case Angler.Federation.HTTP.deliver(
            [
              url: inbox_url,
              headers: headers,

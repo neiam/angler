@@ -63,6 +63,26 @@ defmodule AnglerWeb.MastodonAPI.AccountProfileTest do
       assert body["locked"] == true
     end
 
+    test "keeps only http(s) websites and strips control chars from display_name", ctx do
+      patch_creds = fn params ->
+        ctx.conn
+        |> auth(ctx.write)
+        |> patch(~p"/api/v1/accounts/update_credentials", params)
+        |> json_response(200)
+      end
+
+      body =
+        patch_creds.(%{"website" => "javascript:alert(1)", "display_name" => "Al\u202Eice\n👨‍👩‍👧"})
+
+      assert Angler.Repo.get!(Angler.Profiles.Profile, ctx.alice.id).website == nil
+      assert body["display_name"] == "Alice👨‍👩‍👧"
+
+      patch_creds.(%{"website" => "https://alice.example"})
+
+      assert Angler.Repo.get!(Angler.Profiles.Profile, ctx.alice.id).website ==
+               "https://alice.example"
+    end
+
     test "uploads avatar via multipart", ctx do
       src = Path.join(System.tmp_dir!(), "ang-av-#{System.unique_integer([:positive])}.jpg")
       File.cp!(@fixture, src)

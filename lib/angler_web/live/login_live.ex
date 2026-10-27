@@ -7,15 +7,24 @@ defmodule AnglerWeb.LoginLive do
   """
   use AnglerWeb, :live_view
 
-  alias Angler.Accounts
+  alias AnglerWeb.LoginThrottle
 
   @impl true
   def mount(params, _session, socket) do
     if socket.assigns.current_user do
       {:ok, push_navigate(socket, to: ~p"/")}
     else
+      # The live check reports whether credentials are right, so it is
+      # throttled like the form POST — keyed on the same client IP.
+      ip =
+        case connected?(socket) && get_connect_info(socket, :peer_data) do
+          %{address: address} -> address
+          _ -> nil
+        end
+
       {:ok,
        socket
+       |> assign(:client_ip, ip)
        |> assign(:page_title, "Log in")
        |> assign(:next, sanitize_next(params["next"]))
        |> assign(:error, nil)
@@ -26,12 +35,21 @@ defmodule AnglerWeb.LoginLive do
 
   @impl true
   def handle_event("submit", %{"username" => handle, "password" => password} = params, socket) do
-    case Accounts.authenticate(handle, password) do
+    limit_key = LoginThrottle.key(socket.assigns.client_ip, handle)
+
+    case LoginThrottle.authenticate(limit_key, handle, password) do
       {:ok, _user} ->
         {:noreply, assign(socket, trigger_submit: true, error: nil)}
 
       :error ->
         {:noreply, assign(socket, error: "Invalid credentials.", form: to_form(params))}
+
+      :rate_limited ->
+        {:noreply,
+         assign(socket,
+           error: "Too many failed attempts. Try again in a few minutes.",
+           form: to_form(params)
+         )}
     end
   end
 

@@ -240,6 +240,19 @@ defmodule AnglerWeb.MastodonAPI.StoriesControllerTest do
       {:ok, draft} = Stories.add(bob, upload_fixture())
       {:ok, story} = Stories.publish(bob, draft.id, %{"can_reply" => "true"})
 
+      comment = fn ->
+        ctx.conn
+        |> auth(ctx.write)
+        |> post(~p"/api/v1.1/stories/comment", %{
+          "sid" => Integer.to_string(story.id),
+          "caption" => "loved it"
+        })
+      end
+
+      # Only followers may comment.
+      assert json_response(comment.(), 404)
+      {:ok, :accepted, _} = Angler.Follows.follow(ctx.alice, bob)
+
       body =
         ctx.conn
         |> auth(ctx.write)

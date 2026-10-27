@@ -29,7 +29,9 @@ defmodule AnglerWeb.PixelfedAdmin.AdminControllerTest do
       |> Repo.update()
 
     %{client: c} = OAuth.first_party_client!()
-    {:ok, %{access: bearer}} = OAuth.issue_token(user, c, scopes: ["read", "write"])
+
+    {:ok, %{access: bearer}} =
+      OAuth.issue_token(user, c, scopes: ["read", "write", "admin:read", "admin:write"])
 
     %{user: user, profile: profile, bearer: bearer}
   end

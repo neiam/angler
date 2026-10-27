@@ -80,7 +80,7 @@ defmodule Angler.Profiles.Workers.ActorUpdateDeliver do
         ]
       )
 
-    case Req.post(
+    case Angler.Federation.HTTP.deliver(
            [url: inbox_url, headers: headers, body: body, retry: false, receive_timeout: 10_000]
            |> Keyword.merge(req_overrides())
          ) do

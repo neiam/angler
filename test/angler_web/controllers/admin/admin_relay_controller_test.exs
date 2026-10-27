@@ -16,7 +16,10 @@ defmodule AnglerWeb.Admin.RelayControllerTest do
 
     {:ok, user} = user |> Ecto.Changeset.change(is_admin: true) |> Repo.update()
     %{client: c} = OAuth.first_party_client!()
-    {:ok, %{access: bearer}} = OAuth.issue_token(user, c, scopes: ["read", "write"])
+
+    {:ok, %{access: bearer}} =
+      OAuth.issue_token(user, c, scopes: ["read", "write", "admin:read", "admin:write"])
+
     bearer
   end
 

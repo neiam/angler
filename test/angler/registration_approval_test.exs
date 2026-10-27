@@ -121,7 +121,9 @@ defmodule Angler.RegistrationApprovalTest do
 
       {:ok, admin} = admin |> Ecto.Changeset.change(is_admin: true) |> Repo.update()
       %{client: c} = OAuth.first_party_client!()
-      {:ok, %{access: bearer}} = OAuth.issue_token(admin, c, scopes: ["read", "write"])
+
+      {:ok, %{access: bearer}} =
+        OAuth.issue_token(admin, c, scopes: ["read", "write", "admin:read", "admin:write"])
 
       %{conn: put_req_header(conn, "authorization", "Bearer " <> bearer)}
     end
