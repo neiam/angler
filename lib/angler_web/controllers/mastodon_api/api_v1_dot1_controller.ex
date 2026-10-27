@@ -307,8 +307,9 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
   end
 
   ## POST /api/v1.1/accounts/change-password
+  # `revoke_other_sessions` (upstream) signs out every other app and device.
   def change_password(conn, params) do
-    %{user: user} = BearerAuth.current_scope(conn)
+    %{user: user, token: current} = BearerAuth.current_scope(conn)
 
     cond do
       params["new_password"] != params["confirm_password"] ->
@@ -321,8 +322,14 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
         case user
              |> User.change_password_changeset(%{password: params["new_password"]})
              |> Repo.update() do
-          {:ok, _} -> json(conn, %{"message" => "Password changed"})
-          {:error, cs} -> validation_error(conn, translate_errors(cs))
+          {:ok, _} ->
+            if params["revoke_other_sessions"] in [true, "true", "1", 1],
+              do: Angler.OAuth.revoke_all_for_user(user.id, except: current.id)
+
+            json(conn, %{"message" => "Password changed"})
+
+          {:error, cs} ->
+            validation_error(conn, translate_errors(cs))
         end
     end
   end
@@ -357,11 +364,14 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
   end
 
   ## POST /api/v1.1/accounts/delete
+  # Also serves upstream's `POST /api/v2.1/account/remove/permanent`, which
+  # names the password `current_password`. Every session is signed out.
   def delete_account(conn, params) do
     %{user: user} = BearerAuth.current_scope(conn)
 
-    case Accounts.delete_own_account(user, params["password"]) do
+    case Accounts.delete_own_account(user, params["password"] || params["current_password"]) do
       {:ok, _} ->
+        Angler.OAuth.revoke_all_for_user(user.id)
         json(conn, %{"message" => "Account scheduled for deletion"})
 
       {:error, :deletion_disabled} ->
@@ -510,8 +520,8 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
       {:error, :missing_object_id} ->
         report_error(conn, "Invalid or missing parameters", "ERROR_INVALID_PARAMS")
 
-      {:error, :unsupported_object_type} ->
-        report_error(conn, "Unsupported object type", "ERROR_REPORT_OBJECT_TYPE_INVALID")
+      {:error, :message_too_long} ->
+        report_error(conn, "Message is too long", "ERROR_MESSAGE_TOO_LONG")
 
       {:error, _} ->
         report_error(conn, "Invalid report", "ERROR_REPORT_INVALID")

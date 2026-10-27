@@ -96,7 +96,8 @@ defmodule AnglerWeb.Admin.ReportController do
       "action_taken" => r.action_taken,
       "action_taken_at" => format_ts(r.action_taken_at),
       "category" => map_category(r.type),
-      "comment" => r.moderator_comment || "",
+      # Mastodon's admin `comment` is what the reporter wrote.
+      "comment" => r.message || r.moderator_comment || "",
       "forwarded" => false,
       "created_at" => format_ts(r.inserted_at),
       "updated_at" => format_ts(r.updated_at),

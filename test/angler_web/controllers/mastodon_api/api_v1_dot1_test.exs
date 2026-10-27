@@ -243,6 +243,58 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Test do
       assert [%Report{type: "spam"}] = Angler.Repo.all(Report)
     end
 
+    test "stores the reporter's message and caps it", ctx do
+      {:ok, target} = Profiles.create_profile(%{username: "spammy"})
+
+      report = fn message ->
+        ctx.conn
+        |> auth(ctx.write)
+        |> post(~p"/api/v1.1/report", %{
+          "report_type" => "spam",
+          "object_id" => Integer.to_string(target.id),
+          "object_type" => "user",
+          "message" => message
+        })
+      end
+
+      assert json_response(report.(String.duplicate("x", 256)), 400)["error_code"] ==
+               "ERROR_MESSAGE_TOO_LONG"
+
+      assert json_response(report.("<b>sells</b> pills"), 200)
+      assert [%Report{message: "sells pills"}] = Angler.Repo.all(Report)
+    end
+
+    test "DMs can be reported by participants only", ctx do
+      {:ok, %{profile: bob}} =
+        Accounts.register(%{username: "bob", email: "bob@example.com", password: "passwordOK1"})
+
+      {:ok, _} =
+        Accounts.register(%{
+          username: "carol",
+          email: "carol@example.com",
+          password: "passwordOK1"
+        })
+
+      {:ok, to_alice} =
+        Statuses.create_local(bob, %{"status" => "@alice psst", "visibility" => "direct"})
+
+      {:ok, to_carol} =
+        Statuses.create_local(bob, %{"status" => "@carol psst", "visibility" => "direct"})
+
+      report = fn status ->
+        ctx.conn
+        |> auth(ctx.write)
+        |> post(~p"/api/v1.1/report", %{
+          "report_type" => "spam",
+          "object_id" => Integer.to_string(status.id),
+          "object_type" => "direct_message"
+        })
+      end
+
+      assert json_response(report.(to_alice), 200)
+      assert json_response(report.(to_carol), 400)["error_code"] == "ERROR_INVALID_OBJECT_ID"
+    end
+
     test "duplicate is rejected", ctx do
       {:ok, target} = Profiles.create_profile(%{username: "spammy"})
 
@@ -288,6 +340,62 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Test do
         |> json_response(400)
 
       assert body["error_code"] == "ERROR_TYPE_INVALID"
+    end
+  end
+
+  describe "v2.1 account endpoints" do
+    test "timeline settings round-trip", ctx do
+      get_settings = fn ->
+        ctx.conn
+        |> auth(ctx.read)
+        |> get(~p"/api/v2.1/account/timeline/settings")
+        |> json_response(200)
+      end
+
+      assert get_settings.() == %{"reblogs_enabled" => false, "photo_reblogs_only" => false}
+
+      assert %{"reblogs_enabled" => true, "photo_reblogs_only" => false} =
+               ctx.conn
+               |> auth(ctx.write)
+               |> post(~p"/api/v2.1/account/timeline/settings", %{"reblogs_enabled" => "true"})
+               |> json_response(200)
+
+      assert get_settings.()["reblogs_enabled"] == true
+    end
+
+    test "change-password with revoke_other_sessions signs out other sessions", ctx do
+      {:ok, %{token: other}} = OAuth.issue_token(ctx.user, ctx.client, scopes: ["read"])
+
+      ctx.conn
+      |> auth(ctx.write)
+      |> post(~p"/api/v1.1/accounts/change-password", %{
+        "current_password" => "verysecret123",
+        "new_password" => "evenmoresecret456",
+        "confirm_password" => "evenmoresecret456",
+        "revoke_other_sessions" => "true"
+      })
+      |> json_response(200)
+
+      assert Angler.Repo.get!(Angler.OAuth.Token, other.id).revoked_at
+      # The session that made the change stays signed in.
+      assert ctx.conn
+             |> auth(ctx.write)
+             |> post(~p"/api/v2.1/account/timeline/settings", %{})
+             |> json_response(200)
+    end
+
+    test "remove/permanent schedules deletion and signs out", ctx do
+      ctx.conn
+      |> auth(ctx.write)
+      |> post(~p"/api/v2.1/account/remove/permanent", %{"current_password" => "verysecret123"})
+      |> json_response(200)
+
+      assert Angler.Repo.get!(Angler.Accounts.User, ctx.user.id).status == "delete"
+
+      assert ctx.conn
+             |> auth(ctx.read)
+             |> get(~p"/api/v2.1/account/timeline/settings")
+             |> json_response(401)
     end
   end
 end

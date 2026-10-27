@@ -26,7 +26,9 @@ defmodule AnglerWeb.MastodonAPI.ReportController do
     pixelfed_attrs = %{
       "report_type" => map_category(params["category"], params["comment"]),
       "object_id" => params["account_id"],
-      "object_type" => "user"
+      "object_type" => "user",
+      # Mastodon's free-text comment was dropped; it is the reporter's message.
+      "message" => params["comment"] && String.slice(params["comment"], 0, 255)
     }
 
     case Reports.submit(user, pixelfed_attrs) do

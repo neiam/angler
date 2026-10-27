@@ -8,7 +8,7 @@ defmodule Angler.Reports.Report do
   alias Angler.Profiles.Profile
 
   @types ~w(spam sensitive abusive underage violence copyright impersonation scam terrorism)
-  @object_types ~w(post user story)
+  @object_types ~w(post user story direct_message)
 
   @primary_key {:id, :integer, autogenerate: false}
   schema "reports" do
@@ -23,6 +23,7 @@ defmodule Angler.Reports.Report do
     field :action_taken_at, :utc_datetime_usec
     field :action_taken_by_account_id, :integer
     field :moderator_comment, :string
+    field :message, :string
 
     belongs_to :profile, Profile, type: :integer
     belongs_to :user, User, type: :integer
@@ -45,7 +46,8 @@ defmodule Angler.Reports.Report do
       :action_taken,
       :action_taken_at,
       :action_taken_by_account_id,
-      :moderator_comment
+      :moderator_comment,
+      :message
     ])
     |> validate_required([:profile_id, :user_id, :object_id, :object_type, :type])
     |> validate_inclusion(:type, @types)

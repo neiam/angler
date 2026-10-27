@@ -139,6 +139,21 @@ defmodule Angler.OAuth do
 
   def revoke(%Token{} = token), do: token
 
+  @doc "Revoke every live token of a user, optionally keeping one (the caller's)."
+  @spec revoke_all_for_user(integer(), keyword()) :: non_neg_integer()
+  def revoke_all_for_user(user_id, opts \\ []) when is_integer(user_id) do
+    query = from(t in Token, where: t.user_id == ^user_id and is_nil(t.revoked_at))
+
+    query =
+      case Keyword.get(opts, :except) do
+        nil -> query
+        keep_id -> from(t in query, where: t.id != ^keep_id)
+      end
+
+    {n, _} = Repo.update_all(query, set: [revoked_at: DateTime.utc_now()])
+    n
+  end
+
   defp expired?(nil), do: false
   defp expired?(at), do: DateTime.compare(DateTime.utc_now(), at) == :gt
 

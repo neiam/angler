@@ -239,6 +239,19 @@ defmodule AnglerWeb.Router do
     get "/custom_emojis", EmptyController, :empty_array
   end
 
+  scope "/api/v2.1", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_read
+
+    get "/account/timeline/settings", SettingsController, :timeline_settings
+  end
+
+  scope "/api/v2.1", AnglerWeb.MastodonAPI do
+    pipe_through :authenticated_write
+
+    post "/account/timeline/settings", SettingsController, :update_timeline_settings
+    post "/account/remove/permanent", ApiV1Dot1Controller, :delete_account
+  end
+
   scope "/api/v2", AnglerWeb.MastodonAPI do
     pipe_through :authenticated_read
 

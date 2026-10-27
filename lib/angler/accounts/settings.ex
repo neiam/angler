@@ -7,7 +7,7 @@ defmodule Angler.Accounts.Settings do
   alias Angler.Accounts.UserSettings
   alias Angler.Repo
 
-  @web_allowed_fields ~w(enable_reblogs hide_reblog_banner)
+  @web_allowed_fields ~w(enable_reblogs hide_reblog_banner photo_reblogs_only)
 
   # Account display/privacy settings surfaced in the account `settings` block.
   # These have no dedicated profiles column (the ones that do — `indexable`

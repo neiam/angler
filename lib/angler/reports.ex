@@ -31,11 +31,9 @@ defmodule Angler.Reports do
       not is_binary(object_id_str) and not is_integer(object_id_str) ->
         {:error, :missing_object_id}
 
-      object_type == "story" ->
-        {:error, :unsupported_object_type}
-
       true ->
-        with {:ok, object_id} <- parse_id(object_id_str),
+        with {:ok, message} <- clean_message(attrs["message"]),
+             {:ok, object_id} <- parse_id(object_id_str),
              {:ok, reported_pid} <- resolve_target(object_type, object_id, reporter_pid) do
           if duplicate?(user.id, object_type, object_id) do
             {:error, :duplicate}
@@ -46,7 +44,8 @@ defmodule Angler.Reports do
               object_id: object_id,
               object_type: object_type,
               reported_profile_id: reported_pid,
-              type: type
+              type: type,
+              message: message
             }
             |> Report.changeset()
             |> Repo.insert()
@@ -77,16 +76,44 @@ defmodule Angler.Reports do
     end
   end
 
-  defp resolve_target("post", id, reporter_pid) do
-    case Statuses.get(id) do
-      nil ->
-        {:error, :invalid_object_id}
+  # Upstream's optional note from the reporter: tags stripped, at most 255.
+  @max_message 255
 
+  defp clean_message(nil), do: {:ok, nil}
+
+  defp clean_message(m) when is_binary(m) do
+    m = m |> String.replace(~r/<[^>]*>/, "") |> String.trim()
+
+    cond do
+      m == "" -> {:ok, nil}
+      String.length(m) > @max_message -> {:error, :message_too_long}
+      true -> {:ok, m}
+    end
+  end
+
+  defp clean_message(_), do: {:error, :invalid}
+
+  # A post (or DM) the reporter can't see doesn't exist as far as they know.
+  defp resolve_target(type, id, reporter_pid) when type in ["post", "direct_message"] do
+    case Statuses.get(id) do
       %_{profile_id: ^reporter_pid} ->
         {:error, :self_report}
 
-      %_{profile_id: pid} ->
-        {:ok, pid}
+      %_{visibility: v} = status when type == "post" or v == :direct ->
+        if Statuses.visible_to?(status, reporter_pid),
+          do: {:ok, status.profile_id},
+          else: {:error, :invalid_object_id}
+
+      _ ->
+        {:error, :invalid_object_id}
+    end
+  end
+
+  defp resolve_target("story", id, reporter_pid) do
+    case Angler.Repo.get(Angler.Stories.Story, id) do
+      %{profile_id: ^reporter_pid} -> {:error, :self_report}
+      %{profile_id: pid} -> {:ok, pid}
+      nil -> {:error, :invalid_object_id}
     end
   end
 
