@@ -18,6 +18,7 @@ defmodule Angler.Federation.Workers.DeleteWorker do
 
   require Logger
 
+  alias Angler.Federation.Actor
   alias Angler.Profiles
   alias Angler.Statuses
 
@@ -33,18 +34,30 @@ defmodule Angler.Federation.Workers.DeleteWorker do
     do_handle(activity)
   end
 
-  defp do_handle(%{"object" => %{"type" => "Person", "id" => actor_url}}) do
-    Profiles.Federation.handle_delete_person(actor_url)
+  # The inbox has already bound the signature to `actor`, so it is who sent
+  # this. Every branch below only lets an actor delete what it owns.
+  defp do_handle(%{"actor" => actor, "object" => %{"type" => "Person", "id" => person}})
+       when is_binary(actor) do
+    if Actor.same_actor?(person, actor),
+      do: Profiles.Federation.handle_delete_person(actor),
+      else: :ok
   end
 
-  defp do_handle(%{"object" => %{"type" => "Tombstone", "id" => object_id}}) do
-    Statuses.Federation.handle_delete_tombstone(object_id)
+  # Mastodon deletes an account with `object` as the bare actor URL.
+  defp do_handle(%{"actor" => actor, "object" => actor}) when is_binary(actor) do
+    Profiles.Federation.handle_delete_person(actor)
+  end
+
+  defp do_handle(%{"actor" => actor, "object" => %{"type" => "Tombstone", "id" => object_id}})
+       when is_binary(actor) and is_binary(object_id) do
+    Statuses.Federation.handle_delete_tombstone(object_id, actor)
   end
 
   # Some peers send `Delete` with just `object` as the URL string + no inner
   # type. In that case we treat it as a Tombstone delete of the URL.
-  defp do_handle(%{"object" => object_id}) when is_binary(object_id) do
-    Statuses.Federation.handle_delete_tombstone(object_id)
+  defp do_handle(%{"actor" => actor, "object" => object_id})
+       when is_binary(actor) and is_binary(object_id) do
+    Statuses.Federation.handle_delete_tombstone(object_id, actor)
   end
 
   defp do_handle(%{"object" => %{"type" => "Story"}} = activity) do

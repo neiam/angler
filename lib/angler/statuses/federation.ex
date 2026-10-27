@@ -33,17 +33,34 @@ defmodule Angler.Statuses.Federation do
   @spec handle_create(map(), String.t()) :: :ok | {:error, term()}
   def handle_create(%{"object" => %{"type" => type, "id" => object_id} = object}, actor_url)
       when type in ["Note", "Question"] and is_binary(object_id) do
-    case Statuses.get_by_uri(object_id) do
-      %Status{} ->
-        # Already mirrored.
-        :ok
-
-      nil ->
-        do_create(object, actor_url)
+    cond do
+      not authored_by?(object, actor_url) -> {:error, :not_authored_by_actor}
+      # Already mirrored.
+      Statuses.get_by_uri(object_id) -> :ok
+      true -> do_create(object, actor_url)
     end
   end
 
   def handle_create(_, _), do: {:error, :unsupported_object_type}
+
+  # An actor may only deliver objects it wrote, hosted on its own server —
+  # otherwise a forged `id` could squat another server's (or a local) URI.
+  defp authored_by?(%{"id" => id} = object, actor_url) do
+    Actor.same_actor?(attributed_to(object), actor_url) and Actor.same_host?(id, actor_url)
+  end
+
+  defp attributed_to(%{"attributedTo" => a}) when is_binary(a), do: a
+  defp attributed_to(%{"attributedTo" => %{"id" => a}}) when is_binary(a), do: a
+
+  defp attributed_to(%{"attributedTo" => list}) when is_list(list) do
+    Enum.find_value(list, fn
+      a when is_binary(a) -> a
+      %{"id" => a, "type" => "Person"} -> a
+      _ -> nil
+    end)
+  end
+
+  defp attributed_to(_), do: nil
 
   @doc """
   Ingest the object of a relay-forwarded `Announce` as an ordinary public
@@ -57,9 +74,13 @@ defmodule Angler.Statuses.Federation do
   """
   @spec ingest_announced(map()) :: :ok | {:error, term()}
   def ingest_announced(%{"object" => object}) do
-    with {:ok, %{"type" => type, "id" => id, "attributedTo" => author} = note}
-         when type in ["Note", "Question"] and is_binary(id) and is_binary(author) <-
-           resolve_announced_object(object) do
+    with {:ok, url} <- announced_object_url(object),
+         {:ok, %{"type" => type, "id" => id} = note}
+         when type in ["Note", "Question"] and is_binary(id) <- fetch_announced(url),
+         # The doc must be the object we asked for, by an author on its host.
+         true <- Actor.same_actor?(id, url),
+         author when is_binary(author) <- attributed_to(note),
+         true <- Actor.same_host?(id, author) do
       case Statuses.get_by_uri(id) do
         %Status{} -> :ok
         nil -> do_create(note, author)
@@ -83,14 +104,16 @@ defmodule Angler.Statuses.Federation do
   @spec fetch_and_ingest(String.t()) :: :ok | {:error, term()}
   def fetch_and_ingest(url) when is_binary(url), do: ingest_announced(%{"object" => url})
 
-  defp resolve_announced_object(object) when is_map(object), do: {:ok, object}
+  # A relay's inline copy is unauthenticated — the relay didn't write it — so
+  # we always fetch the object from its origin.
+  defp announced_object_url(%{"id" => url}) when is_binary(url), do: {:ok, url}
+  defp announced_object_url(url) when is_binary(url), do: {:ok, url}
+  defp announced_object_url(_), do: {:error, :bad_object}
 
-  defp resolve_announced_object(url) when is_binary(url) do
+  defp fetch_announced(url) do
     actor = InstanceActor.ensure!()
     HTTP.fetch(url, signed_with: {actor.key_id, actor.private_key_pem})
   end
-
-  defp resolve_announced_object(_), do: {:error, :bad_object}
 
   defp do_create(object, actor_url) do
     with {:ok, %Profile{} = author} <- Actor.resolve(actor_url),
@@ -124,50 +147,62 @@ defmodule Angler.Statuses.Federation do
   Mastodon includes the full updated Note inline; we trust it.
   """
   @spec handle_update(map(), String.t()) :: :ok | {:error, term()}
-  def handle_update(%{"object" => %{"type" => type, "id" => object_id} = object}, _actor_url)
+  def handle_update(%{"object" => %{"type" => type, "id" => object_id} = object}, actor_url)
       when type in ["Note", "Question"] and is_binary(object_id) do
     case Statuses.get_by_uri(object_id) do
       nil ->
         # Update for an unknown status — could indicate we missed the Create.
-        # Optimistically materialize it as if it were a Create.
+        # Materialize it as one, under the same authorship rules.
         Logger.info("Update Note for unknown status #{object_id}; treating as Create")
-        do_create(object, object["attributedTo"])
+        handle_create(%{"object" => object}, actor_url)
 
       %Status{} = status ->
-        edited_at =
-          case object["updated"] do
-            ts when is_binary(ts) ->
-              case DateTime.from_iso8601(ts) do
-                {:ok, dt, _} -> dt
-                _ -> DateTime.utc_now()
-              end
-
-            _ ->
-              DateTime.utc_now()
-          end
-
-        attrs = build_attrs(object, status.profile) |> Map.put(:edited_at, edited_at)
-
-        status
-        |> Status.changeset(attrs)
-        |> Repo.update()
-        |> case do
-          {:ok, _} -> :ok
-          {:error, _} = err -> err
-        end
+        if remote_owned_by?(status, actor_url),
+          do: apply_update(status, object),
+          else: {:error, :not_owner}
     end
   end
 
   def handle_update(_, _), do: {:error, :bad_update_payload}
 
-  @doc """
-  Handle `Delete Tombstone` — soft-delete the mirrored status.
-  """
-  @spec handle_delete_tombstone(String.t()) :: :ok
-  def handle_delete_tombstone(object_id) when is_binary(object_id) do
-    Statuses.soft_delete_by_uri(object_id)
-    :ok
+  defp apply_update(%Status{} = status, object) do
+    edited_at =
+      with ts when is_binary(ts) <- object["updated"],
+           {:ok, dt, _} <- DateTime.from_iso8601(ts) do
+        dt
+      else
+        _ -> DateTime.utc_now()
+      end
+
+    attrs = build_attrs(object, status.profile) |> Map.put(:edited_at, edited_at)
+
+    case status |> Status.changeset(attrs) |> Repo.update() do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
+    end
   end
+
+  @doc """
+  Handle `Delete Tombstone` — soft-delete the mirrored status, but only when
+  `actor_url` authored it. Local statuses are never deleted from outside.
+  """
+  @spec handle_delete_tombstone(String.t(), String.t()) :: :ok
+  def handle_delete_tombstone(object_id, actor_url)
+      when is_binary(object_id) and is_binary(actor_url) do
+    case Statuses.get_by_uri(object_id) do
+      %Status{} = status ->
+        if remote_owned_by?(status, actor_url), do: Statuses.soft_delete_by_uri(object_id)
+        :ok
+
+      nil ->
+        :ok
+    end
+  end
+
+  defp remote_owned_by?(%Status{local: false, profile: %Profile{remote_url: owner}}, actor_url),
+    do: Actor.same_actor?(owner, actor_url)
+
+  defp remote_owned_by?(_, _), do: false
 
   ## Internals
 

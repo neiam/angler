@@ -58,6 +58,46 @@ defmodule Angler.Federation.Actor do
   end
 
   @doc """
+  Like `public_key_for/1`, but only returns the key when it belongs to
+  `actor_url` — the inbox's binding between an HTTP signature and the
+  activity's claimed `actor`. Without it any server could sign with its own
+  key and speak for any actor.
+  """
+  @spec public_key_for(String.t(), String.t()) :: {:ok, String.t()} | {:error, atom()}
+  def public_key_for(key_id, actor_url) when is_binary(key_id) and is_binary(actor_url) do
+    case Repo.get_by(HttpSignatureKey, key_id: key_id) do
+      %HttpSignatureKey{owner_url: owner, public_key_pem: pem} ->
+        if same_actor?(owner, actor_url), do: {:ok, pem}, else: {:error, :key_actor_mismatch}
+
+      # Uncached: only the actor's own `<actor>#fragment` key resolves, via
+      # the actor doc we fetch for it.
+      nil ->
+        if same_actor?(strip_fragment(key_id), actor_url),
+          do: public_key_for(key_id),
+          else: {:error, :key_actor_mismatch}
+    end
+  end
+
+  @doc """
+  Whether two actor URLs name the same actor: exact match after normalising
+  scheme/host case, a trailing slash and any fragment.
+  """
+  @spec same_actor?(String.t() | nil, String.t() | nil) :: boolean()
+  def same_actor?(a, b) when is_binary(a) and is_binary(b), do: normalize(a) == normalize(b)
+  def same_actor?(_, _), do: false
+
+  @doc "Whether `url` is on `actor_url`'s host (case-insensitive)."
+  @spec same_host?(String.t() | nil, String.t() | nil) :: boolean()
+  def same_host?(url, actor_url) when is_binary(url) and is_binary(actor_url) do
+    case {host(url), host(actor_url)} do
+      {h, h} when is_binary(h) -> true
+      _ -> false
+    end
+  end
+
+  def same_host?(_, _), do: false
+
+  @doc """
   Refresh a cached actor (and its key) — used after a signature failure as a
   rotation defence.
   """
@@ -133,6 +173,11 @@ defmodule Angler.Federation.Actor do
     now = DateTime.utc_now()
 
     case Repo.get_by(HttpSignatureKey, key_id: key_id) do
+      # A key id already bound to another actor is never rebound: an actor doc
+      # can't claim someone else's key and swap in its own PEM.
+      %HttpSignatureKey{owner_url: other} = existing ->
+        if same_actor?(other, owner_url), do: refresh_key!(existing, pem, now), else: :refused
+
       nil ->
         %HttpSignatureKey{}
         |> HttpSignatureKey.changeset(%{
@@ -142,22 +187,18 @@ defmodule Angler.Federation.Actor do
           fetched_at: now
         })
         |> Repo.insert!()
-
-      %HttpSignatureKey{public_key_pem: ^pem} = existing ->
-        # Same PEM — just bump fetched_at.
-        existing
-        |> HttpSignatureKey.changeset(%{fetched_at: now})
-        |> Repo.update!()
-
-      %HttpSignatureKey{} = existing ->
-        existing
-        |> HttpSignatureKey.changeset(%{
-          public_key_pem: pem,
-          fetched_at: now,
-          rotated_at: now
-        })
-        |> Repo.update!()
     end
+  end
+
+  defp refresh_key!(%HttpSignatureKey{public_key_pem: pem} = existing, pem, now) do
+    # Same PEM — just bump fetched_at.
+    existing |> HttpSignatureKey.changeset(%{fetched_at: now}) |> Repo.update!()
+  end
+
+  defp refresh_key!(existing, pem, now) do
+    existing
+    |> HttpSignatureKey.changeset(%{public_key_pem: pem, fetched_at: now, rotated_at: now})
+    |> Repo.update!()
   end
 
   defp ensure_instance(domain) do
@@ -173,9 +214,10 @@ defmodule Angler.Federation.Actor do
     end
   end
 
-  defp parse_actor(doc, _actor_url) when is_map(doc) do
+  defp parse_actor(doc, actor_url) when is_map(doc) do
     with {:ok, username} <- Map.fetch(doc, "preferredUsername"),
-         {:ok, inbox} <- Map.fetch(doc, "inbox") do
+         {:ok, inbox} <- Map.fetch(doc, "inbox"),
+         true <- same_host?(doc["id"] || actor_url, actor_url) do
       shared_inbox =
         get_in(doc, ["endpoints", "sharedInbox"]) || nil
 
@@ -195,7 +237,7 @@ defmodule Angler.Federation.Actor do
       }
 
       attrs =
-        case extract_public_key(doc) do
+        case extract_public_key(doc, actor_url) do
           {:ok, key} -> Map.merge(attrs, %{public_key_pem: key.pem, public_key: key})
           :error -> attrs
         end
@@ -206,12 +248,44 @@ defmodule Angler.Federation.Actor do
     end
   end
 
-  defp extract_public_key(%{"publicKey" => %{"id" => kid, "publicKeyPem" => pem}})
+  # The key must live on the actor's own host, and when it names an owner,
+  # that owner must be the actor (upstream 1905da723).
+  defp extract_public_key(
+         %{"publicKey" => %{"id" => kid, "publicKeyPem" => pem} = key} = doc,
+         actor_url
+       )
        when is_binary(kid) and is_binary(pem) do
-    {:ok, %{key_id: kid, pem: pem}}
+    owner_ok? =
+      case key["owner"] do
+        nil -> true
+        owner -> same_actor?(owner, doc["id"] || actor_url)
+      end
+
+    if same_host?(kid, actor_url) and owner_ok?, do: {:ok, %{key_id: kid, pem: pem}}, else: :error
   end
 
-  defp extract_public_key(_), do: :error
+  defp extract_public_key(_, _), do: :error
 
   defp strip_fragment(url), do: url |> URI.parse() |> Map.put(:fragment, nil) |> URI.to_string()
+
+  defp host(url) do
+    case URI.parse(url) do
+      %URI{host: h} when is_binary(h) and h != "" -> String.downcase(h)
+      _ -> nil
+    end
+  end
+
+  defp normalize(url) do
+    uri = URI.parse(url)
+    path = (uri.path || "") |> String.trim_trailing("/")
+
+    %URI{
+      uri
+      | scheme: uri.scheme && String.downcase(uri.scheme),
+        host: host(url),
+        path: path,
+        fragment: nil
+    }
+    |> URI.to_string()
+  end
 end

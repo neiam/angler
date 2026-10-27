@@ -150,6 +150,7 @@ defmodule Angler.Federation.HTTPSignature do
   defp ok_or(nil, reason), do: {:error, reason}
   defp ok_or(:error, reason), do: {:error, reason}
   defp ok_or({:ok, _} = ok, _), do: ok
+  defp ok_or({:error, _} = err, _), do: err
   defp ok_or(value, _), do: {:ok, value}
 
   ## Internals — signing string construction

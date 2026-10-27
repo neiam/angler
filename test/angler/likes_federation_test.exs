@@ -39,6 +39,7 @@ defmodule Angler.Likes.FederationTest do
           "object" => %{
             "type" => "Note",
             "id" => note_uri,
+            "attributedTo" => bob.remote_url,
             "content" => "<p>like me</p>",
             "to" => ["https://www.w3.org/ns/activitystreams#Public"],
             "cc" => []

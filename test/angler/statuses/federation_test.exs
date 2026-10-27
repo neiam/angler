@@ -30,6 +30,7 @@ defmodule Angler.Statuses.FederationTest do
           %{
             "type" => "Note",
             "id" => uri,
+            "attributedTo" => Keyword.get(opts, :actor, "http://remote.test/users/bob"),
             "url" => uri,
             "content" => Keyword.get(opts, :content, "<p>hello world</p>"),
             "to" => Keyword.get(opts, :to, ["https://www.w3.org/ns/activitystreams#Public"]),
@@ -177,12 +178,12 @@ defmodule Angler.Statuses.FederationTest do
     end
   end
 
-  describe "handle_delete_tombstone/1" do
+  describe "handle_delete_tombstone/2" do
     test "soft-deletes a previously-mirrored status", ctx do
       uri = "http://remote.test/notes/del"
       :ok = Federation.handle_create(create_note(uri), ctx.bob.remote_url)
 
-      assert :ok = Federation.handle_delete_tombstone(uri)
+      assert :ok = Federation.handle_delete_tombstone(uri, ctx.bob.remote_url)
       assert is_nil(Statuses.get_by_uri(uri))
 
       raw = Repo.one(from s in Status, where: s.uri == ^uri, select: s.deleted_at)
@@ -190,7 +191,11 @@ defmodule Angler.Statuses.FederationTest do
     end
 
     test "is a no-op for unknown uri" do
-      assert :ok = Federation.handle_delete_tombstone("http://nope/missing")
+      assert :ok =
+               Federation.handle_delete_tombstone(
+                 "http://nope/missing",
+                 "http://remote.test/users/bob"
+               )
     end
   end
 end

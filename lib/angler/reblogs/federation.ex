@@ -3,7 +3,9 @@ defmodule Angler.Reblogs.Federation do
 
   alias Angler.Federation.Actor
   alias Angler.Notifications
+  alias Angler.Profiles.Profile
   alias Angler.Reblogs
+  alias Angler.Repo
   alias Angler.Statuses
   alias Angler.Statuses.Status
 
@@ -12,6 +14,7 @@ defmodule Angler.Reblogs.Federation do
       when is_binary(activity_id) and is_binary(target_uri) do
     with {:ok, profile} <- Actor.resolve(actor_url),
          %Status{} = status <- find_local_status(target_uri),
+         true <- Statuses.remote_interaction_allowed?(status, profile, :announce) || :forbidden,
          {:ok, _reblog} <-
            Reblogs.insert(%{
              profile_id: profile.id,
@@ -31,6 +34,7 @@ defmodule Angler.Reblogs.Federation do
       :ok
     else
       nil -> {:error, :unknown_target}
+      :forbidden -> {:error, :forbidden}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -40,26 +44,27 @@ defmodule Angler.Reblogs.Federation do
   @spec handle_undo_announce(map(), String.t()) :: :ok | {:error, term()}
   def handle_undo_announce(
         %{"object" => %{"type" => "Announce", "id" => announce_uri}},
-        _actor_url
+        actor_url
       )
       when is_binary(announce_uri) do
     case Reblogs.get_by_remote_url(announce_uri) do
-      nil ->
-        :ok
-
-      reblog ->
-        case Reblogs.delete(reblog.profile_id, reblog.status_id) do
-          n when n > 0 ->
-            Statuses.inc_counter(reblog.status_id, :reblogs_count, -1)
-            :ok
-
-          _ ->
-            :ok
-        end
+      nil -> :ok
+      reblog -> undo_owned_reblog(reblog, actor_url)
     end
   end
 
   def handle_undo_announce(_, _), do: {:error, :bad_undo_announce_payload}
+
+  # Only the actor who boosted can take the boost back.
+  defp undo_owned_reblog(reblog, actor_url) do
+    with %Profile{remote_url: owner} <- Repo.get(Profile, reblog.profile_id),
+         true <- Actor.same_actor?(owner, actor_url),
+         n when n > 0 <- Reblogs.delete(reblog.profile_id, reblog.status_id) do
+      Statuses.inc_counter(reblog.status_id, :reblogs_count, -1)
+    end
+
+    :ok
+  end
 
   defp find_local_status(uri) do
     Statuses.get_by_uri(uri) || find_by_local_url(uri)

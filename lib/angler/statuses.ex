@@ -510,6 +510,27 @@ defmodule Angler.Statuses do
     end
   end
 
+  @doc """
+  Whether a remote `profile` may `:like` or `:announce` `status` (upstream
+  96b645980). Public and unlisted posts take both. A followers-only post takes
+  a like only from an accepted follower and is never boosted, so a remote boost
+  can't fan it into strangers' timelines. Direct posts take neither.
+  """
+  @spec remote_interaction_allowed?(Status.t(), Angler.Profiles.Profile.t(), :like | :announce) ::
+          boolean()
+  def remote_interaction_allowed?(%Status{visibility: v}, _profile, _kind)
+      when v in [:public, :unlisted],
+      do: true
+
+  def remote_interaction_allowed?(%Status{visibility: :private} = status, profile, :like) do
+    match?(
+      %{accepted_at: %DateTime{}},
+      Angler.Follows.get_follower(status.profile_id, profile.id)
+    )
+  end
+
+  def remote_interaction_allowed?(_status, _profile, _kind), do: false
+
   @doc "Soft-delete a status by AS2 `id`. Idempotent."
   @spec soft_delete_by_uri(String.t()) :: :ok
   def soft_delete_by_uri(uri) when is_binary(uri) do

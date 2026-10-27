@@ -69,8 +69,11 @@ defmodule Angler.Federation.Workers.InboxValidator do
 
   defp verify_and_dispatch(headers, raw_body, payload, actor_url, path, recipient_id) do
     headers_list = Enum.into(headers, [])
+    # Only a key owned by the claimed actor verifies — a valid signature from
+    # anyone else's key is not this actor speaking.
+    key_resolver = &Actor.public_key_for(&1, actor_url)
 
-    case HTTPSignature.verify(:post, path, headers_list, raw_body, &Actor.public_key_for/1) do
+    case HTTPSignature.verify(:post, path, headers_list, raw_body, key_resolver) do
       :ok ->
         record_and_dispatch(payload, raw_body, actor_url, recipient_id)
 
@@ -83,7 +86,7 @@ defmodule Angler.Federation.Workers.InboxValidator do
                    path,
                    headers_list,
                    raw_body,
-                   &Actor.public_key_for/1
+                   key_resolver
                  ) do
               :ok -> record_and_dispatch(payload, raw_body, actor_url, recipient_id)
               {:error, _} -> log_rejected(payload, actor_url, reason)
