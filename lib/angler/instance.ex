@@ -18,9 +18,20 @@ defmodule Angler.Instance do
   @cache_ttl_ms 30 * 60 * 1_000
 
   @doc """
-  Returns `%{user_count, status_count, domain_count}` cached for half an hour.
+  Returns `%{user_count, status_count, domain_count, active_month,
+  active_halfyear, local_comments}` cached for half an hour.
+
+  "Active" means the user authored a local status in the window — the only
+  activity signal we record (`users.last_active_at` is never written).
   """
-  @spec stats() :: %{user_count: integer(), status_count: integer(), domain_count: integer()}
+  @spec stats() :: %{
+          user_count: integer(),
+          status_count: integer(),
+          domain_count: integer(),
+          active_month: integer(),
+          active_halfyear: integer(),
+          local_comments: integer()
+        }
   def stats do
     now = System.monotonic_time(:millisecond)
 
@@ -43,15 +54,29 @@ defmodule Angler.Instance do
   end
 
   defp compute_stats do
+    local_statuses = from(s in Status, where: is_nil(s.deleted_at) and s.local == true)
+
     %{
       user_count: Repo.aggregate(from(u in User, where: is_nil(u.status)), :count),
-      status_count:
-        Repo.aggregate(
-          from(s in Status, where: is_nil(s.deleted_at) and s.local == true),
-          :count
-        ),
-      domain_count: Repo.aggregate(Instance, :count)
+      status_count: Repo.aggregate(local_statuses, :count),
+      domain_count: Repo.aggregate(Instance, :count),
+      active_month: active_users_since(local_statuses, 30),
+      active_halfyear: active_users_since(local_statuses, 180),
+      local_comments:
+        Repo.aggregate(from(s in local_statuses, where: not is_nil(s.in_reply_to_id)), :count)
     }
+  end
+
+  defp active_users_since(local_statuses, days) do
+    since = DateTime.add(DateTime.utc_now(), -days, :day)
+
+    from(s in local_statuses,
+      join: u in User,
+      on: u.profile_id == s.profile_id and is_nil(u.status),
+      where: s.inserted_at >= ^since,
+      select: count(s.profile_id, :distinct)
+    )
+    |> Repo.one()
   end
 
   @doc """

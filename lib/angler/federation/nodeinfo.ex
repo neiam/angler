@@ -2,13 +2,9 @@ defmodule Angler.Federation.Nodeinfo do
   @moduledoc """
   Builds the nodeinfo well-known + 2.0 documents.
 
-  Counters come from the `node_stats` singleton row, which a periodic worker
-  will refresh later. Until that worker exists, the row stays at zeros — the
-  document still validates against the spec.
+  Counters come from `Angler.Instance.stats/0` (computed live, cached for half
+  an hour) — the same numbers `/api/v1/instance` reports.
   """
-
-  import Ecto.Query, only: [from: 2]
-  alias Angler.Repo
 
   # The top-level `software` block reports the Pixelfed API surface we implement
   # (`name: "pixelfed"`, a >= 0.12.3 version). The pixelfed-rn mobile app gates
@@ -40,7 +36,7 @@ defmodule Angler.Federation.Nodeinfo do
   @doc "GET /api/nodeinfo/2.0.json"
   @spec document() :: map()
   def document do
-    stats = stats()
+    stats = Angler.Instance.stats()
     domain = URI.parse(AnglerWeb.Endpoint.url()).host
 
     %{
@@ -51,14 +47,14 @@ defmodule Angler.Federation.Nodeinfo do
       },
       "protocols" => ["activitypub"],
       "services" => %{"outbound" => [], "inbound" => []},
-      "openRegistrations" => true,
+      "openRegistrations" => Angler.Instance.open_registration?(),
       "usage" => %{
         "users" => %{
           "total" => stats.user_count,
           "activeMonth" => stats.active_month,
           "activeHalfyear" => stats.active_halfyear
         },
-        "localPosts" => stats.local_posts,
+        "localPosts" => stats.status_count,
         "localComments" => stats.local_comments
       },
       "metadata" => %{
@@ -76,43 +72,5 @@ defmodule Angler.Federation.Nodeinfo do
         }
       }
     }
-  end
-
-  @doc "Read the singleton stats row, defaulting to zeros if it doesn't exist yet."
-  @spec stats() :: %{
-          user_count: integer(),
-          status_count: integer(),
-          domain_count: integer(),
-          active_month: integer(),
-          active_halfyear: integer(),
-          local_posts: integer(),
-          local_comments: integer()
-        }
-  def stats do
-    row =
-      from(s in "node_stats",
-        where: s.id == 1,
-        select: %{
-          user_count: s.user_count,
-          status_count: s.status_count,
-          domain_count: s.domain_count,
-          active_month: s.active_month,
-          active_halfyear: s.active_halfyear,
-          local_posts: s.local_posts,
-          local_comments: s.local_comments
-        }
-      )
-      |> Repo.one()
-
-    row ||
-      %{
-        user_count: 0,
-        status_count: 0,
-        domain_count: 0,
-        active_month: 0,
-        active_halfyear: 0,
-        local_posts: 0,
-        local_comments: 0
-      }
   end
 end

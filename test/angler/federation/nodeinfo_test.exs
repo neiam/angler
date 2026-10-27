@@ -1,7 +1,9 @@
 defmodule Angler.Federation.NodeinfoTest do
   use Angler.DataCase, async: false
 
+  alias Angler.Accounts
   alias Angler.Federation.Nodeinfo
+  alias Angler.Statuses
 
   describe "well_known/0" do
     test "links to the 2.0 schema document" do
@@ -35,12 +37,48 @@ defmodule Angler.Federation.NodeinfoTest do
       assert is_integer(usage["localPosts"])
     end
 
-    test "stats default to zero when no node_stats row exists" do
+    test "usage is zero on an empty instance" do
       doc = Nodeinfo.document()
 
       assert doc["usage"]["users"]["total"] == 0
       assert doc["usage"]["users"]["activeMonth"] == 0
       assert doc["usage"]["localPosts"] == 0
+    end
+
+    test "usage counts local users, posts, replies and recent posters" do
+      {:ok, %{profile: alice}} =
+        Accounts.register(%{
+          username: "alice",
+          email: "alice@example.com",
+          password: "passwordOK1"
+        })
+
+      {:ok, %{profile: bob}} =
+        Accounts.register(%{username: "bob", email: "bob@example.com", password: "passwordOK1"})
+
+      {:ok, post} = Statuses.create_local(alice, %{"status" => "hi", "visibility" => "public"})
+
+      {:ok, _} =
+        Statuses.create_local(alice, %{
+          "status" => "reply",
+          "visibility" => "public",
+          "in_reply_to_id" => Integer.to_string(post.id)
+        })
+
+      # bob last posted eight months ago: counted in neither activity window
+      {:ok, _} =
+        Statuses.create_local(bob, %{"status" => "old", "visibility" => "public"},
+          created_at: DateTime.add(DateTime.utc_now(), -240, :day)
+        )
+
+      Angler.Instance.clear_stats_cache()
+      usage = Nodeinfo.document()["usage"]
+
+      assert usage["users"]["total"] == 2
+      assert usage["users"]["activeMonth"] == 1
+      assert usage["users"]["activeHalfyear"] == 1
+      assert usage["localPosts"] == 3
+      assert usage["localComments"] == 1
     end
   end
 end
