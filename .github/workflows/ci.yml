@@ -48,8 +48,8 @@ jobs:
       - uses: https://gg.neiam.co/neiam/action-setup-beam@v1
         with:
           # Match the build image in the Dockerfile.
-          elixir-version: "1.19.5"
-          otp-version: "28.1.1"
+          elixir-version: "1.20.4"
+          otp-version: "28.5.0.8"
 
       - uses: actions/cache@v4
         with:
