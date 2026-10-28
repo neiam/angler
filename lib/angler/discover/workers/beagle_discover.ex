@@ -71,8 +71,14 @@ defmodule Angler.Discover.Workers.BeagleDiscover do
     end
   end
 
+  # A crash here would take the whole run down (stream tasks are linked).
   defp ingest(%{"id" => url}) do
-    case StatusFed.fetch_and_ingest(url) do
+    try do
+      StatusFed.fetch_and_ingest(url)
+    rescue
+      e -> {:error, {:crash, Exception.message(e)}}
+    end
+    |> case do
       :ok ->
         :ok
 

@@ -40,6 +40,9 @@ defmodule Angler.Federation.InstanceActor do
     end
   end
 
+  # Callers can race to create it (e.g. Beagle's parallel ingests on a fresh
+  # instance): the loser's insert is a no-op and it reads the winner's row.
+
   defp create! do
     base = AnglerWeb.Endpoint.url()
     domain = URI.parse(base).host
@@ -48,7 +51,7 @@ defmodule Angler.Federation.InstanceActor do
 
     owner = base <> "/i/actor"
 
-    Repo.insert!(%__MODULE__{
+    %__MODULE__{
       public_key_pem: public_pem,
       private_key_pem: private_pem,
       key_id: owner <> "#main-key",
@@ -58,7 +61,10 @@ defmodule Angler.Federation.InstanceActor do
       preferred_username: domain,
       name: domain,
       summary: "Internal actor."
-    })
+    }
+    |> Repo.insert!(on_conflict: :nothing, conflict_target: :key_id)
+
+    Repo.one!(__MODULE__)
   end
 
   @doc """
