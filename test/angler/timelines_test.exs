@@ -94,8 +94,12 @@ defmodule Angler.TimelinesTest do
       s2 = insert_status!(ctx.bob)
       s3 = insert_status!(ctx.bob)
 
-      Enum.each([s1, s2, s3], fn s -> {:ok, _} = FeedInsert.enqueue(s.id) end)
-      Oban.drain_queue(queue: :feed)
+      # Drain one at a time: home orders by entry id, and a single drain
+      # doesn't promise to run the jobs in insertion order.
+      Enum.each([s1, s2, s3], fn s ->
+        {:ok, _} = FeedInsert.enqueue(s.id)
+        Oban.drain_queue(queue: :feed)
+      end)
 
       {statuses, _cursor_rows} = Timelines.home(ctx.alice.id, default_cursor())
       assert Enum.map(statuses, & &1.id) == [s3.id, s2.id, s1.id]
@@ -172,8 +176,11 @@ defmodule Angler.TimelinesTest do
       # alice already has two of bob's posts in her feed.
       s1 = insert_status!(ctx.bob)
       s2 = insert_status!(ctx.bob)
-      Enum.each([s1, s2], fn s -> FeedInsert.enqueue(s.id) end)
-      Oban.drain_queue(queue: :feed)
+
+      Enum.each([s1, s2], fn s ->
+        FeedInsert.enqueue(s.id)
+        Oban.drain_queue(queue: :feed)
+      end)
 
       # Sanity: newest first.
       {home, _} = Timelines.home(ctx.alice.id, default_cursor())
