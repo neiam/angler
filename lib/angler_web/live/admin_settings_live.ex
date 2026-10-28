@@ -28,6 +28,7 @@ defmodule AnglerWeb.AdminSettingsLive do
      |> assign_settings_form()
      |> assign(:surfaces, @surfaces)
      |> assign_registration_form()
+     |> assign_toggles()
      |> assign_admins()}
   end
 
@@ -78,6 +79,15 @@ defmodule AnglerWeb.AdminSettingsLive do
   end
 
   defp present?(v), do: is_binary(v) and String.trim(v) != ""
+
+  # The admin config switches, shared with the admin app's /api/admin/config.
+  # Only the ones Angler acts on; the API still lists upstream's full set.
+  @live_toggles ~w(open_registration stories_enabled)
+
+  defp assign_toggles(socket),
+    do: assign(socket, :toggles, live_toggles(Angler.Admin.Pixelfed.config_list()))
+
+  defp live_toggles(list), do: Enum.filter(list, &(&1["key"] in @live_toggles))
 
   defp assign_admins(socket), do: assign(socket, :admins, Accounts.list_admins())
 
@@ -130,6 +140,20 @@ defmodule AnglerWeb.AdminSettingsLive do
        socket |> put_flash(:info, "Registration settings saved.") |> assign_registration_form()}
     else
       _ -> {:noreply, put_flash(socket, :error, "Couldn't save registration settings.")}
+    end
+  end
+
+  def handle_event("toggle", %{"key" => key}, socket) do
+    current = Enum.find(socket.assigns.toggles, &(&1["key"] == key))
+
+    case current &&
+           Angler.Admin.Pixelfed.update_config(
+             socket.assigns.current_user,
+             key,
+             !current["state"]
+           ) do
+      {:ok, list} -> {:noreply, assign(socket, :toggles, live_toggles(list))}
+      _ -> {:noreply, socket}
     end
   end
 
@@ -227,9 +251,34 @@ defmodule AnglerWeb.AdminSettingsLive do
           </.form>
         </section>
 
+        <section id="feature-toggles" class="space-y-3">
+          <h2 class="text-lg font-semibold">Features</h2>
+          <ul class="divide-y divide-base-300 rounded-box border border-base-300">
+            <li
+              :for={t <- @toggles}
+              id={"toggle-#{t["key"]}"}
+              class="flex items-center justify-between gap-4 px-3 py-2"
+            >
+              <span class="min-w-0">
+                <span class="block text-sm font-medium">{t["name"]}</span>
+                <span class="block text-xs text-base-content/60">{t["description"]}</span>
+              </span>
+              <input
+                type="checkbox"
+                class="toggle toggle-primary"
+                checked={t["state"]}
+                phx-click="toggle"
+                phx-value-key={t["key"]}
+                aria-label={t["name"]}
+              />
+            </li>
+          </ul>
+        </section>
+
         <section id="registration-settings" class="space-y-4">
           <div class="flex items-center justify-between gap-3">
             <h2 class="text-lg font-semibold">Registration</h2>
+            <.link navigate={~p"/admin/pages"} class="link text-sm">Site pages</.link>
             <button
               :if={@registration_overridden?}
               id="reset-registration"

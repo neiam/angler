@@ -19,6 +19,8 @@ defmodule Angler.Instance.Settings do
     # string-keyed; a missing key (or a nil map) falls back to env.
     field :captcha, :map
     field :curated_registration, :map
+    # Admin config switches (`Angler.Instance.toggle/2`), string-keyed.
+    field :toggles, :map
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -28,7 +30,7 @@ defmodule Angler.Instance.Settings do
 
   @doc "Changeset for the captcha / curated-registration overrides."
   def registration_changeset(settings, attrs),
-    do: cast(settings, attrs, [:captcha, :curated_registration])
+    do: cast(settings, attrs, [:captcha, :curated_registration, :toggles])
 
   def changeset(settings, attrs) do
     settings

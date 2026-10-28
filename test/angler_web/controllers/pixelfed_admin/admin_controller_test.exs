@@ -231,9 +231,10 @@ defmodule AnglerWeb.PixelfedAdmin.AdminControllerTest do
 
       stories = Enum.find(body, &(&1["key"] == "stories_enabled"))
       assert stories["state"] == true
-      assert Application.get_env(:angler, :stories_enabled) == true
-
-      on_exit(fn -> Application.delete_env(:angler, :stories_enabled) end)
+      # Saved in the database (every node, survives restarts), not app env.
+      assert Application.get_env(:angler, :stories_enabled) == nil
+      assert Angler.Instance.get_settings().toggles == %{"stories_enabled" => true}
+      assert Angler.Stories.enabled?()
     end
 
     test "POST rejects unknown key", ctx do

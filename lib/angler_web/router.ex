@@ -82,6 +82,16 @@ defmodule AnglerWeb.Router do
     live_session :public, on_mount: {AnglerWeb.LiveAuth, :mount_current_user} do
       live "/", IndexLive
       live "/about", AboutLive
+      live "/site/terms", SitePageLive, :terms
+      live "/site/privacy", SitePageLive, :privacy
+      live "/site/help", SitePageLive, :help
+      live "/site/legal-notice", SitePageLive, :legal_notice
+      live "/site/kb/community-guidelines", SitePageLive, :community_guidelines
+      live "/site/kb/licenses", SitePageLive, :licenses
+      live "/site/kb/instance-actor", SitePageLive, :instance_actor
+      # The Pixelfed app's Settings → Legal.
+      live "/e/terms", SitePageLive, :terms
+      live "/e/privacy", SitePageLive, :privacy
       live "/features", FeaturesLive
       live "/login", LoginLive
       live "/register", RegisterLive
@@ -111,6 +121,7 @@ defmodule AnglerWeb.Router do
 
     live_session :admin, on_mount: {AnglerWeb.LiveAuth, :require_admin} do
       live "/admin", AdminSettingsLive
+      live "/admin/pages", AdminPagesLive
       live "/admin/relays", AdminRelaysLive
       live "/admin/curated-onboarding", AdminCuratedRegistersLive
       live "/admin/curated-onboarding/templates", AdminCuratedTemplatesLive

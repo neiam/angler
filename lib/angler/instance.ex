@@ -146,8 +146,27 @@ defmodule Angler.Instance do
 
   @doc "Whether open registration is on. Default false."
   @spec open_registration?() :: boolean()
-  def open_registration? do
-    Application.get_env(:angler, :open_registration, false) == true
+  def open_registration?, do: toggle(:open_registration, false)
+
+  @doc """
+  An admin config switch (`/api/admin/config`, the admin settings page):
+  the saved value, else `config :angler, key` (env), else `default`. Saved
+  in the database so it reaches every node and survives restarts.
+  """
+  @spec toggle(atom(), boolean()) :: boolean()
+  def toggle(key, default) when is_atom(key) do
+    case Map.fetch(settings().toggles || %{}, Atom.to_string(key)) do
+      {:ok, v} -> v == true
+      :error -> Application.get_env(:angler, key, default) == true
+    end
+  end
+
+  @doc "Save an admin config switch."
+  @spec put_toggle(atom(), boolean()) :: {:ok, Settings.t()} | {:error, Ecto.Changeset.t()}
+  def put_toggle(key, value) when is_atom(key) and is_boolean(value) do
+    s = get_settings()
+    toggles = Map.put(s.toggles || %{}, Atom.to_string(key), value)
+    s |> Settings.registration_changeset(%{toggles: toggles}) |> Repo.insert_or_update()
   end
 
   @doc "Whether moderator approval is required for new signups."

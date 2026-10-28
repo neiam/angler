@@ -162,7 +162,7 @@ defmodule AnglerWeb.MastodonAPI.IarController do
 
   ## Internals
 
-  defp open_registration?, do: Application.get_env(:angler, :open_registration, false) == true
+  defp open_registration?, do: Angler.Instance.open_registration?()
 
   defp iar_allowed?,
     do: Application.get_env(:angler, :in_app_registration_enabled, false) == true

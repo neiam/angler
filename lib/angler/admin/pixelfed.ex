@@ -240,7 +240,7 @@ defmodule Angler.Admin.Pixelfed do
         "name" => n,
         "description" => d,
         "key" => k,
-        "state" => Application.get_env(:angler, String.to_atom(k), false) == true
+        "state" => Angler.Instance.toggle(String.to_atom(k), false)
       }
     end)
   end
@@ -249,7 +249,7 @@ defmodule Angler.Admin.Pixelfed do
           {:ok, [map()]} | {:error, :unknown_key}
   def update_config(%User{} = actor, key, value) when key in @config_keys do
     bool = coerce_bool(value, false)
-    Application.put_env(:angler, String.to_atom(key), bool)
+    {:ok, _} = Angler.Instance.put_toggle(String.to_atom(key), bool)
     log!(actor, "config.update", "config", nil, %{"key" => key, "value" => bool})
     {:ok, config_list()}
   end

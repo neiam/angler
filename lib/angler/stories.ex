@@ -38,7 +38,7 @@ defmodule Angler.Stories do
   @video_mimes ~w(video/mp4)
 
   @doc "Whether the operator has enabled the stories feature."
-  def enabled?, do: Application.get_env(:angler, :stories_enabled, false) == true
+  def enabled?, do: Angler.Instance.toggle(:stories_enabled, false)
 
   ## Add (upload draft)
 

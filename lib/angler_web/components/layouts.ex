@@ -95,6 +95,11 @@ defmodule AnglerWeb.Layouts do
                     </.link>
                   </li>
                   <li :if={@current_user.is_admin}>
+                    <.link navigate={~p"/admin/pages"}>
+                      <.icon name="hero-document-text-micro" class="size-4" /> Site pages
+                    </.link>
+                  </li>
+                  <li :if={@current_user.is_admin}>
                     <.link navigate={~p"/admin/relays"}>
                       <.icon name="hero-signal-micro" class="size-4" /> Relays
                     </.link>

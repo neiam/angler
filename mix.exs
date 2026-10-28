@@ -82,7 +82,9 @@ defmodule Angler.MixProject do
       {:jose, "~> 1.11"},
       {:nimble_totp, "~> 1.0"},
       {:eqrcode, "~> 0.2.1"},
-      {:wax_, "~> 0.7.0"}
+      {:wax_, "~> 0.7.0"},
+      # Markdown for admin-edited site pages (terms, privacy, help, ...).
+      {:mdex, "~> 0.14"}
     ]
   end
 
