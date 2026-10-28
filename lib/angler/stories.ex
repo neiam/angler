@@ -15,8 +15,10 @@ defmodule Angler.Stories do
        any story whose `expires_at` is in the past.
     5. `delete/2` author-only force-expires.
 
-  Comments on stories become `:direct` statuses to the author with a
-  reference embedded — see `comment/3`.
+  Replies and reactions become `story:reply` / `story:reaction` `:direct`
+  statuses to the author, carrying the `story_id` — see `comment/3` and
+  `react/3`. Publishing, deleting, expiring, viewing and answering federate
+  through `Angler.Stories.Outbound`.
   """
 
   import Ecto.Query, warn: false
@@ -26,7 +28,8 @@ defmodule Angler.Stories do
   alias Angler.Profiles.Profile
   alias Angler.Repo
   alias Angler.Statuses
-  alias Angler.Stories.{Story, View}
+  alias Angler.Statuses.{Mention, Status}
+  alias Angler.Stories.{Outbound, RemoteMedia, Story, View}
 
   @max_per_day 30
   @ttl_seconds 24 * 60 * 60
@@ -118,8 +121,12 @@ defmodule Angler.Stories do
           expires_at: DateTime.add(DateTime.utc_now(), @ttl_seconds, :second)
         )
         |> Repo.update()
+        |> tap(&fan_out_published/1)
     end
   end
+
+  defp fan_out_published({:ok, %Story{} = story}), do: Outbound.published(story)
+  defp fan_out_published(_), do: :ok
 
   defp mint_bearcap do
     :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
@@ -245,7 +252,12 @@ defmodule Angler.Stories do
 
       %Story{profile_id: pid} = s ->
         if follower?(viewer_id, pid) do
-          do_mark_seen(s, viewer_id)
+          # A first view of a remote story is reported to its author.
+          with {:ok, true} <- do_mark_seen(s, viewer_id),
+               %Profile{domain: nil} = viewer <- Repo.get(Profile, viewer_id) do
+            Outbound.viewed(s, viewer)
+          end
+
           {:ok, s}
         else
           {:error, :forbidden}
@@ -271,13 +283,16 @@ defmodule Angler.Stories do
 
       case result do
         {:ok, %View{id: id}} when not is_nil(id) ->
-          Repo.update_all(
-            from(s in Story, where: s.id == ^story_id),
-            inc: [view_count: 1]
-          )
+          {1, _} =
+            Repo.update_all(
+              from(s in Story, where: s.id == ^story_id),
+              inc: [view_count: 1]
+            )
+
+          true
 
         _ ->
-          :ok
+          false
       end
     end)
   end
@@ -294,7 +309,7 @@ defmodule Angler.Stories do
         {:error, :forbidden}
 
       story ->
-        story |> Ecto.Changeset.change(active: false) |> Repo.update!()
+        story |> Ecto.Changeset.change(active: false) |> Repo.update!() |> Outbound.removed()
         :ok
     end
   end
@@ -370,6 +385,7 @@ defmodule Angler.Stories do
             expires_at: DateTime.add(DateTime.utc_now(), @ttl_seconds, :second)
           )
           |> Repo.update()
+          |> tap(&fan_out_published/1)
         end
     end
   end
@@ -524,36 +540,134 @@ defmodule Angler.Stories do
     })
   end
 
-  ## Comment (story reply → :direct status)
+  ## Comment / react (→ story:reply / story:reaction DM)
 
+  @max_message 500
+  @max_reactions 5
+
+  @doc """
+  Reply to a story: a `story:reply` `:direct` status from `sender` to the
+  author, filed into their DM conversation and, for a remote story, sent to
+  its author as `Story:Reply` (upstream StoryApiV1Controller::comment).
+  """
   @spec comment(Profile.t(), integer(), String.t()) ::
           {:ok, Statuses.Status.t()} | {:error, atom()}
   def comment(%Profile{} = sender, story_id, text)
       when is_integer(story_id) and is_binary(text) and text != "" do
     case Repo.get(Story, story_id) do
-      nil ->
-        {:error, :not_found}
-
-      %Story{can_reply: false} ->
-        {:error, :replies_disabled}
-
-      %Story{profile_id: author_id} = story ->
-        # Only a live story, from someone who follows the author, with no
-        # block either way (upstream StoryApiV1Controller::comment).
-        if commentable?(story, sender) do
-          author = Repo.get!(Profile, author_id)
-
-          Statuses.create_local(sender, %{
-            "status" => "@" <> author.username <> " " <> text,
-            "visibility" => "direct"
-          })
-        else
-          {:error, :not_found}
-        end
+      nil -> {:error, :not_found}
+      %Story{can_reply: false} -> {:error, :replies_disabled}
+      story -> send_message(story, sender, :reply, text)
     end
   end
 
   def comment(_, _, _), do: {:error, :empty_comment}
+
+  @doc """
+  React to a story (an emoji, as free text): a `story:reaction` DM, and
+  `Story:Reaction` for a remote story. At most #{@max_reactions} per story
+  each (upstream StoryComposeController::react).
+  """
+  @spec react(Profile.t(), integer(), String.t()) ::
+          {:ok, Statuses.Status.t()} | {:error, atom()}
+  def react(%Profile{} = sender, story_id, text)
+      when is_integer(story_id) and is_binary(text) and text != "" do
+    case Repo.get(Story, story_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Story{can_react: false} ->
+        {:error, :reactions_disabled}
+
+      story ->
+        if reaction_count(story.id, sender.id) >= @max_reactions,
+          do: {:error, :limit_reached},
+          else: send_message(story, sender, :reaction, text)
+    end
+  end
+
+  def react(_, _, _), do: {:error, :empty_reaction}
+
+  defp reaction_count(story_id, sender_id) do
+    Repo.aggregate(
+      from(s in Status,
+        where:
+          s.story_id == ^story_id and s.profile_id == ^sender_id and s.type == "story:reaction"
+      ),
+      :count
+    )
+  end
+
+  # Only a live story, from someone who follows the author, with no block
+  # either way.
+  defp send_message(%Story{} = story, %Profile{domain: nil} = sender, kind, text) do
+    if commentable?(story, sender) do
+      story = Repo.preload(story, :profile)
+      id = Angler.Snowflake.next()
+      uri = AnglerWeb.Endpoint.url() <> "/p/" <> sender.username <> "/" <> Integer.to_string(id)
+
+      with {:ok, status} <-
+             record_message(story, sender, kind, String.slice(text, 0, @max_message),
+               id: id,
+               local: true,
+               uri: uri,
+               url: uri
+             ) do
+        Outbound.interacted(story, status, kind)
+        {:ok, status}
+      end
+    else
+      {:error, :not_found}
+    end
+  end
+
+  defp send_message(_, _, _, _), do: {:error, :not_found}
+
+  @doc """
+  Store a story reply or reaction from `sender` as a `:direct` status to the
+  story's author, mentioning them, and file it into their DM conversation
+  (upstream DirectMessageService::storeStoryMessage). `attrs` carries the
+  status's own fields: `:local`, `:uri`, `:url`, and optionally `:id`.
+  Idempotent on the uri.
+  """
+  @spec record_message(Story.t(), Profile.t(), :reaction | :reply, String.t(), keyword()) ::
+          {:ok, Status.t()} | {:error, term()}
+  def record_message(%Story{} = story, %Profile{} = sender, kind, text, attrs) do
+    {id, attrs} = Keyword.pop(attrs, :id)
+    html = text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+
+    attrs =
+      Map.merge(
+        %{
+          profile_id: sender.id,
+          caption: text,
+          rendered: "<p>" <> html <> "</p>",
+          visibility: :direct,
+          scope: "direct",
+          type: if(kind == :reply, do: "story:reply", else: "story:reaction"),
+          in_reply_to_profile_id: story.profile_id,
+          story_id: story.id
+        },
+        Map.new(attrs)
+      )
+
+    with {:ok, %Status{} = status} <- insert_message(%Status{id: id}, attrs) do
+      %{status_id: status.id, profile_id: story.profile_id}
+      |> Mention.changeset()
+      |> Repo.insert!(on_conflict: :nothing, conflict_target: [:status_id, :profile_id])
+
+      :ok = Angler.Conversations.record_story_message(status)
+      {:ok, status}
+    end
+  end
+
+  # The uri index is partial, so a duplicate surfaces as a constraint error
+  # rather than through ON CONFLICT (as `Statuses.create_remote/1`).
+  defp insert_message(status, attrs) do
+    status |> Status.changeset(attrs) |> Repo.insert()
+  rescue
+    Ecto.ConstraintError -> {:error, :exists}
+  end
 
   defp commentable?(%Story{profile_id: author_id} = story, %Profile{id: sender_id}) do
     story.active == true and
@@ -565,15 +679,33 @@ defmodule Angler.Stories do
 
   ## Expiry (called by the cron worker)
 
+  @doc """
+  Flip every published story past its `expires_at` to inactive and send
+  the `Delete` of each local one; mirrored remote stories are dropped with
+  their media (upstream StoryExpire). Returns the count.
+  """
   @spec expire_due() :: non_neg_integer()
   def expire_due do
     now = DateTime.utc_now()
 
-    {n, _} =
-      from(s in Story, where: s.active == true and s.expires_at <= ^now)
+    {n, expired} =
+      from(s in Story, where: s.active == true and s.expires_at <= ^now, select: s)
       |> Repo.update_all(set: [active: false, updated_at: now])
 
+    {local, remote} = Enum.split_with(expired, & &1.local)
+    Enum.each(local, &Outbound.removed/1)
+    purge_remote(remote)
+
     n
+  end
+
+  @doc "Delete mirrored remote stories and their stored media."
+  @spec purge_remote([Story.t()]) :: :ok
+  def purge_remote(stories) when is_list(stories) do
+    stories = Enum.reject(stories, & &1.local)
+    ids = Enum.map(stories, & &1.id)
+    {_, _} = Repo.delete_all(from s in Story, where: s.id in ^ids)
+    Enum.each(stories, &RemoteMedia.delete(&1.path))
   end
 
   ## Rendering helpers (used by both this module and the controller)
@@ -619,16 +751,21 @@ defmodule Angler.Stories do
   end
 
   @doc """
-  A story's media URL. Remote stories (`Angler.Stories.Federation`) are
-  hotlinked, so their `path` is already the URL.
+  A story's media URL. Remote stories mirrored before their media was
+  downloaded (`Angler.Stories.RemoteMedia`) hotlink it, so their `path` is
+  already the URL.
   """
   @spec media_url(Story.t()) :: String.t()
-  def media_url(%Story{local: false, path: url}), do: url
+  def media_url(%Story{local: false, path: url}) when is_binary(url) do
+    if RemoteMedia.hotlinked?(url), do: url, else: stored_url(url)
+  end
+
+  def media_url(%Story{path: path}), do: stored_url(path)
 
   # Stories don't share the Asset schema; the storage backend's `url/2`
   # signature wants an Asset, so we synthesize a minimal one.
-  def media_url(%Story{} = s),
-    do: Storage.backend().url(%Angler.Media.Asset{path_original: s.path}, :original) || s.path
+  defp stored_url(path),
+    do: Storage.backend().url(%Angler.Media.Asset{path_original: path}, :original) || path
 
   @doc """
   The v1.1 DM `{type, meta}` of a story reply or reaction status, or nil for

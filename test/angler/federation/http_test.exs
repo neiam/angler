@@ -114,6 +114,24 @@ defmodule Angler.Federation.HTTPTest do
       assert {:ok, %{status: 307}} =
                HTTP.deliver(url: "https://93.184.216.34/inbox", body: "{}", retry: false)
     end
+
+    test "download returns raw bytes of any type, under the guards and the cap" do
+      Req.Test.stub(:angler_http_redirect, fn
+        %{request_path: "/private"} = conn ->
+          conn
+          |> Plug.Conn.put_resp_header("location", "https://10.0.0.5/x.jpg")
+          |> Plug.Conn.send_resp(302, "")
+
+        conn ->
+          conn |> Plug.Conn.put_resp_content_type("image/jpeg") |> Plug.Conn.send_resp(200, "abc")
+      end)
+
+      assert {:ok, "abc"} = HTTP.download("https://93.184.216.34/x.jpg", max_bytes: 3)
+      assert {:error, :too_large} = HTTP.download("https://93.184.216.34/x.jpg", max_bytes: 2)
+
+      assert {:error, :private_address} =
+               HTTP.download("https://93.184.216.34/private", max_bytes: 10)
+    end
   end
 
   # Banned-domain behaviour is exercised end-to-end in BansTest (which has a

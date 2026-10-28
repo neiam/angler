@@ -84,10 +84,12 @@ defmodule AnglerWeb.Federation.StoryObjectControllerTest do
 
     assert body["@context"] == "https://www.w3.org/ns/activitystreams"
     assert body["type"] == "Story"
-    assert body["actor"] =~ "/users/alice"
-    assert is_list(body["attachment"])
-    [a] = body["attachment"]
-    assert a["mediaType"] == "image/jpeg"
+    # Upstream StoryVerb, which inbound `Stories.Federation` parses back.
+    assert body["attributedTo"] =~ "/users/alice"
+    assert is_integer(body["duration"])
+    assert is_boolean(body["can_reply"]) and is_boolean(body["can_react"])
+    assert {:ok, _, _} = DateTime.from_iso8601(body["expiresAt"])
+    assert %{"type" => "Image", "mediaType" => "image/jpeg"} = body["attachment"]
   end
 
   test "404 when story has expired (older than 20 minute publish window)", ctx do

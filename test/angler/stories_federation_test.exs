@@ -13,7 +13,7 @@ defmodule Angler.StoriesFederationTest do
   alias Angler.Profiles
   alias Angler.Statuses.Status
   alias Angler.Stories
-  alias Angler.Stories.{Story, View}
+  alias Angler.Stories.{RemoteMedia, Story, View}
   alias Angler.Stories.Workers.StoryFetch
 
   @story_url "http://remote.test/stories/bob/42"
@@ -23,9 +23,14 @@ defmodule Angler.StoriesFederationTest do
     Application.put_env(:angler, :stories_enabled, true)
     Application.put_env(:angler, :req_options, plug: {Req.Test, :angler_http})
 
+    root = Path.join(System.tmp_dir!(), "ang-story-fed-#{System.unique_integer([:positive])}")
+    Application.put_env(:angler, :media_root, root)
+
     on_exit(fn ->
       Application.delete_env(:angler, :stories_enabled)
       Application.delete_env(:angler, :req_options)
+      Application.delete_env(:angler, :media_root)
+      File.rm_rf!(root)
     end)
 
     {:ok, %{profile: alice}} =
@@ -48,6 +53,14 @@ defmodule Angler.StoriesFederationTest do
 
     p
   end
+
+  # Just enough JPEG for the type and dimension checks: SOI, APP0, SOF0.
+  defp jpeg(width, height) do
+    <<0xFF, 0xD8, 0xFF, 0xE0, 16::16, "JFIF", 0, 1, 1, 0, 1::16, 1::16, 0, 0, 0xFF, 0xC0, 17::16,
+      8, height::16, width::16, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xFF, 0xD9>>
+  end
+
+  defp stored(%Story{path: path}), do: Path.join(Angler.Media.Storage.Local.root(), path)
 
   # `follower` follows `followee`.
   defp follow!(follower, followee) do
@@ -103,15 +116,27 @@ defmodule Angler.StoriesFederationTest do
       )
     end
 
-    defp serve(doc) do
+    # The story document on remote.test, its media on the CDN.
+    defp serve(doc, media \\ jpeg(1080, 1920)) do
       test_pid = self()
 
       Req.Test.stub(:angler_http, fn conn ->
-        send(test_pid, {:auth, Plug.Conn.get_req_header(conn, "authorization")})
+        send(test_pid, {:auth, conn.host, Plug.Conn.get_req_header(conn, "authorization")})
 
-        conn
-        |> Plug.Conn.put_resp_content_type("application/activity+json")
-        |> Plug.Conn.send_resp(200, Jason.encode!(doc))
+        case {conn.host, media} do
+          {"cdn.remote.test", {:status, code}} ->
+            Plug.Conn.send_resp(conn, code, "")
+
+          {"cdn.remote.test", bytes} ->
+            conn
+            |> Plug.Conn.put_resp_content_type("image/jpeg")
+            |> Plug.Conn.send_resp(200, bytes)
+
+          _ ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/activity+json")
+            |> Plug.Conn.send_resp(200, Jason.encode!(doc))
+        end
       end)
     end
 
@@ -125,7 +150,9 @@ defmodule Angler.StoriesFederationTest do
 
       :ok = deliver(add(ctx.bob), ctx.bob)
       assert [:ok] = fetch_all()
-      assert_received {:auth, ["Bearer " <> @token]}
+      assert_received {:auth, "remote.test", ["Bearer " <> @token]}
+      # The token is the story's, not the media's.
+      assert_received {:auth, "cdn.remote.test", []}
 
       assert [%Story{local: false, active: true, can_reply: true, can_react: false} = story] =
                Repo.all(Story)
@@ -133,8 +160,13 @@ defmodule Angler.StoriesFederationTest do
       assert story.remote_url == @story_url
       assert story.duration_ms == 5_000
 
+      # The media was downloaded and is served from here.
+      refute RemoteMedia.hotlinked?(story.path)
+      assert File.read!(stored(story)) == jpeg(1080, 1920)
+
       %{nodes: [node]} = Stories.carousel(ctx.alice)
-      assert [%{"src" => "http://cdn.remote.test/s/42.jpg"}] = node["nodes"]
+      assert [%{"src" => src}] = node["nodes"]
+      assert src == AnglerWeb.Endpoint.url() <> "/storage/" <> story.path
 
       # Redelivery doesn't mirror it twice.
       :ok = deliver(add(ctx.bob), ctx.bob)
@@ -229,10 +261,84 @@ defmodule Angler.StoriesFederationTest do
       end
 
       :ok = delete.(ctx.mallory)
-      assert Repo.aggregate(Story, :count) == 1
+      assert [story] = Repo.all(Story)
+      assert File.exists?(stored(story))
 
       :ok = delete.(ctx.bob)
       assert Repo.all(Story) == []
+      refute File.exists?(stored(story))
+    end
+
+    defp fetch_once(ctx) do
+      perform_job(StoryFetch, %{
+        "url" => @story_url,
+        "token" => @token,
+        "actor_url" => ctx.bob.remote_url
+      })
+    end
+
+    test "media that fails upstream's checks isn't kept", ctx do
+      follow!(ctx.alice, ctx.bob)
+
+      # Not a story-sized image.
+      serve(story_doc(), jpeg(1080, 1080))
+      assert :ok = fetch_once(ctx)
+
+      # Not what it says it is.
+      serve(story_doc(), <<0x89, "PNG\r\n", 0x1A, "\n", 13::32, "IHDR", 1080::32, 1920::32>>)
+      assert :ok = fetch_once(ctx)
+
+      # An extension we don't take.
+      serve(
+        story_doc(%{
+          "attachment" => %{
+            "type" => "Image",
+            "url" => "http://cdn.remote.test/s/42.php",
+            "mediaType" => "image/jpeg"
+          }
+        })
+      )
+
+      assert :ok = fetch_once(ctx)
+
+      # Gone for good, vs. worth retrying.
+      serve(story_doc(), {:status, 404})
+      assert :ok = fetch_once(ctx)
+      serve(story_doc(), {:status, 503})
+      assert {:error, {:unavailable, 503}} = fetch_once(ctx)
+
+      assert Repo.all(Story) == []
+      assert Path.wildcard(Path.join(Angler.Media.Storage.Local.root(), "**/*.*")) == []
+    end
+
+    test "expiry drops mirrored stories and their media", ctx do
+      follow!(ctx.alice, ctx.bob)
+      serve(story_doc())
+      assert :ok = fetch_once(ctx)
+      [story] = Repo.all(Story)
+
+      # One mirrored before media was downloaded: hotlinked, nothing stored.
+      legacy =
+        Repo.insert!(%Story{
+          id: Angler.Snowflake.next(),
+          profile_id: ctx.bob.id,
+          local: false,
+          active: true,
+          type: "photo",
+          mime: "image/jpeg",
+          path: "http://cdn.remote.test/s/old.jpg",
+          remote_url: "http://remote.test/stories/bob/41",
+          expires_at: DateTime.add(DateTime.utc_now(), 60, :second)
+        })
+
+      assert Stories.media_url(legacy) == "http://cdn.remote.test/s/old.jpg"
+
+      past = DateTime.add(DateTime.utc_now(), -1, :second)
+      Repo.update_all(Story, set: [expires_at: past])
+
+      assert Stories.expire_due() == 2
+      assert Repo.all(Story) == []
+      refute File.exists?(stored(story))
     end
   end
 
