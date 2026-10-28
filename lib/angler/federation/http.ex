@@ -20,6 +20,7 @@ defmodule Angler.Federation.HTTP do
   """
 
   alias Angler.Federation.Bans
+  alias Angler.Federation.DeliveryHosts
   alias Angler.Federation.HTTP.PinnedAdapter
 
   @ap_content_types ~w(
@@ -73,15 +74,47 @@ defmodule Angler.Federation.HTTP do
   banned domain, private address). `req_opts` are passed to `Req.post/1`;
   redirects are never followed, since a redirected POST would be replayed as a
   GET against wherever the peer points it.
+
+  The outcome feeds `Angler.Federation.DeliveryHosts`: while the inbox's host
+  is backed off nothing is sent and this returns `{:error, :host_unavailable}`,
+  which workers turn into `{:cancel, :host_unavailable}` (upstream drops
+  deliveries to unavailable hosts too).
   """
   @spec deliver(keyword()) :: {:ok, Req.Response.t()} | {:error, term()}
   def deliver(req_opts) when is_list(req_opts) do
-    with {:ok, uri, ip} <- check_url(Keyword.fetch!(req_opts, :url)) do
-      req_opts
-      |> Keyword.merge(method: :post, redirect: false)
-      |> request(uri, ip)
+    url = Keyword.fetch!(req_opts, :url)
+    domain = DeliveryHosts.domain(url)
+
+    if domain && DeliveryHosts.unavailable?(domain) do
+      {:error, :host_unavailable}
+    else
+      result =
+        with {:ok, uri, ip} <- check_url(url) do
+          req_opts
+          |> Keyword.merge(method: :post, redirect: false)
+          |> request(uri, ip)
+        end
+
+      if domain, do: record_outcome(domain, result)
+      result
     end
   end
+
+  # As upstream: a 2xx clears the host; a 5xx, a connection failure or an
+  # unresolvable host counts against it; anything else (3xx, 4xx, our own
+  # guards) says nothing about the host's health.
+  defp record_outcome(domain, {:ok, %{status: s}}) when s in 200..299,
+    do: DeliveryHosts.record_success(domain)
+
+  defp record_outcome(domain, {:ok, %{status: s}}) when s >= 500,
+    do: DeliveryHosts.record_failure(domain)
+
+  defp record_outcome(domain, {:error, reason})
+       when reason == :unresolvable or is_struct(reason, Req.TransportError) or
+              is_struct(reason, Mint.TransportError),
+       do: DeliveryHosts.record_failure(domain)
+
+  defp record_outcome(_domain, _result), do: :ok
 
   @doc """
   Whether a `fetch/2` error looks temporary — timeouts, refused or reset

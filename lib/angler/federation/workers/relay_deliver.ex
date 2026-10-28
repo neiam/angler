@@ -107,6 +107,9 @@ defmodule Angler.Federation.Workers.RelayDeliver do
         log(:error, activity, actor, inbox_url, body, "remote #{status}")
         {:error, "remote #{status}"}
 
+      {:error, :host_unavailable} ->
+        {:cancel, :host_unavailable}
+
       {:error, reason} ->
         log(:error, activity, actor, inbox_url, body, inspect(reason))
         {:error, reason}
