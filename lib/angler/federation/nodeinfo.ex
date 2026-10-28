@@ -13,7 +13,7 @@ defmodule Angler.Federation.Nodeinfo do
   # here makes it refuse to connect ("Invalid or outdated version"). Angler's
   # real identity + version live under `metadata.software` (and the Pixelfed
   # level is echoed in `metadata.compatible`) for peers that look deeper.
-  @pixelfed_compat "0.12.7"
+  @pixelfed_compat "0.15.2"
 
   @doc "The Pixelfed release whose API surface Angler reports implementing."
   @spec pixelfed_compat() :: String.t()
