@@ -2,10 +2,13 @@ defmodule Angler.Profiles.BlocksMutes do
   @moduledoc """
   Block + mute lifecycle. Block also tears down any follow edges in either
   direction (blocked accounts can't follow you, and you stop following them).
+  A local profile blocking or unblocking a remote one is federated through
+  `Angler.Federation.BlockSync`.
   """
 
   import Ecto.Query, warn: false
 
+  alias Angler.Federation.BlockSync
   alias Angler.Follows
   alias Angler.Profiles.{Block, Mute, Profile}
   alias Angler.Repo
@@ -27,6 +30,7 @@ defmodule Angler.Profiles.BlocksMutes do
       Follows.unfollow(actor, target)
       Follows.unfollow(target, actor)
       if target.domain, do: Angler.Quotes.revoke_for_actor(actor.id, target.id)
+      if row.id, do: BlockSync.local_block_changed(actor, target, row.id, true)
 
       block
     end)
@@ -39,11 +43,15 @@ defmodule Angler.Profiles.BlocksMutes do
 
   @spec unblock(Profile.t(), Profile.t()) :: :ok
   def unblock(%Profile{} = actor, %Profile{} = target) do
-    Repo.delete_all(
-      from b in Block, where: b.profile_id == ^actor.id and b.target_id == ^target.id
-    )
+    {_, ids} =
+      Repo.delete_all(
+        from(b in Block,
+          where: b.profile_id == ^actor.id and b.target_id == ^target.id,
+          select: b.id
+        )
+      )
 
-    :ok
+    Enum.each(ids, &BlockSync.local_block_changed(actor, target, &1, false))
   end
 
   @doc "Profiles that block `target_id`."

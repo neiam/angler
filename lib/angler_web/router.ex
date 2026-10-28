@@ -167,6 +167,9 @@ defmodule AnglerWeb.Router do
     # Shared inbox for activities addressed to multiple local users.
     post "/f/inbox", Federation.InboxController, :shared
 
+    # FEP-070c: our users' blocks of the signing server's actors.
+    get "/f/block_sync", Federation.BlockSyncController, :show
+
     # AP object representation of a published story; bearer-cap gated.
     get "/stories/:username/:id", Federation.StoryObjectController, :show
   end

@@ -20,11 +20,12 @@ defmodule AnglerWeb.Federation.UserActorController do
 
   use AnglerWeb, :controller
 
-  alias Angler.Federation.{Actor, ActorBuilder, FollowersSync, HTTPSignature, HttpSignatureKey}
+  alias Angler.Federation.{ActorBuilder, FollowersSync}
   alias Angler.Profiles
   alias Angler.Profiles.Profile
   alias Angler.Quotes
   alias Angler.Quotes.Authorization
+  alias AnglerWeb.Federation.SignedFetch
 
   def show(conn, %{"username" => username}) do
     case Profiles.get_local_by_username(username) do
@@ -65,7 +66,7 @@ defmodule AnglerWeb.Federation.UserActorController do
 
   def followers_synchronization(conn, %{"username" => username}) do
     with %Profile{status: nil} = profile <- Profiles.get_local_by_username(username),
-         {:ok, owner} <- signer(conn),
+         {:ok, owner} <- SignedFetch.signer(conn),
          auth when is_binary(auth) <- FollowersSync.authority(owner) do
       items = FollowersSync.partial_followers(profile, auth)
 
@@ -85,23 +86,6 @@ defmodule AnglerWeb.Federation.UserActorController do
       nil -> conn |> put_status(:not_found) |> json(%{"error" => "Not Found"})
       %Profile{} -> conn |> put_status(:not_found) |> json(%{"error" => "Not Found"})
       _ -> conn |> put_status(:unauthorized) |> json(%{"error" => "Unauthorized"})
-    end
-  end
-
-  # Who signed this fetch: the owner of the verified key.
-  defp signer(conn) do
-    headers = [{"host", conn.host} | conn.req_headers]
-
-    path =
-      if conn.query_string == "",
-        do: conn.request_path,
-        else: conn.request_path <> "?" <> conn.query_string
-
-    with {:ok, key_id} <- HTTPSignature.verify_fetch(path, headers, &Actor.public_key_for/1) do
-      case Angler.Repo.get_by(HttpSignatureKey, key_id: key_id) do
-        %HttpSignatureKey{owner_url: owner} -> {:ok, owner}
-        nil -> {:ok, key_id |> URI.parse() |> Map.put(:fragment, nil) |> URI.to_string()}
-      end
     end
   end
 

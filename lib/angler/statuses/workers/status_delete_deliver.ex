@@ -14,6 +14,7 @@ defmodule Angler.Statuses.Workers.StatusDeleteDeliver do
     unique: [period: 60, fields: [:args], keys: [:status_id, :inbox_url]]
 
   alias Angler.Federation.Activity
+  alias Angler.Federation.BlockSync
   alias Angler.Federation.HTTPSignature
   alias Angler.Profiles
   alias Angler.Profiles.Profile
@@ -58,7 +59,7 @@ defmodule Angler.Statuses.Workers.StatusDeleteDeliver do
         [
           {"Content-Type", "application/activity+json"},
           {"Accept", "application/activity+json"}
-        ]
+        ] ++ BlockSync.headers(inbox_url)
       )
 
     case Angler.Federation.HTTP.deliver(

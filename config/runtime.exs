@@ -289,6 +289,23 @@ if config_env() != :test do
     max_account_size: String.to_integer(str.("MAX_ACCOUNT_SIZE", "1000000")),
     oauth_refresh_tokens: bool.("OAUTH_REFRESH_TOKENS", true)
 
+  int = fn key, default ->
+    case Integer.parse(System.get_env(key) || "") do
+      {n, ""} -> n
+      _ -> default
+    end
+  end
+
+  ## FEP-070c block sync (upstream federation.activitypub.block_sync).
+  # AP_BLOCK_SYNC: act on peers' block lists. AP_BLOCK_SYNC_DISCLOSE: tell
+  # each peer which of its actors our users block.
+  config :angler, Angler.Federation.BlockSync,
+    enabled: bool.("AP_BLOCK_SYNC", true),
+    disclose: bool.("AP_BLOCK_SYNC_DISCLOSE", true),
+    cooldown: int.("AP_BLOCK_SYNC_COOLDOWN", 900),
+    max_pages: int.("AP_BLOCK_SYNC_MAX_PAGES", 10),
+    reconcile_limit: int.("AP_BLOCK_SYNC_RECONCILE_LIMIT", 1000)
+
   ## Instance metadata (surfaced via /api/v1/instance, /nodeinfo, etc.)
   config :angler,
     instance_title: str.("INSTANCE_TITLE", "Angler"),
@@ -367,7 +384,9 @@ config :angler, Oban,
        {"* * * * *", Angler.Stories.Workers.Expire},
        {"40 * * * *", Angler.Statuses.Workers.PruneIdempotencyKeys},
        # No-op unless Beagle discovery is enabled (see below).
-       {"0 * * * *", Angler.Discover.Workers.BeagleDiscover}
+       {"0 * * * *", Angler.Discover.Workers.BeagleDiscover},
+       # FEP-070c: pull peers' block lists; no-op unless AP_BLOCK_SYNC.
+       {"40 3 * * *", Angler.Federation.Workers.BlockSyncReconcile}
      ]}
   ]
 

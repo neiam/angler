@@ -30,7 +30,7 @@ defmodule Angler.Federation.FollowersSync do
 
   require Logger
 
-  alias Angler.Federation.{HTTP, HTTPSignature, InstanceActor}
+  alias Angler.Federation.{HTTPSignature, Sync}
   alias Angler.Federation.Workers.FollowersSync, as: SyncWorker
   alias Angler.Follows
   alias Angler.Follows.Follower
@@ -39,48 +39,21 @@ defmodule Angler.Federation.FollowersSync do
   alias Angler.Repo
 
   @header "collection-synchronization"
-  @empty_digest String.duplicate("0", 64)
   @removal_grace_s 600
   @max_items 100_000
   @max_undo_per_run 100
   @max_pages 10
-  @collection_types ~w(Collection OrderedCollection CollectionPage OrderedCollectionPage)
 
   @doc "The header name, as sent."
   def header_name, do: "Collection-Synchronization"
 
-  @doc """
-  Scheme and authority of an http(s) URL, lowercased and without a default
-  port, or nil.
-  """
-  @spec authority(term()) :: String.t() | nil
-  def authority(url) when is_binary(url) do
-    case URI.parse(String.trim(url)) do
-      %URI{scheme: scheme, host: host, port: port, userinfo: nil}
-      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
-        default = if scheme == "https", do: 443, else: 80
-        base = scheme <> "://" <> String.downcase(host)
-        if port in [nil, default], do: base, else: base <> ":" <> Integer.to_string(port)
+  @doc "See `Angler.Federation.Sync.authority/1`."
+  defdelegate authority(url), to: Sync
 
-      _ ->
-        nil
-    end
-  end
+  @doc "See `Angler.Federation.Sync.digest/1`."
+  defdelegate digest(ids), to: Sync
 
-  def authority(_), do: nil
-
-  defp local_authority, do: authority(AnglerWeb.Endpoint.url())
-
-  @doc "The FEP digest: SHA-256 of each id, XORed together, hex."
-  @spec digest([String.t()]) :: String.t()
-  def digest(ids) do
-    ids
-    |> Enum.filter(&(is_binary(&1) and &1 != ""))
-    |> Enum.reduce(<<0::256>>, fn id, acc ->
-      :crypto.exor(acc, :crypto.hash(:sha256, id))
-    end)
-    |> Base.encode16(case: :lower)
-  end
+  defp local_authority, do: Sync.local_authority()
 
   ## Sending
 
@@ -102,7 +75,7 @@ defmodule Angler.Federation.FollowersSync do
 
           digest =
             case partial_followers(profile, auth) do
-              [] -> @empty_digest
+              [] -> Sync.empty_digest()
               ids -> digest(ids)
             end
 
@@ -167,21 +140,15 @@ defmodule Angler.Federation.FollowersSync do
   @doc "Parse a header value (`signature`-style `k=\"v\"` pairs)."
   @spec parse_header(String.t()) ::
           {:ok, %{collection_id: String.t(), url: String.t(), digest: String.t()}} | :error
-  def parse_header(value) when is_binary(value) and byte_size(value) <= 2048 do
-    pairs = Regex.scan(~r/(?:^|,)\s*([A-Za-z][A-Za-z0-9_-]*)\s*=\s*"([^"]*)"/, value)
-    keys = Enum.map(pairs, fn [_, k, _] -> k end)
-    params = Map.new(pairs, fn [_, k, v] -> {k, v} end)
-    digest = String.downcase(params["digest"] || "")
-
-    if length(keys) == map_size(params) and params["collectionId"] not in [nil, ""] and
-         params["url"] not in [nil, ""] and Regex.match?(~r/\A[0-9a-f]{64}\z/, digest) do
+  def parse_header(value) do
+    with {:ok, params} <- Sync.parse_params(value),
+         digest when is_binary(digest) <- Sync.normalize_digest(params["digest"]),
+         true <- params["collectionId"] not in [nil, ""] and params["url"] not in [nil, ""] do
       {:ok, %{collection_id: params["collectionId"], url: params["url"], digest: digest}}
     else
-      :error
+      _ -> :error
     end
   end
-
-  def parse_header(_), do: :error
 
   # The collection and its sync URL must be on the sender's own authority,
   # so nobody can have us fetch a third party's followers.
@@ -238,7 +205,7 @@ defmodule Angler.Federation.FollowersSync do
 
   defp reconcile(sender, %{items: items, complete: complete?}, expected, result) do
     items = Enum.uniq(items)
-    segments = Enum.map(items, &local_username/1)
+    segments = Enum.map(items, &Sync.local_username/1)
 
     # Removing follows is destructive: only from a complete list that hashes
     # to what they signed and holds nothing we can't read as a local actor.
@@ -314,19 +281,6 @@ defmodule Angler.Federation.FollowersSync do
 
   defp send_undo(_, _), do: :ok
 
-  # The username in one of our actor ids, or nil if it isn't one.
-  defp local_username(uri) when is_binary(uri) do
-    with true <- authority(uri) == local_authority(),
-         %URI{query: nil, fragment: nil, path: path} when is_binary(path) <- URI.parse(uri),
-         [_, name] <- Regex.run(~r"\A/users/([A-Za-z0-9_.\-]{1,64})/?\z", path) do
-      name
-    else
-      _ -> nil
-    end
-  end
-
-  defp local_username(_), do: nil
-
   @doc """
   Fetch a possibly paged collection, signed as the instance actor, staying
   on `authority`. `%{items, complete}`, or nil when anything is off (a
@@ -335,9 +289,9 @@ defmodule Angler.Federation.FollowersSync do
   @spec fetch_collection(String.t(), String.t()) ::
           %{items: [String.t()], complete: boolean()} | nil
   def fetch_collection(url, authority) do
-    with %{} = doc <- fetch_doc(url, authority),
-         true <- collection?(doc) do
-      first = if items?(doc), do: doc, else: doc["first"]
+    with %{} = doc <- Sync.fetch_doc(url, authority),
+         true <- Sync.collection?(doc) do
+      first = if Sync.items?(doc), do: doc, else: doc["first"]
       walk(first, authority, [], MapSet.new([url]), 0)
     else
       _ -> nil
@@ -356,7 +310,7 @@ defmodule Angler.Federation.FollowersSync do
 
       true ->
         walk(
-          fetch_doc(page_url, authority),
+          Sync.fetch_doc(page_url, authority),
           authority,
           items,
           MapSet.put(seen, page_url),
@@ -366,7 +320,7 @@ defmodule Angler.Federation.FollowersSync do
   end
 
   defp walk(%{} = page, authority, items, seen, pages) do
-    with true <- collection?(page),
+    with true <- Sync.collection?(page),
          {:ok, page_items} <- page_items(page["orderedItems"] || page["items"] || []),
          items = items ++ page_items,
          true <- length(items) <= @max_items,
@@ -393,22 +347,4 @@ defmodule Angler.Federation.FollowersSync do
   end
 
   defp page_items(_), do: :error
-
-  defp fetch_doc(url, authority) do
-    if authority(url) == authority do
-      actor = InstanceActor.ensure!()
-
-      case HTTP.fetch(url, signed_with: {actor.key_id, actor.private_key_pem}) do
-        {:ok, %{} = doc} -> doc
-        _ -> nil
-      end
-    end
-  end
-
-  defp collection?(%{"type" => types}),
-    do: types |> List.wrap() |> Enum.any?(&(&1 in @collection_types))
-
-  defp collection?(_), do: false
-
-  defp items?(doc), do: Map.has_key?(doc, "orderedItems") or Map.has_key?(doc, "items")
 end

@@ -4,9 +4,9 @@ defmodule Angler.Profiles.Federation do
   `Update Person`, `Delete Person`, `Block`, `Undo Block`.
   """
 
-  alias Angler.Federation.Actor
+  alias Angler.Federation.{Actor, BlockSync, Sync}
   alias Angler.Profiles
-  alias Angler.Profiles.{BlocksMutes, Profile}
+  alias Angler.Profiles.Profile
   alias Angler.Repo
 
   @doc """
@@ -48,18 +48,24 @@ defmodule Angler.Profiles.Federation do
   end
 
   @doc """
-  A remote actor blocked a local one (upstream 39532e8ba): record the block,
-  which also drops follows both ways, so their posts stop reaching each
-  other here. Mastodon sends this when a user blocks someone on another
-  server.
+  A remote actor blocked a local one (upstream 39532e8ba, HandlesBlocks):
+  record the block, which also drops follows both ways, so their posts stop
+  reaching each other here. Mastodon sends this when a user blocks someone
+  on another server. Ignored when block sync receiving is off (FEP-070c,
+  `Angler.Federation.BlockSync`). The inbox has already checked the
+  signature is the actor's own.
   """
   @spec handle_block(map(), String.t()) :: :ok | {:error, atom()}
-  def handle_block(%{"object" => target_url}, actor_url) when is_binary(target_url) do
-    with {:ok, target} <- local_target(target_url),
-         {:ok, blocker} <- Actor.resolve(actor_url),
-         {:ok, _} <- BlocksMutes.block(blocker, target) do
+  def handle_block(%{} = activity, actor_url) do
+    with true <- BlockSync.receiving?() || :disabled,
+         ^actor_url <- BlockSync.id_of(activity["actor"]) || actor_url,
+         object when is_binary(object) <- BlockSync.id_of(activity["object"]),
+         {:ok, target} <- local_target(object),
+         {:ok, %Profile{domain: d} = blocker} when is_binary(d) <- Actor.resolve(actor_url) do
+      BlockSync.apply_remote_block(blocker, target)
       :ok
     else
+      :disabled -> :ok
       {:error, reason} -> {:error, reason}
       _ -> {:error, :unknown_target}
     end
@@ -68,11 +74,15 @@ defmodule Angler.Profiles.Federation do
   def handle_block(_, _), do: {:error, :bad_block_payload}
 
   @spec handle_undo_block(map(), String.t()) :: :ok | {:error, atom()}
-  def handle_undo_block(%{"object" => %{"object" => target_url}}, actor_url)
-      when is_binary(target_url) do
-    with {:ok, target} <- local_target(target_url),
-         %Profile{} = blocker <- Repo.get_by(Profile, remote_url: actor_url) do
-      BlocksMutes.unblock(blocker, target)
+  def handle_undo_block(%{"object" => %{} = block}, actor_url) do
+    with true <- BlockSync.receiving?(),
+         true <- BlockSync.id_of(block["actor"]) in [nil, actor_url],
+         object when is_binary(object) <- BlockSync.id_of(block["object"]),
+         {:ok, target} <- local_target(object),
+         %Profile{domain: d} = blocker when is_binary(d) <-
+           Repo.get_by(Profile, remote_url: actor_url) do
+      BlockSync.remove_remote_block(blocker, target)
+      :ok
     else
       _ -> :ok
     end
@@ -81,15 +91,11 @@ defmodule Angler.Profiles.Federation do
   def handle_undo_block(_, _), do: {:error, :bad_undo_block_payload}
 
   defp local_target(url) do
-    case String.split(url, AnglerWeb.Endpoint.url() <> "/users/", parts: 2) do
-      ["", username] ->
-        case Profiles.get_local_by_username(username) do
-          %Profile{} = p -> {:ok, p}
-          nil -> :error
-        end
-
-      _ ->
-        :error
+    with name when is_binary(name) <- Sync.local_username(url),
+         %Profile{} = p <- Profiles.get_local_by_username(name) do
+      {:ok, p}
+    else
+      _ -> :error
     end
   end
 end
