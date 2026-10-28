@@ -184,27 +184,43 @@ defmodule AnglerWeb.PublicComponents do
 
   defp media_tiles(assigns) do
     ~H"""
-    <div class={[
-      "grid gap-1",
-      length(@media) > 1 && "grid-cols-2",
-      length(@media) == 1 && "grid-cols-1"
-    ]}>
+    <div
+      data-lightbox-group
+      class={[
+        "grid gap-1",
+        length(@media) > 1 && "grid-cols-2",
+        length(@media) == 1 && "grid-cols-1"
+      ]}
+    >
       <div :for={m <- @media} class="overflow-hidden rounded-box bg-base-300">
         <%= case m["type"] do %>
           <% type when type in ["video", "gifv"] -> %>
             <video controls class="w-full" src={m["url"]} poster={m["preview_url"]} />
           <% _ -> %>
-            <img
-              src={m["preview_url"] || m["url"]}
-              alt={m["description"] || ""}
-              loading="lazy"
-              class="w-full object-cover"
-            />
+            <%!-- Opens the full-size photo in the viewer (assets/js/lightbox.js). --%>
+            <button
+              type="button"
+              id={"media-#{m["id"]}"}
+              data-lightbox-src={m["url"] || m["preview_url"]}
+              data-lightbox-alt={m["description"] || ""}
+              aria-label={"View photo full size" <> alt_suffix(m["description"])}
+              class="group block w-full cursor-zoom-in"
+            >
+              <img
+                src={m["preview_url"] || m["url"]}
+                alt={m["description"] || ""}
+                loading="lazy"
+                class="w-full object-cover transition duration-300 group-hover:scale-[1.02] group-hover:brightness-105"
+              />
+            </button>
         <% end %>
       </div>
     </div>
     """
   end
+
+  defp alt_suffix(desc) when is_binary(desc) and desc != "", do: ": " <> desc
+  defp alt_suffix(_), do: ""
 
   @doc """
   Wraps its content in an in-app link to the account's profile. Uses the

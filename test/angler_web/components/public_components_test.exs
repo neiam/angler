@@ -46,4 +46,35 @@ defmodule AnglerWeb.PublicComponentsTest do
     assert html =~ "/@bob%40remote.test"
     refute html =~ ~s(href="https://remote.test/@bob")
   end
+
+  test "photos open full size in the lightbox; videos keep their player" do
+    media = [
+      %{
+        "id" => "10",
+        "type" => "image",
+        "url" => "https://cdn.test/full.jpg",
+        "preview_url" => "https://cdn.test/thumb.jpg",
+        "description" => "a heron"
+      },
+      %{"id" => "11", "type" => "video", "url" => "https://cdn.test/clip.mp4"}
+    ]
+
+    account = %{"username" => "alice", "acct" => "alice", "avatar" => ""}
+    status = %{status(account) | "media_attachments" => media}
+
+    doc =
+      render_component(&PublicComponents.post_card/1, id: "post-3", status: status)
+      |> LazyHTML.from_fragment()
+
+    [tile] = doc |> LazyHTML.query("[data-lightbox-group] #media-10") |> Enum.to_list()
+    assert LazyHTML.attribute(tile, "data-lightbox-src") == ["https://cdn.test/full.jpg"]
+    assert LazyHTML.attribute(tile, "data-lightbox-alt") == ["a heron"]
+
+    assert tile |> LazyHTML.query("img") |> LazyHTML.attribute("src") == [
+             "https://cdn.test/thumb.jpg"
+           ]
+
+    assert doc |> LazyHTML.query("[data-lightbox-src]") |> Enum.count() == 1
+    assert doc |> LazyHTML.query("video") |> Enum.count() == 1
+  end
 end
