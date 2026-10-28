@@ -4,6 +4,8 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationControllerTest do
   use AnglerWeb.ConnCase, async: false
   use Oban.Testing, repo: Angler.Repo
 
+  import Ecto.Query
+
   alias Angler.Accounts
   alias Angler.OAuth
 
@@ -327,5 +329,30 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationControllerTest do
     conn |> api(ctx.bob) |> post(~p"/api/v1.1/direct/conversations/#{cid}/unhide")
     say!(conn, ctx.alice, cid, "four")
     assert [%{"type" => "mention"}] = notifications(conn, ctx.bob)
+  end
+
+  test "with new-account DMs off, accounts under 72 hours can't start one", %{conn: conn} = ctx do
+    Application.put_env(:angler, :allow_new_account_dms, false)
+    on_exit(fn -> Application.delete_env(:angler, :allow_new_account_dms) end)
+
+    assert %{"error" => "You need to wait" <> _} =
+             conn
+             |> api(ctx.alice)
+             |> post(~p"/api/v1.1/direct/conversations", %{"recipient_ids" => [id(ctx.bob)]})
+             |> json_response(400)
+
+    assert conn
+           |> api(ctx.alice)
+           |> post(~p"/api/v1.1/direct/thread/send", %{"to_id" => id(ctx.bob), "message" => "hi"})
+           |> json_response(400)
+
+    old = DateTime.add(DateTime.utc_now(), -73 * 3600)
+
+    Angler.Repo.update_all(
+      from(u in Angler.Accounts.User, where: u.profile_id == ^ctx.alice.profile.id),
+      set: [inserted_at: old]
+    )
+
+    start!(conn, ctx.alice, [ctx.bob])
   end
 end

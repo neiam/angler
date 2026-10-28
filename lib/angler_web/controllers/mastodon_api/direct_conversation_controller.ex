@@ -19,6 +19,8 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationController do
 
   use AnglerWeb, :controller
 
+  @wait_message "You need to wait a bit before you can DM another account"
+
   import Ecto.Query, only: [from: 2]
 
   alias Angler.Conversations
@@ -72,14 +74,14 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationController do
 
   # Find or start the conversation with exactly these people (plus me).
   def create(conn, params) do
-    %{profile: me} = BearerAuth.current_scope(conn)
+    %{profile: me, user: user} = BearerAuth.current_scope(conn)
 
     with {:ok, ids} <- recipient_ids(params["recipient_ids"], me.id),
          {:ok, recipients} <- recipients(ids),
          members = [me.id | ids],
          existing = Repo.get_by(Conversation, participants_hash: Conversation.hash(members)),
          :ok <- check_groups(members),
-         :ok <- if(existing, do: :ok, else: check_new(me, recipients)) do
+         :ok <- if(existing, do: :ok, else: check_new(user, me, recipients)) do
       conversation = existing || Conversations.find_or_create!(members, me.id)
       Conversations.reopen(conversation.id, me.id)
       row = Conversations.get(me.id, conversation.id)
@@ -248,6 +250,12 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationController do
 
   # Starting a new conversation: you can't DM someone who blocks you, or put
   # someone you block in a group.
+  defp check_new(user, me, recipients) do
+    if Conversations.can_initiate?(user),
+      do: check_new(me, recipients),
+      else: {:error, 400, @wait_message}
+  end
+
   defp check_new(me, [single]) do
     if BlocksMutes.blocked?(single.id, me.id),
       do: {:error, 403, "You cannot message this account."},

@@ -37,6 +37,21 @@ defmodule Angler.Conversations do
   @doc "Most people a conversation can hold, the creator included."
   def max_participants, do: @max_participants
 
+  @new_account_wait_s 72 * 3600
+
+  @doc """
+  May `user` start a conversation (upstream canInitiateConversation)? New
+  accounts wait 72 hours, unless the instance allows new-account DMs
+  (`INSTANCE_ALLOW_NEW_DMS`, on by default) or they're an admin.
+  """
+  @spec can_initiate?(User.t()) :: boolean()
+  def can_initiate?(%User{is_admin: true}), do: true
+
+  def can_initiate?(%User{inserted_at: at}) do
+    Application.get_env(:angler, :allow_new_account_dms, true) == true or
+      DateTime.diff(DateTime.utc_now(), at) >= @new_account_wait_s
+  end
+
   ## Recording messages
 
   @doc """

@@ -68,9 +68,10 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
   ## POST /direct/thread/send
 
   def send(conn, params) do
-    %{profile: actor} = BearerAuth.current_scope(conn)
+    %{profile: actor, user: user} = BearerAuth.current_scope(conn)
 
-    with {:ok, to_id} <- parse_id(params["to_id"]),
+    with true <- Angler.Conversations.can_initiate?(user) || :too_new,
+         {:ok, to_id} <- parse_id(params["to_id"]),
          %Profile{} = peer when peer.id != actor.id <- Profiles.get_profile(to_id),
          {:ok, message} <- params["message"] |> validate_message(),
          :ok <- check_block(actor, peer) do
@@ -92,10 +93,22 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
           validation_error(conn, %{"_" => [to_string(reason)]})
       end
     else
-      {:error, :blocked} -> conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
-      {:error, :too_long} -> validation_error(conn, %{"message" => ["max 500 chars"]})
-      {:error, :empty} -> validation_error(conn, %{"message" => ["is required"]})
-      _ -> not_found(conn)
+      :too_new ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{"error" => "You need to wait a bit before you can DM another account"})
+
+      {:error, :blocked} ->
+        conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+
+      {:error, :too_long} ->
+        validation_error(conn, %{"message" => ["max 500 chars"]})
+
+      {:error, :empty} ->
+        validation_error(conn, %{"message" => ["is required"]})
+
+      _ ->
+        not_found(conn)
     end
   end
 
