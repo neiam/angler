@@ -22,6 +22,7 @@ defmodule Angler.Federation.Workers.InboxValidator do
   alias Angler.Federation.Activity
   alias Angler.Federation.Actor
   alias Angler.Federation.Bans
+  alias Angler.Federation.BlockSync
   alias Angler.Federation.FollowersSync
   alias Angler.Federation.HTTPSignature
   alias Angler.Federation.Workers.ActivityHandler
@@ -96,7 +97,7 @@ defmodule Angler.Federation.Workers.InboxValidator do
 
     case HTTPSignature.verify(:post, path, headers_list, raw_body, key_resolver) do
       :ok ->
-        FollowersSync.handle_inbound(headers, actor_url)
+        sync_headers(headers, actor_url)
         record_and_dispatch(payload, raw_body, actor_url, recipient_id)
 
       {:error, reason} ->
@@ -111,7 +112,7 @@ defmodule Angler.Federation.Workers.InboxValidator do
                    key_resolver
                  ) do
               :ok ->
-                FollowersSync.handle_inbound(headers, actor_url)
+                sync_headers(headers, actor_url)
                 record_and_dispatch(payload, raw_body, actor_url, recipient_id)
 
               {:error, _} ->
@@ -124,6 +125,12 @@ defmodule Angler.Federation.Workers.InboxValidator do
               else: log_rejected(payload, actor_url, reason)
         end
     end
+  end
+
+  # FEP-8fcf / FEP-070c: compare the sender's digests with our copies.
+  defp sync_headers(headers, actor_url) do
+    FollowersSync.handle_inbound(headers, actor_url)
+    BlockSync.handle_inbound(headers, actor_url)
   end
 
   defp record_and_dispatch(payload, raw_body, actor_url, recipient_id) do

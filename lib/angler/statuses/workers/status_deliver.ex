@@ -20,6 +20,7 @@ defmodule Angler.Statuses.Workers.StatusDeliver do
   import Ecto.Query, warn: false
 
   alias Angler.Federation.Activity
+  alias Angler.Federation.BlockSync
   alias Angler.Federation.FollowersSync
   alias Angler.Federation.HTTPSignature
   alias Angler.Profiles
@@ -88,7 +89,7 @@ defmodule Angler.Statuses.Workers.StatusDeliver do
         [
           {"Content-Type", "application/activity+json"},
           {"Accept", "application/activity+json"}
-        ] ++ sync_header(actor, inbox_url)
+        ] ++ sync_header(actor, inbox_url) ++ BlockSync.headers(inbox_url)
       )
 
     case Angler.Federation.HTTP.deliver(

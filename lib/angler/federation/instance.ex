@@ -33,6 +33,12 @@ defmodule Angler.Federation.Instance do
     field :last_fetched_at, :utc_datetime_usec
     field :unreachable_since, :utc_datetime_usec
 
+    # FEP-070c: the peer's block sync endpoint, as last seen in a signed
+    # `Block-Synchronization` header; see `Angler.Federation.BlockSync`.
+    field :block_sync_url, :string
+    field :block_sync_backoff_until, :utc_datetime_usec
+    field :block_sync_queued_at, :utc_datetime_usec
+
     timestamps(type: :utc_datetime_usec)
   end
 
