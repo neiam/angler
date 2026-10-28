@@ -191,7 +191,7 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
       # Include the live row as the most recent edit if there are any prior
       # snapshots — Mastodon includes the current state in /history.
       live = %{
-        "content" => status.rendered || "",
+        "content" => StatusJSON.content(status),
         "spoiler_text" => status.cw_summary || "",
         "sensitive" => status.is_nsfw,
         "created_at" => DateTime.to_iso8601(status.edited_at || status.inserted_at),
@@ -203,7 +203,11 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
       historical =
         Enum.map(edits, fn e ->
           %{
-            "content" => e.rendered || "",
+            "content" =>
+              if(status.local,
+                do: e.rendered || "",
+                else: Angler.Content.RemoteHtml.clean(e.rendered)
+              ),
             "spoiler_text" => e.spoiler_text || "",
             "sensitive" => e.is_nsfw,
             "created_at" => DateTime.to_iso8601(e.inserted_at),

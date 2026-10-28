@@ -178,7 +178,7 @@ defmodule AnglerWeb.MastodonAPI.Status do
       "muted" => false,
       "bookmarked" => false,
       "pinned" => false,
-      "content" => status.rendered || "",
+      "content" => content(status),
       # Pixelfed extensions the mobile app depends on: `pf_type` drives the
       # photo/video grid filters (profile grid, explore, feed) and `content_text`
       # is the plain-text caption used for client-side checks. Missing `pf_type`
@@ -263,6 +263,24 @@ defmodule AnglerWeb.MastodonAPI.Status do
 
   defp mention_acct(%Profile{domain: nil, username: u}), do: u
   defp mention_acct(%Profile{domain: d, username: u}), do: "#{u}@#{d}"
+
+  @doc """
+  A status's HTML for clients. Ours is built by our own lexer; a remote
+  post's is whatever its server sent, so it's sanitized, with its hashtag
+  links pointed at our tag pages (`Angler.Content.RemoteHtml`).
+  """
+  @spec content(Status.t()) :: String.t()
+  def content(%Status{local: true, rendered: html}), do: html || ""
+
+  def content(%Status{rendered: html, status_hashtags: tags}) do
+    names =
+      case tags do
+        list when is_list(list) -> for %StatusHashtag{hashtag: %Hashtag{name: n}} <- list, do: n
+        _ -> []
+      end
+
+    Angler.Content.RemoteHtml.clean(html, names)
+  end
 
   defp render_tags(status_hashtags) when is_list(status_hashtags) do
     Enum.map(status_hashtags, fn %StatusHashtag{hashtag: %Hashtag{name: name}} ->

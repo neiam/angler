@@ -30,7 +30,8 @@ defmodule AnglerWeb.MastodonAPI.Account do
       "discoverable" => p.discoverable,
       "group" => false,
       "created_at" => format_ts(p.inserted_at),
-      "note" => p.bio || "",
+      # A remote bio is the other server's HTML: sanitized on the way out.
+      "note" => if(p.domain, do: Angler.Content.RemoteHtml.clean(p.bio), else: p.bio || ""),
       "url" => Profiles.url(p),
       "avatar" => p.avatar_path || @default_avatar,
       "avatar_static" => p.avatar_path || @default_avatar,

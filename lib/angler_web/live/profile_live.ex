@@ -192,7 +192,12 @@ defmodule AnglerWeb.ProfileLive do
           <h1 class="text-2xl font-bold truncate">{display_name(@account)}</h1>
           <div class="text-base-content/60">@{@account["acct"]}</div>
           <div :if={@profile.bio not in [nil, ""]} class="mt-2 prose prose-sm max-w-none break-words">
-            {raw(@profile.bio)}
+            {raw(
+              if(@profile.domain,
+                do: Angler.Content.RemoteHtml.clean(@profile.bio),
+                else: @profile.bio
+              )
+            )}
           </div>
           <div class="mt-3 flex flex-wrap items-center gap-4 text-sm text-base-content/70">
             <span>
