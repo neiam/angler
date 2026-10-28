@@ -4,7 +4,6 @@ defmodule AnglerWeb.WebPagesTest do
   import Phoenix.LiveViewTest
 
   alias Angler.Accounts
-  alias Angler.Accounts.User
   alias Angler.Repo
 
   test "index shows the three feed tabs and can switch between them", %{conn: conn} do

@@ -13,7 +13,6 @@ defmodule AnglerWeb.Admin.AdminNamespaceTest do
   alias Angler.OAuth
   alias Angler.Profiles
   alias Angler.Repo
-  alias Angler.Reports.Report
 
   defp register_admin! do
     {:ok, %{user: user, profile: profile}} =

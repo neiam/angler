@@ -92,7 +92,7 @@ defmodule Angler.ConversationsTest do
   describe "direct_timeline/2" do
     test "returns the last status of each thread" do
       alice = local!("alice")
-      bob = local!("bob")
+      _bob = local!("bob")
 
       {:ok, _} =
         Statuses.create_local(alice, %{"status" => "first @bob", "visibility" => "direct"})

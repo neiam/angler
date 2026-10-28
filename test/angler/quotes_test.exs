@@ -36,7 +36,7 @@ defmodule Angler.QuotesTest do
 
   @quote_url "http://remote.test/notes/q1"
 
-  defp request(ctx, extra \\ %{}) do
+  defp request(ctx, extra) do
     Map.merge(
       %{
         "@context" => "https://www.w3.org/ns/activitystreams",
