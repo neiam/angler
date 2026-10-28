@@ -62,17 +62,65 @@ defmodule Angler.Media do
         %Asset{status_id: nil, status: status} = existing when status != "deleted" ->
           {:ok, existing}
 
-        # The sha+profile row is unique, so we can't insert a second copy and
-        # we can't reuse one that's stale (soft-deleted, or left attached to a
-        # since-deleted status). Reclaim it so the same image can be posted or
-        # set as an avatar again — this is what makes re-uploads after a delete
-        # work.
-        %Asset{} = existing ->
-          reclaim(existing, profile_id, path)
-
-        nil ->
-          do_insert(profile_id, path, sha, sniffed_type, size, params)
+        # Anything else stores new bytes, so it counts against the quota.
+        existing ->
+          with :ok <- check_quota(profile_id, size) do
+            store(existing, profile_id, path, sha, sniffed_type, size, params)
+          end
       end
+    end
+  end
+
+  defp store(existing, profile_id, path, sha, sniffed_type, size, params) do
+    case existing do
+      # The sha+profile row is unique, so we can't insert a second copy and
+      # we can't reuse one that's stale (soft-deleted, or left attached to a
+      # since-deleted status). Reclaim it so the same image can be posted or
+      # set as an avatar again — this is what makes re-uploads after a delete
+      # work.
+      %Asset{} = existing ->
+        reclaim(existing, profile_id, path)
+
+      nil ->
+        do_insert(profile_id, path, sha, sniffed_type, size, params)
+    end
+  end
+
+  @doc """
+  Bytes of media `profile_id` is storing (upstream UserStorageService, summed
+  live rather than cached; `media` is indexed by profile).
+  """
+  @spec storage_used(integer()) :: non_neg_integer()
+  def storage_used(profile_id) when is_integer(profile_id) do
+    Repo.one(
+      from a in Asset,
+        where: a.profile_id == ^profile_id and a.status != "deleted",
+        select: coalesce(sum(a.size_bytes), 0)
+    )
+    |> to_integer()
+  end
+
+  defp to_integer(%Decimal{} = d), do: Decimal.to_integer(d)
+  defp to_integer(n) when is_integer(n), do: n
+
+  @doc """
+  The per-account storage cap in bytes, or nil when it isn't enforced
+  (`LIMIT_ACCOUNT_SIZE`, `MAX_ACCOUNT_SIZE` in KB, as upstream).
+  """
+  @spec storage_limit() :: pos_integer() | nil
+  def storage_limit do
+    if Application.get_env(:angler, :enforce_account_limit, true) == true do
+      Application.get_env(:angler, :max_account_size, 1_000_000) * 1000
+    end
+  end
+
+  defp check_quota(profile_id, size) do
+    case storage_limit() do
+      nil ->
+        :ok
+
+      limit ->
+        if storage_used(profile_id) + size >= limit, do: {:error, :account_size_limit}, else: :ok
     end
   end
 

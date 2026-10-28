@@ -191,8 +191,14 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
 
       upload ->
         case Media.upload(actor, upload, params) do
-          {:ok, asset} -> json(conn, MediaJSON.render(asset))
-          {:error, reason} -> validation_error(conn, %{"_" => [to_string(reason)]})
+          {:ok, asset} ->
+            json(conn, MediaJSON.render(asset))
+
+          {:error, :account_size_limit} ->
+            conn |> put_status(403) |> json(%{"error" => "Account size limit reached."})
+
+          {:error, reason} ->
+            validation_error(conn, %{"_" => [to_string(reason)]})
         end
     end
   end

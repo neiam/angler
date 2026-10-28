@@ -37,6 +37,9 @@ defmodule AnglerWeb.MastodonAPI.MediaController do
           {:error, :too_large} ->
             send_error(conn, 413, "file too large")
 
+          {:error, :account_size_limit} ->
+            send_error(conn, 403, "Account size limit reached.")
+
           {:error, :unsupported_type} ->
             send_error(conn, 422, "unsupported media type")
 

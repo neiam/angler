@@ -283,6 +283,10 @@ if config_env() != :test do
     expo_push_enabled: bool.("EXPO_PUSH_ENABLED", false),
     # Off: accounts under 72 hours old can't start DMs (upstream allow_new_account_dms).
     allow_new_account_dms: bool.("INSTANCE_ALLOW_NEW_DMS", true),
+    # Per-account media storage cap, in KB (upstream LIMIT_ACCOUNT_SIZE /
+    # MAX_ACCOUNT_SIZE; 1000000 KB = 1 GB).
+    enforce_account_limit: bool.("LIMIT_ACCOUNT_SIZE", true),
+    max_account_size: String.to_integer(str.("MAX_ACCOUNT_SIZE", "1000000")),
     oauth_refresh_tokens: bool.("OAUTH_REFRESH_TOKENS", true)
 
   ## Instance metadata (surfaced via /api/v1/instance, /nodeinfo, etc.)

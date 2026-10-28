@@ -442,6 +442,9 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
           {:ok, asset} ->
             create_local_with_media(conn, profile, params, asset.id)
 
+          {:error, :account_size_limit} ->
+            conn |> put_status(403) |> json(%{"error" => "Account size limit reached."})
+
           {:error, reason} ->
             validation_error(conn, %{"file" => [to_string(reason)]})
         end

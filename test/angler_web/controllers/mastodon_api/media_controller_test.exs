@@ -134,4 +134,49 @@ defmodule AnglerWeb.MastodonAPI.MediaControllerTest do
       assert ct =~ "image/jpeg"
     end
   end
+
+  describe "account storage limit" do
+    test "uploads past MAX_ACCOUNT_SIZE are refused with 403", ctx do
+      first =
+        ctx.conn
+        |> put_req_header("authorization", "Bearer " <> ctx.write)
+        |> post(~p"/api/v1/media", %{"file" => upload_fixture()})
+        |> json_response(200)
+
+      used = Media.storage_used(ctx.alice.id)
+      assert used > 0
+
+      # A cap (in KB) the next distinct file won't fit under.
+      Application.put_env(:angler, :max_account_size, div(used, 1000) + 1)
+      on_exit(fn -> Application.delete_env(:angler, :max_account_size) end)
+
+      other = Path.join(System.tmp_dir!(), "ang-mc-#{System.unique_integer([:positive])}.jpg")
+      File.write!(other, File.read!(@fixture) <> :binary.copy("p", 1000))
+
+      assert %{"error" => "Account size limit reached."} =
+               ctx.conn
+               |> put_req_header("authorization", "Bearer " <> ctx.write)
+               |> post(~p"/api/v1/media", %{
+                 "file" => %Plug.Upload{
+                   path: other,
+                   filename: "b.jpg",
+                   content_type: "image/jpeg"
+                 }
+               })
+               |> json_response(403)
+
+      # Re-uploading the same unattached bytes reuses the row: no new storage.
+      assert %{"id" => id} =
+               ctx.conn
+               |> put_req_header("authorization", "Bearer " <> ctx.write)
+               |> post(~p"/api/v1/media", %{"file" => upload_fixture()})
+               |> json_response(200)
+
+      assert id == first["id"]
+
+      Application.put_env(:angler, :enforce_account_limit, false)
+      on_exit(fn -> Application.delete_env(:angler, :enforce_account_limit) end)
+      assert Media.storage_limit() == nil
+    end
+  end
 end

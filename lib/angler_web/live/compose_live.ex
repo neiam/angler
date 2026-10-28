@@ -79,6 +79,14 @@ defmodule AnglerWeb.ComposeLive do
       end)
 
     cond do
+      {:error, :account_size_limit} in media_ids ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "You've used all your storage. Delete some posts to upload more."
+         )}
+
       Enum.any?(media_ids, &match?({:error, _}, &1)) ->
         {:noreply, put_flash(socket, :error, "One of your photos couldn't be processed.")}
 

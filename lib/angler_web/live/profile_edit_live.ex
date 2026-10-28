@@ -38,6 +38,7 @@ defmodule AnglerWeb.ProfileEditLive do
          socket
          |> assign(:page_title, "Edit profile")
          |> assign(:toggles, @toggles)
+         |> assign(:storage, storage(profile))
          |> assign_form(profile)
          |> allow_upload(:avatar,
            accept: ~w(.jpg .jpeg .png .webp .gif),
@@ -110,6 +111,24 @@ defmodule AnglerWeb.ProfileEditLive do
 
   defp maybe_set_license(_user_id, _attrs), do: {:ok, :unchanged}
 
+  # Upstream shows usage only when the cap is enforced.
+  defp storage(profile) do
+    case Angler.Media.storage_limit() do
+      nil ->
+        nil
+
+      limit ->
+        used = Angler.Media.storage_used(profile.id)
+        %{used: used, limit: limit, percent: min(100, ceil(used / limit * 100))}
+    end
+  end
+
+  defp pretty_size(bytes) when bytes >= 1_000_000_000,
+    do: "#{Float.round(bytes / 1_000_000_000, 1)} GB"
+
+  defp pretty_size(bytes) when bytes >= 1_000_000, do: "#{Float.round(bytes / 1_000_000, 1)} MB"
+  defp pretty_size(bytes), do: "#{div(bytes, 1000)} KB"
+
   defp quote_options,
     do: [{"everyone", "Anyone"}, {"followers", "Your followers"}, {"nobody", "No one"}]
 
@@ -180,6 +199,24 @@ defmodule AnglerWeb.ProfileEditLive do
           </div>
 
           <div class="divider">Media</div>
+
+          <div :if={@storage} id="storage-usage" class="space-y-1">
+            <div class="flex justify-between text-sm">
+              <span class="font-medium">Storage</span>
+              <span class="text-base-content/60 tabular-nums">
+                {pretty_size(@storage.used)} of {pretty_size(@storage.limit)}
+              </span>
+            </div>
+            <progress
+              class={[
+                "progress w-full transition-all",
+                if(@storage.percent >= 90, do: "progress-error", else: "progress-primary")
+              ]}
+              value={@storage.percent}
+              max="100"
+            >
+            </progress>
+          </div>
 
           <label class="block space-y-1">
             <span class="text-sm font-medium">Default photo license</span>
