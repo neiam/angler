@@ -34,6 +34,9 @@ config :angler, :mail_from, address: "noreply@localhost", name: "Pixelfed"
 # In dev/prod this is :prod and the SSRF + scheme guards stay strict.
 config :angler, :env, :test
 
+# Honeypot's minimum fill time would trip on every LiveView test submit.
+config :angler, :honeypot, seconds: 0
+
 # Oban runs in :manual mode in test so jobs only execute when the test drains them.
 config :angler, Oban, testing: :manual
 

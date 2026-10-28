@@ -99,6 +99,11 @@ defmodule AnglerWeb.Layouts do
                       <.icon name="hero-signal-micro" class="size-4" /> Relays
                     </.link>
                   </li>
+                  <li :if={@current_user.is_admin}>
+                    <.link navigate={~p"/admin/curated-onboarding"}>
+                      <.icon name="hero-user-plus-micro" class="size-4" /> Curated onboarding
+                    </.link>
+                  </li>
                   <li>
                     <.link href={~p"/session/logout"} method="post">
                       <.icon name="hero-arrow-right-on-rectangle-micro" class="size-4" /> Log out

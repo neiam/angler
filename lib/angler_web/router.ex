@@ -85,6 +85,10 @@ defmodule AnglerWeb.Router do
       live "/features", FeaturesLive
       live "/login", LoginLive
       live "/register", RegisterLive
+      live "/auth/sign_up", CuratedRegisterLive
+      live "/auth/sign_up/confirm", CuratedOnboardingLive, :confirm
+      live "/auth/sign_up/resend-confirmation", CuratedOnboardingLive, :resend
+      live "/auth/sign_up/concierge", CuratedOnboardingLive, :concierge
       live "/forgot-password", ForgotPasswordLive
       live "/reset-password/:token", ResetPasswordLive
       live "/compose", ComposeLive
@@ -108,6 +112,8 @@ defmodule AnglerWeb.Router do
     live_session :admin, on_mount: {AnglerWeb.LiveAuth, :require_admin} do
       live "/admin", AdminSettingsLive
       live "/admin/relays", AdminRelaysLive
+      live "/admin/curated-onboarding", AdminCuratedRegistersLive
+      live "/admin/curated-onboarding/:id", AdminCuratedRegisterLive
     end
   end
 

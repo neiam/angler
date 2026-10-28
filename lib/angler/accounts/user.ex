@@ -74,6 +74,28 @@ defmodule Angler.Accounts.User do
     |> unique_constraint(:profile_id)
   end
 
+  @doc """
+  Changeset for creating a user whose password was hashed earlier, i.e. an
+  approved curated-registration application. The caller sets
+  `password_hash` on the struct; it is never cast from attrs.
+  """
+  def prehashed_registration_changeset(%__MODULE__{password_hash: hash} = user, attrs)
+      when is_binary(hash) do
+    user
+    |> cast(attrs, [
+      :email,
+      :name,
+      :register_source,
+      :register_ip,
+      :profile_id,
+      :email_verified_at
+    ])
+    |> validate_required([:email, :password_hash, :profile_id])
+    |> validate_email()
+    |> unique_constraint(:email)
+    |> unique_constraint(:profile_id)
+  end
+
   defp validate_email(changeset) do
     changeset
     |> update_change(:email, fn

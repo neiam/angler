@@ -139,7 +139,11 @@ defmodule AnglerWeb.IndexLive do
   end
 
   defp registration_state do
-    %{open?: Instance.open_registration?(), approval?: Instance.approval_required?()}
+    %{
+      open?: Instance.open_registration?(),
+      approval?: Instance.approval_required?(),
+      curated?: Instance.curated_registration?()
+    }
   end
 
   defp empty_label(:local), do: "No local posts yet."
@@ -169,6 +173,14 @@ defmodule AnglerWeb.IndexLive do
               <span :if={@registration.approval?} class="text-xs text-base-content/60">
                 New accounts require operator approval.
               </span>
+            <% @registration.curated? -> %>
+              <.link
+                id="index-apply"
+                navigate={~p"/auth/sign_up"}
+                class="btn btn-primary btn-sm"
+              >
+                Apply for an account
+              </.link>
             <% true -> %>
               <span class="text-sm text-base-content/60">Registration is currently closed.</span>
           <% end %>

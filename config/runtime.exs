@@ -306,6 +306,53 @@ if config_env() != :test do
     max_pages: int.("AP_BLOCK_SYNC_MAX_PAGES", 10),
     reconcile_limit: int.("AP_BLOCK_SYNC_RECONCILE_LIMIT", 1000)
 
+  ## Registration protections (upstream config/captcha.php, config/honeypot.php,
+  ## pixelfed.min_registration_age, instance.curated_registration)
+  captcha_driver = str.("CAPTCHA_DRIVER", "hcaptcha")
+
+  {captcha_sitekey, captcha_secret} =
+    case captcha_driver do
+      "turnstile" ->
+        {str.("CAPTCHA_TURNSTILE_SITEKEY", nil), str.("CAPTCHA_TURNSTILE_SECRET", nil)}
+
+      "cap" ->
+        {str.("CAPTCHA_CAP_SITEKEY", nil), str.("CAPTCHA_CAP_SECRET", nil)}
+
+      _ ->
+        {str.("CAPTCHA_H_SITEKEY", nil), str.("CAPTCHA_H_SECRET", nil)}
+    end
+
+  config :angler, :captcha,
+    enabled: bool.("CAPTCHA_ENABLED", false),
+    driver: captcha_driver,
+    sitekey: captcha_sitekey,
+    secret: captcha_secret,
+    cap_endpoint: str.("CAPTCHA_CAP_ENDPOINT", nil),
+    cap_widget_version: str.("CAPTCHA_CAP_WIDGET_VERSION", "latest"),
+    lang: str.("CAPTCHA_H_LANG", nil),
+    timeout: int.("CAPTCHA_TIMEOUT", 5),
+    fail_open: bool.("CAPTCHA_FAIL_OPEN", false),
+    active: [
+      login: bool.("CAPTCHA_ENABLED_ON_LOGIN", true),
+      register: bool.("CAPTCHA_ENABLED_ON_REGISTER", true),
+      curated_register: bool.("CAPTCHA_ENABLED_ON_CURATED_REGISTER", true),
+      forgot_password: bool.("CAPTCHA_ENABLED_ON_FORGOT_PASSWORD", true)
+    ]
+
+  config :angler, :honeypot,
+    enabled: bool.("HONEYPOT_ENABLED", true),
+    name: str.("HONEYPOT_NAME", "my_name"),
+    seconds: int.("HONEYPOT_SECONDS", 1)
+
+  config :angler, min_registration_age: int.("PF_MIN_REGISTRATION_AGE", 16)
+
+  config :angler, :curated_registration,
+    enabled: bool.("INSTANCE_CUR_REG", false),
+    only_enabled_on_closed_reg: bool.("INSTANCE_CUR_REG_STATE_ONLY_ON_CLOSED", true),
+    resend_confirmation_limit: int.("INSTANCE_CUR_REG_RESEND_LIMIT", 5),
+    notify_admin_on_verify: bool.("INSTANCE_CUR_REG_NOTIFY_ADMIN_ON_VERIFY", false),
+    notify_admin_on_user_response: bool.("INSTANCE_CUR_REG_NOTIFY_ADMIN_ON_USER_RESPONSE", false)
+
   ## Instance metadata (surfaced via /api/v1/instance, /nodeinfo, etc.)
   config :angler,
     instance_title: str.("INSTANCE_TITLE", "Angler"),
