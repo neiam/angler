@@ -23,8 +23,21 @@ defmodule Angler.Profiles.DomainBlocks do
     |> DomainBlock.changeset()
     |> Repo.insert(on_conflict: :nothing, conflict_target: [:profile_id, :domain])
 
-    Angler.Quotes.revoke_for_domain(pid, domain)
+    :ok = Angler.Quotes.revoke_for_domain(pid, domain)
+    Angler.FeaturedCollections.revoke_for_domain(pid, domain)
   end
+
+  @doc "Whether `profile_id` blocks `domain`."
+  @spec blocked?(integer(), String.t()) :: boolean()
+  def blocked?(profile_id, domain) when is_binary(domain) do
+    domain = String.downcase(domain)
+
+    Repo.exists?(
+      from b in DomainBlock, where: b.profile_id == ^profile_id and b.domain == ^domain
+    )
+  end
+
+  def blocked?(_, _), do: false
 
   @spec unblock(Profile.t(), String.t()) :: :ok
   def unblock(%Profile{id: pid}, domain) when is_binary(domain) do

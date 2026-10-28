@@ -13,6 +13,9 @@ defmodule AnglerWeb.Federation.UserActorController do
   ever issued for public and unlisted posts and holding nothing but ids, so
   it's public; 410 once revoked.
 
+  GET /users/:username/stamps/:id — a FEP-7aa9 FeatureAuthorization stamp,
+  likewise public and 410 once revoked.
+
   Federating peers fetch this to get our public key and inbox URL. We always
   return JSON regardless of `Accept` header for now (the HTML profile page is
   a separate route — out of scope for the federation slice).
@@ -20,6 +23,7 @@ defmodule AnglerWeb.Federation.UserActorController do
 
   use AnglerWeb, :controller
 
+  alias Angler.FeaturedCollections
   alias Angler.Federation.{Actor, ActorBuilder, FollowersSync, HTTPSignature, HttpSignatureKey}
   alias Angler.Profiles
   alias Angler.Profiles.Profile
@@ -117,6 +121,23 @@ defmodule AnglerWeb.Federation.UserActorController do
         conn
         |> put_resp_content_type("application/activity+json")
         |> send_resp(200, Jason.encode_to_iodata!(Quotes.stamp_object(auth)))
+      end
+    else
+      _ -> conn |> put_status(:not_found) |> json(%{"error" => "Not Found"})
+    end
+  end
+
+  def feature_authorization(conn, %{"username" => username, "id" => id}) do
+    with %Profile{id: pid} <- Profiles.get_local_by_username(username),
+         {id, ""} <- Integer.parse(id),
+         %FeaturedCollections.Authorization{} = auth <-
+           Angler.Repo.get_by(FeaturedCollections.Authorization, id: id, profile_id: pid) do
+      if auth.state == "revoked" do
+        conn |> put_status(:gone) |> json(%{"error" => "Gone"})
+      else
+        conn
+        |> put_resp_content_type("application/activity+json")
+        |> send_resp(200, Jason.encode_to_iodata!(FeaturedCollections.stamp_object(auth)))
       end
     else
       _ -> conn |> put_status(:not_found) |> json(%{"error" => "Not Found"})

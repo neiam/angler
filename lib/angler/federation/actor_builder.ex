@@ -7,12 +7,12 @@ defmodule Angler.Federation.ActorBuilder do
   Shared by the actor endpoint (`AnglerWeb.Federation.UserActorController`) and
   the outbound update deliver (`Angler.Profiles.Workers.ActorUpdateDeliver`) so
   the fetched doc and the pushed update are identical — including `icon`/`image`,
-  without which remote servers show no avatar at all.
+  without which remote servers show no avatar at all — and the FEP-7aa9
+  `interactionPolicy.canFeature` (`Angler.FeaturedCollections`).
   """
 
+  alias Angler.FeaturedCollections
   alias Angler.Profiles.Profile
-
-  @context ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"]
   @public_uri "https://www.w3.org/ns/activitystreams#Public"
 
   @doc "The standalone `Person` (or `Service`) actor document."
@@ -21,7 +21,7 @@ defmodule Angler.Federation.ActorBuilder do
     actor_url = actor_url(p)
 
     %{
-      "@context" => @context,
+      "@context" => context(),
       "id" => actor_url,
       "type" => if(p.is_bot, do: "Service", else: "Person"),
       "preferredUsername" => p.username,
@@ -43,7 +43,8 @@ defmodule Angler.Federation.ActorBuilder do
         "publicKeyPem" => p.public_key_pem
       },
       "icon" => image_object(p.avatar_path),
-      "image" => image_object(p.header_path)
+      "image" => image_object(p.header_path),
+      "interactionPolicy" => if(is_nil(p.status), do: FeaturedCollections.interaction_policy(p))
     }
     |> reject_nils()
   end
@@ -55,7 +56,7 @@ defmodule Angler.Federation.ActorBuilder do
     object = person(p) |> Map.delete("@context")
 
     %{
-      "@context" => @context,
+      "@context" => context(),
       "id" => actor_url <> "#updates/" <> stamp(p),
       "type" => "Update",
       "actor" => actor_url,
@@ -75,7 +76,7 @@ defmodule Angler.Federation.ActorBuilder do
     actor_url = actor_url(p)
 
     %{
-      "@context" => @context,
+      "@context" => context(),
       "id" => actor_url <> "#delete",
       "type" => "Delete",
       "actor" => actor_url,
@@ -89,6 +90,14 @@ defmodule Angler.Federation.ActorBuilder do
   def actor_url(%Profile{username: username}), do: base() <> "/users/" <> username
 
   ## Internals
+
+  defp context do
+    [
+      "https://www.w3.org/ns/activitystreams",
+      "https://w3id.org/security/v1",
+      FeaturedCollections.actor_context_terms()
+    ]
+  end
 
   defp base, do: AnglerWeb.Endpoint.url()
 

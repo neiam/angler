@@ -16,6 +16,7 @@ defmodule Angler.Federation.Workers.ActivityHandler do
 
   require Logger
 
+  alias Angler.FeaturedCollections
   alias Angler.Federation.Relays
   alias Angler.Federation.Workers.DeleteWorker
   alias Angler.Follows
@@ -97,6 +98,10 @@ defmodule Angler.Federation.Workers.ActivityHandler do
 
   defp dispatch(%{"type" => "QuoteRequest"} = activity, actor_url) do
     Quotes.Federation.handle_quote_request(activity, actor_url)
+  end
+
+  defp dispatch(%{"type" => "FeatureRequest"} = activity, actor_url) do
+    FeaturedCollections.Federation.handle_feature_request(activity, actor_url)
   end
 
   defp dispatch(%{"type" => "Like"} = activity, actor_url) do

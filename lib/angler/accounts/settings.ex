@@ -13,7 +13,8 @@ defmodule Angler.Accounts.Settings do
   # These have no dedicated profiles column (the ones that do — `indexable`
   # ↔ indexable_search, `is_suggestable` ↔ discoverable — are read straight
   # off the profile). `default_scope` backs `source[privacy]`; `can_quote`
-  # (who may quote your posts, `Angler.Quotes`) backs `source[quote_policy]`.
+  # (who may quote your posts, `Angler.Quotes`) backs `source[quote_policy]`;
+  # `can_feature` is who may feature you (`Angler.FeaturedCollections`).
   @account_defaults %{
     "crawlable" => true,
     "disable_embeds" => false,
@@ -26,7 +27,8 @@ defmodule Angler.Accounts.Settings do
     "show_profile_following_count" => true,
     "video_autoplay" => true,
     "default_scope" => "public",
-    "can_quote" => "everyone"
+    "can_quote" => "everyone",
+    "can_feature" => "everyone"
   }
 
   @account_bool_fields ~w(
@@ -54,15 +56,24 @@ defmodule Angler.Accounts.Settings do
   """
   @spec merge_account(integer(), map()) :: {:ok, map()}
   def merge_account(user_id, partial) when is_integer(user_id) and is_map(partial) do
-    allowed = Map.take(partial, ["default_scope", "can_quote" | @account_bool_fields])
+    allowed =
+      Map.take(partial, ["default_scope", "can_quote", "can_feature" | @account_bool_fields])
 
     if allowed == %{} do
       {:ok, account_settings(user_id)}
     else
       row = get(user_id)
+      before = Map.merge(@account_defaults, row.account || %{})
       account = Map.merge(row.account || %{}, allowed)
       {:ok, _} = row |> UserSettings.changeset(%{account: account}) |> Repo.update()
-      {:ok, Map.merge(@account_defaults, account)}
+      after_ = Map.merge(@account_defaults, account)
+
+      if before["can_feature"] != after_["can_feature"] do
+        %User{profile_id: pid} = Repo.get!(User, user_id)
+        :ok = Angler.FeaturedCollections.policy_changed(pid)
+      end
+
+      {:ok, after_}
     end
   end
 
@@ -92,7 +103,16 @@ defmodule Angler.Accounts.Settings do
         p -> %{"can_quote" => p}
       end
 
-    merge_account(user_id, bools |> Map.merge(scope) |> Map.merge(can_quote))
+    can_feature =
+      case Angler.FeaturedCollections.policy_param(params["can_feature"]) do
+        nil -> %{}
+        p -> %{"can_feature" => p}
+      end
+
+    merge_account(
+      user_id,
+      bools |> Map.merge(scope) |> Map.merge(can_quote) |> Map.merge(can_feature)
+    )
   end
 
   defp truthy?(true), do: true

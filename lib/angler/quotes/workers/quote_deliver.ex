@@ -1,7 +1,8 @@
 defmodule Angler.Quotes.Workers.QuoteDeliver do
   @moduledoc """
-  Delivers a quote answer (the `Accept` or `Reject` of a `QuoteRequest`, or
-  the `Delete` revoking a stamp) from a local author to the remote quoter.
+  Delivers a consent answer from a local author to one remote actor: the
+  `Accept` or `Reject` of a `QuoteRequest` or `FeatureRequest`, or the
+  `Delete` revoking a quote or feature stamp (`Angler.FeaturedCollections`).
 
   The activity is built up front and carried in the job, so it still goes
   out after the quoted post is deleted. Retries on temporary failures: the
