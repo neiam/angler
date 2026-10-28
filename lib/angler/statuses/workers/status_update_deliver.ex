@@ -91,7 +91,8 @@ defmodule Angler.Statuses.Workers.StatusUpdateDeliver do
     %{
       "@context" => [
         "https://www.w3.org/ns/activitystreams",
-        "https://w3id.org/security/v1"
+        "https://w3id.org/security/v1",
+        Angler.Quotes.note_context_terms()
       ],
       "id" => update_id,
       "type" => "Update",
@@ -107,7 +108,8 @@ defmodule Angler.Statuses.Workers.StatusUpdateDeliver do
         "sensitive" => status.is_nsfw,
         "updated" => DateTime.to_iso8601(status.edited_at || DateTime.utc_now()),
         "to" => to,
-        "cc" => cc
+        "cc" => cc,
+        "interactionPolicy" => Angler.Quotes.interaction_policy(status, actor)
       }
     }
   end

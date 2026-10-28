@@ -109,6 +109,25 @@ defmodule Angler.Statuses do
   end
 
   @doc """
+  A status by its ActivityPub id: a remote one's `uri`, or a local one's
+  canonical `<base>/p/<username>/<id>` URL (local statuses have no `uri`).
+  """
+  @spec get_by_ap_id(String.t()) :: Status.t() | nil
+  def get_by_ap_id(id) when is_binary(id) do
+    get_by_uri(id) || get_by_local_url(id)
+  end
+
+  defp get_by_local_url(url) do
+    with [_, rest] <- String.split(url, AnglerWeb.Endpoint.url() <> "/p/", parts: 2),
+         [_username, id_str] <- String.split(rest, "/"),
+         {id, ""} <- Integer.parse(id_str) do
+      get(id)
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
   Whether `status` is visible to `viewer_id` (or anonymous if nil).
 
   Visibility rules:
@@ -270,6 +289,19 @@ defmodule Angler.Statuses do
     spoiler = Map.get(attrs, "spoiler_text", status.cw_summary)
     lang = Map.get(attrs, "language", status.language)
 
+    quote_policy =
+      if Map.has_key?(attrs, "quote_approval_policy") do
+        parse_quote_policy(attrs)
+      else
+        {:ok, status.quote_policy}
+      end
+
+    with {:ok, quote_policy} <- quote_policy do
+      do_update(status, caption, sensitive?, spoiler, lang, quote_policy)
+    end
+  end
+
+  defp do_update(status, caption, sensitive?, spoiler, lang, quote_policy) do
     lex = Angler.Content.Lexer.render(caption)
 
     Repo.transaction(fn ->
@@ -283,6 +315,7 @@ defmodule Angler.Statuses do
           is_nsfw: sensitive?,
           cw_summary: spoiler,
           language: lang,
+          quote_policy: quote_policy,
           edited_at: DateTime.utc_now()
         })
         |> Repo.update()
@@ -291,6 +324,25 @@ defmodule Angler.Statuses do
       Angler.Streaming.broadcast_status_edit(loaded)
       loaded
     end)
+  end
+
+  @doc """
+  Set (or with `nil`, clear back to the account default) a post's
+  `quote_approval_policy` (`PUT /statuses/:id/interaction_policy`).
+  Owner-only, original non-direct posts. Not federated: the policy is
+  enforced on each QuoteRequest, and peers see it on their next fetch.
+  """
+  @spec set_quote_policy(integer(), Profile.t(), term()) ::
+          {:ok, Status.t()} | {:error, :not_found | :bad_quote_policy}
+  def set_quote_policy(status_id, %Profile{id: profile_id}, value) when is_integer(status_id) do
+    with %Status{profile_id: ^profile_id, reblog_of_id: nil, local: true} = status
+         when status.visibility != :direct <- get(status_id),
+         {:ok, flags} <- parse_quote_policy(%{"quote_approval_policy" => value}) do
+      status |> Ecto.Changeset.change(quote_policy: flags) |> Repo.update()
+    else
+      {:error, _} = err -> err
+      _ -> {:error, :not_found}
+    end
   end
 
   @doc """
@@ -480,6 +532,7 @@ defmodule Angler.Statuses do
 
     Angler.Streaming.broadcast_status_delete(deleted.id, deleted)
     dm_deleted(deleted.id)
+    Angler.Quotes.status_deleted(deleted.id)
     {:ok, deleted}
   end
 
@@ -839,9 +892,11 @@ defmodule Angler.Statuses do
 
     with {:ok, caption} <- fetch_caption(attrs, media_ids),
          {:ok, visibility} <- parse_visibility(attrs["visibility"]),
+         {:ok, quote_policy} <- parse_quote_policy(attrs),
          {:ok, parent} <- resolve_reply_parent(attrs["in_reply_to_id"], profile.id) do
       lex = Lexer.render(caption)
       sensitive? = truthy?(attrs["sensitive"])
+      attrs = Map.put(attrs, "quote_policy", quote_policy)
 
       Repo.transaction(fn ->
         case insert_status(
@@ -931,6 +986,14 @@ defmodule Angler.Statuses do
 
   defp parse_media_ids(_), do: []
 
+  # Mastodon 4.5's `quote_approval_policy`; absent or null = account default.
+  defp parse_quote_policy(attrs) do
+    case Angler.Quotes.from_api_policy(attrs["quote_approval_policy"]) do
+      {:ok, flags} -> {:ok, flags}
+      :error -> {:error, :bad_quote_policy}
+    end
+  end
+
   defp parse_visibility(nil), do: {:ok, :public}
 
   defp parse_visibility(v) when v in ["public", "unlisted", "private", "direct"],
@@ -994,7 +1057,8 @@ defmodule Angler.Statuses do
       in_reply_to_id: parent && parent.id,
       in_reply_to_profile_id: parent && parent.profile_id,
       language: attrs["language"] || "en",
-      group_id: parse_group_id(attrs["group_id"])
+      group_id: parse_group_id(attrs["group_id"]),
+      quote_policy: attrs["quote_policy"]
     }
     |> Status.changeset()
     |> put_timestamps(created_at)

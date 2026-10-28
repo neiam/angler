@@ -90,6 +90,7 @@ defmodule AnglerWeb.Router do
       live "/compose", ComposeLive
       live "/settings/profile", ProfileEditLive
       live "/settings/followed-tags", FollowedTagsLive
+      live "/settings/quotes", QuotesLive
       live "/settings/filters", FiltersLive
       live "/settings/two-factor", TwoFactorSetupLive
       live "/settings/data", DataLive
@@ -152,6 +153,11 @@ defmodule AnglerWeb.Router do
     get "/users/:username/outbox", Federation.UserActorController, :outbox
     get "/users/:username/followers", Federation.UserActorController, :followers
     get "/users/:username/following", Federation.UserActorController, :following
+
+    get "/users/:username/quote_authorizations/:id",
+        Federation.UserActorController,
+        :quote_authorization
+
     post "/users/:username/inbox", Federation.InboxController, :user
 
     # Shared inbox for activities addressed to multiple local users.
@@ -549,6 +555,7 @@ defmodule AnglerWeb.Router do
 
     delete "/statuses/:id", StatusController, :delete
     put "/statuses/:id", StatusController, :update
+    put "/statuses/:id/interaction_policy", StatusController, :interaction_policy
 
     post "/statuses/:id/pin", StatusController, :pin
     post "/statuses/:id/unpin", StatusController, :unpin

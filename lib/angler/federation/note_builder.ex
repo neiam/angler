@@ -21,6 +21,9 @@ defmodule Angler.Federation.NoteBuilder do
   @public_uri "https://www.w3.org/ns/activitystreams#Public"
   @context ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"]
 
+  # Our Notes carry FEP-044f `interactionPolicy`, so their @context names it.
+  defp context, do: @context ++ [Angler.Quotes.note_context_terms()]
+
   @doc "The standalone AP `Note` object (with `@context`) for a local status."
   @spec object(Status.t()) :: map()
   def object(%Status{} = status) do
@@ -34,7 +37,7 @@ defmodule Angler.Federation.NoteBuilder do
     {to, cc} = audience_uris(actor_url, status, parent)
 
     %{
-      "@context" => @context,
+      "@context" => context(),
       "id" => status.uri || status.url,
       "type" => "Note",
       "inReplyTo" => parent && parent.uri,
@@ -47,7 +50,8 @@ defmodule Angler.Federation.NoteBuilder do
       "sensitive" => status.is_nsfw,
       "summary" => status.cw_summary,
       "tag" => Enum.uniq_by(tag_array(status) ++ parent_mention(parent), & &1["href"]),
-      "attachment" => attachments(status)
+      "attachment" => attachments(status),
+      "interactionPolicy" => Angler.Quotes.interaction_policy(status, actor)
     }
     |> drop_nils()
   end
@@ -62,7 +66,7 @@ defmodule Angler.Federation.NoteBuilder do
     object = object(status, actor) |> Map.delete("@context")
 
     %{
-      "@context" => @context,
+      "@context" => context(),
       "id" => (status.uri || status.url) <> "/activity",
       "type" => "Create",
       "actor" => actor_url,

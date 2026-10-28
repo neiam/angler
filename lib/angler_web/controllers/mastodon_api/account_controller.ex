@@ -668,12 +668,18 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
     %{
       "privacy" =>
         Map.get(settings, "default_scope", if(profile.is_private, do: "private", else: "public")),
+      "quote_policy" => quote_policy(settings["can_quote"]),
       "sensitive" => false,
       "language" => user.language || "en",
       "note" => profile.bio_text || "",
       "fields" => []
     }
   end
+
+  # Mastodon's spelling of our `can_quote` setting.
+  defp quote_policy("followers"), do: "followers"
+  defp quote_policy("nobody"), do: "nobody"
+  defp quote_policy(_), do: "public"
 
   # `source[language]` updates the user's default post language.
   defp maybe_update_language(user, params) do

@@ -10,6 +10,8 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
 
   use AnglerWeb, :controller
 
+  @bad_quote_policy "quote_approval_policy must be one of: public, followers, nobody"
+
   import Ecto.Query, only: [from: 2]
 
   alias Angler.Bookmarks
@@ -136,6 +138,9 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
       {:error, :not_found} ->
         not_found(conn)
 
+      {:error, :bad_quote_policy} ->
+        validation_error(conn, @bad_quote_policy)
+
       {:error, %Ecto.Changeset{} = cs} ->
         conn
         |> put_status(:unprocessable_entity)
@@ -143,6 +148,32 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
 
       _ ->
         not_found(conn)
+    end
+  end
+
+  ## PUT /api/v1/statuses/:id/interaction_policy
+
+  # Mastodon 4.5: the post's quote_approval_policy; null clears it back to
+  # the account default.
+  def interaction_policy(conn, %{"id" => id} = params) do
+    %{profile: profile} = BearerAuth.current_scope(conn)
+
+    with true <- Map.has_key?(params, "quote_approval_policy") || :missing,
+         {:ok, snowflake} <- parse_id(id),
+         {:ok, updated} <-
+           Statuses.set_quote_policy(snowflake, profile, params["quote_approval_policy"]) do
+      updated = Statuses.get(updated.id)
+
+      body =
+        updated
+        |> StatusJSON.render(profile.id)
+        |> Map.put("quote_approval_policy", Angler.Quotes.api_policy(updated))
+
+      json(conn, body)
+    else
+      :missing -> validation_error(conn, @bad_quote_policy)
+      {:error, :bad_quote_policy} -> validation_error(conn, @bad_quote_policy)
+      _ -> not_found(conn)
     end
   end
 
@@ -335,6 +366,9 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
 
       {:error, :bad_visibility} ->
         validation_error(conn, "Visibility must be one of: public, unlisted, private, direct")
+
+      {:error, :bad_quote_policy} ->
+        validation_error(conn, @bad_quote_policy)
 
       {:error, :reply_parent_not_found} ->
         validation_error(conn, "Reply target not found")

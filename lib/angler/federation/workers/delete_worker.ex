@@ -20,6 +20,7 @@ defmodule Angler.Federation.Workers.DeleteWorker do
 
   alias Angler.Federation.Actor
   alias Angler.Profiles
+  alias Angler.Quotes
   alias Angler.Statuses
 
   @spec enqueue(map()) :: {:ok, Oban.Job.t()} | {:error, term()}
@@ -50,14 +51,14 @@ defmodule Angler.Federation.Workers.DeleteWorker do
 
   defp do_handle(%{"actor" => actor, "object" => %{"type" => "Tombstone", "id" => object_id}})
        when is_binary(actor) and is_binary(object_id) do
-    Statuses.Federation.handle_delete_tombstone(object_id, actor)
+    tombstone(object_id, actor)
   end
 
   # Some peers send `Delete` with just `object` as the URL string + no inner
   # type. In that case we treat it as a Tombstone delete of the URL.
   defp do_handle(%{"actor" => actor, "object" => object_id})
        when is_binary(actor) and is_binary(object_id) do
-    Statuses.Federation.handle_delete_tombstone(object_id, actor)
+    tombstone(object_id, actor)
   end
 
   defp do_handle(%{"object" => %{"type" => "Story"}} = activity) do
@@ -71,5 +72,11 @@ defmodule Angler.Federation.Workers.DeleteWorker do
   defp do_handle(activity) do
     Logger.info("Unhandled Delete activity object: #{inspect(activity["object"])}")
     :ok
+  end
+
+  # A deleted post may have been a quote of ours: its stamp goes with it.
+  defp tombstone(object_id, actor) do
+    :ok = Quotes.forget_quote(actor, object_id)
+    Statuses.Federation.handle_delete_tombstone(object_id, actor)
   end
 end

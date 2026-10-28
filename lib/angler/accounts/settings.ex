@@ -12,7 +12,8 @@ defmodule Angler.Accounts.Settings do
   # Account display/privacy settings surfaced in the account `settings` block.
   # These have no dedicated profiles column (the ones that do — `indexable`
   # ↔ indexable_search, `is_suggestable` ↔ discoverable — are read straight
-  # off the profile). `default_scope` backs `source[privacy]`.
+  # off the profile). `default_scope` backs `source[privacy]`; `can_quote`
+  # (who may quote your posts, `Angler.Quotes`) backs `source[quote_policy]`.
   @account_defaults %{
     "crawlable" => true,
     "disable_embeds" => false,
@@ -24,7 +25,8 @@ defmodule Angler.Accounts.Settings do
     "show_profile_follower_count" => true,
     "show_profile_following_count" => true,
     "video_autoplay" => true,
-    "default_scope" => "public"
+    "default_scope" => "public",
+    "can_quote" => "everyone"
   }
 
   @account_bool_fields ~w(
@@ -52,7 +54,7 @@ defmodule Angler.Accounts.Settings do
   """
   @spec merge_account(integer(), map()) :: {:ok, map()}
   def merge_account(user_id, partial) when is_integer(user_id) and is_map(partial) do
-    allowed = Map.take(partial, ["default_scope" | @account_bool_fields])
+    allowed = Map.take(partial, ["default_scope", "can_quote" | @account_bool_fields])
 
     if allowed == %{} do
       {:ok, account_settings(user_id)}
@@ -82,7 +84,15 @@ defmodule Angler.Accounts.Settings do
         _ -> %{}
       end
 
-    merge_account(user_id, Map.merge(bools, scope))
+    can_quote =
+      case Angler.Quotes.account_policy_param(
+             params["can_quote"] || get_in(params, ["source", "quote_policy"])
+           ) do
+        nil -> %{}
+        p -> %{"can_quote" => p}
+      end
+
+    merge_account(user_id, bools |> Map.merge(scope) |> Map.merge(can_quote))
   end
 
   defp truthy?(true), do: true

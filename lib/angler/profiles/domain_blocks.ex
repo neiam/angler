@@ -23,7 +23,7 @@ defmodule Angler.Profiles.DomainBlocks do
     |> DomainBlock.changeset()
     |> Repo.insert(on_conflict: :nothing, conflict_target: [:profile_id, :domain])
 
-    :ok
+    Angler.Quotes.revoke_for_domain(pid, domain)
   end
 
   @spec unblock(Profile.t(), String.t()) :: :ok

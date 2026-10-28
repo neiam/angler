@@ -589,6 +589,7 @@ defmodule Angler.Admin.Pixelfed do
       |> Ecto.Changeset.change(deleted_at: DateTime.utc_now())
       |> Repo.update!()
 
+    Angler.Quotes.status_deleted(status.id)
     log!(actor, "status.delete", "status", status.id, %{})
     {:ok, updated}
   end

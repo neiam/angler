@@ -21,6 +21,7 @@ defmodule Angler.Federation.Workers.ActivityHandler do
   alias Angler.Follows
   alias Angler.Likes
   alias Angler.Profiles
+  alias Angler.Quotes
   alias Angler.Reblogs
   alias Angler.Statuses
 
@@ -92,6 +93,10 @@ defmodule Angler.Federation.Workers.ActivityHandler do
 
   defp dispatch(%{"type" => "Create"} = activity, actor_url) do
     Statuses.Federation.handle_create(activity, actor_url)
+  end
+
+  defp dispatch(%{"type" => "QuoteRequest"} = activity, actor_url) do
+    Quotes.Federation.handle_quote_request(activity, actor_url)
   end
 
   defp dispatch(%{"type" => "Like"} = activity, actor_url) do

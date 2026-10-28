@@ -36,6 +36,8 @@ defmodule Angler.Statuses.Status do
 
     field :language, :string, default: "en"
     field :comments_disabled, :boolean, default: false
+    # FEP-044f canQuote override (`Angler.Quotes`); nil = account default.
+    field :quote_policy, :integer
 
     field :reply_count, :integer, default: 0
     field :reblogs_count, :integer, default: 0
@@ -59,7 +61,7 @@ defmodule Angler.Statuses.Status do
     profile_id caption rendered is_nsfw cw_summary visibility scope type pf_type
     local uri url
     in_reply_to_id in_reply_to_profile_id reblog_of_id
-    language comments_disabled
+    language comments_disabled quote_policy
     reply_count reblogs_count likes_count
     edited_at deleted_at scheduled_at
     place_id group_id

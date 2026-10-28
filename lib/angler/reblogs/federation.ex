@@ -13,7 +13,7 @@ defmodule Angler.Reblogs.Federation do
   def handle_announce(%{"id" => activity_id, "object" => target_uri}, actor_url)
       when is_binary(activity_id) and is_binary(target_uri) do
     with {:ok, profile} <- Actor.resolve(actor_url),
-         %Status{} = status <- find_local_status(target_uri),
+         %Status{} = status <- Statuses.get_by_ap_id(target_uri),
          true <- Statuses.remote_interaction_allowed?(status, profile, :announce) || :forbidden,
          {:ok, _reblog} <-
            Reblogs.insert(%{
@@ -64,30 +64,5 @@ defmodule Angler.Reblogs.Federation do
     end
 
     :ok
-  end
-
-  defp find_local_status(uri) do
-    Statuses.get_by_uri(uri) || find_by_local_url(uri)
-  end
-
-  defp find_by_local_url(url) do
-    base = AnglerWeb.Endpoint.url() <> "/p/"
-
-    case String.split(url, base, parts: 2) do
-      [_, rest] ->
-        case String.split(rest, "/") do
-          [_username, id_str] ->
-            case Integer.parse(id_str) do
-              {id, ""} -> Statuses.get(id)
-              _ -> nil
-            end
-
-          _ ->
-            nil
-        end
-
-      _ ->
-        nil
-    end
   end
 end

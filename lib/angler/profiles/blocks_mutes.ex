@@ -26,6 +26,7 @@ defmodule Angler.Profiles.BlocksMutes do
 
       Follows.unfollow(actor, target)
       Follows.unfollow(target, actor)
+      if target.domain, do: Angler.Quotes.revoke_for_actor(actor.id, target.id)
 
       block
     end)

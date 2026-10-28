@@ -14,7 +14,7 @@ defmodule Angler.Likes.Federation do
   def handle_like(%{"id" => activity_id, "object" => target_uri}, actor_url)
       when is_binary(activity_id) and is_binary(target_uri) do
     with {:ok, profile} <- Actor.resolve(actor_url),
-         %Status{} = status <- find_local_status(target_uri),
+         %Status{} = status <- Statuses.get_by_ap_id(target_uri),
          true <- Statuses.remote_interaction_allowed?(status, profile, :like) || :forbidden,
          {:ok, _like} <-
            Likes.insert(%{
@@ -65,32 +65,5 @@ defmodule Angler.Likes.Federation do
     end
 
     :ok
-  end
-
-  defp find_local_status(uri) do
-    Statuses.get_by_uri(uri) || find_by_local_url(uri)
-  end
-
-  # Local statuses are referenced by their canonical URL form
-  # (`<base>/p/<username>/<id>`), not by `uri` (which is null for local).
-  defp find_by_local_url(url) do
-    base = AnglerWeb.Endpoint.url() <> "/p/"
-
-    case String.split(url, base, parts: 2) do
-      [_, rest] ->
-        case String.split(rest, "/") do
-          [_username, id_str] ->
-            case Integer.parse(id_str) do
-              {id, ""} -> Statuses.get(id)
-              _ -> nil
-            end
-
-          _ ->
-            nil
-        end
-
-      _ ->
-        nil
-    end
   end
 end

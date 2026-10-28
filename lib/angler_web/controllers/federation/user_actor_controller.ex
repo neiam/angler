@@ -6,6 +6,10 @@ defmodule AnglerWeb.Federation.UserActorController do
   actor doc advertises. Like upstream, they carry only `totalItems`: peers
   get the counts, nobody gets the lists.
 
+  GET /users/:username/quote_authorizations/:id — a FEP-044f stamp. Only
+  ever issued for public and unlisted posts and holding nothing but ids, so
+  it's public; 410 once revoked.
+
   Federating peers fetch this to get our public key and inbox URL. We always
   return JSON regardless of `Accept` header for now (the HTML profile page is
   a separate route — out of scope for the federation slice).
@@ -16,6 +20,8 @@ defmodule AnglerWeb.Federation.UserActorController do
   alias Angler.Federation.ActorBuilder
   alias Angler.Profiles
   alias Angler.Profiles.Profile
+  alias Angler.Quotes
+  alias Angler.Quotes.Authorization
 
   def show(conn, %{"username" => username}) do
     case Profiles.get_local_by_username(username) do
@@ -51,6 +57,24 @@ defmodule AnglerWeb.Federation.UserActorController do
         conn
         |> put_resp_content_type("application/activity+json")
         |> send_resp(200, Jason.encode_to_iodata!(body))
+    end
+  end
+
+  def quote_authorization(conn, %{"username" => username, "id" => id}) do
+    with %Profile{id: pid} <- Profiles.get_local_by_username(username),
+         {id, ""} <- Integer.parse(id),
+         %Authorization{} = auth <- Angler.Repo.get_by(Authorization, id: id, profile_id: pid),
+         auth = Angler.Repo.preload(auth, :status),
+         true <- Quotes.quotable?(auth.status) do
+      if auth.state == "revoked" do
+        conn |> put_status(:gone) |> json(%{"error" => "Gone"})
+      else
+        conn
+        |> put_resp_content_type("application/activity+json")
+        |> send_resp(200, Jason.encode_to_iodata!(Quotes.stamp_object(auth)))
+      end
+    else
+      _ -> conn |> put_status(:not_found) |> json(%{"error" => "Not Found"})
     end
   end
 end

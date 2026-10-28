@@ -64,7 +64,8 @@ defmodule AnglerWeb.ProfileEditLive do
       "locked" => profile.is_private,
       "is_suggestable" => profile.discoverable,
       "indexable" => profile.indexable_search,
-      "default_license" => Settings.default_license(socket.assigns.current_user.id)
+      "default_license" => Settings.default_license(socket.assigns.current_user.id),
+      "can_quote" => settings["can_quote"]
     }
 
     toggle_keys = for {k, _, _} <- @toggles, k not in Map.keys(base), do: k
@@ -108,6 +109,9 @@ defmodule AnglerWeb.ProfileEditLive do
   end
 
   defp maybe_set_license(_user_id, _attrs), do: {:ok, :unchanged}
+
+  defp quote_options,
+    do: [{"everyone", "Anyone"}, {"followers", "Your followers"}, {"nobody", "No one"}]
 
   defp split_pronouns(nil), do: []
 
@@ -195,6 +199,26 @@ defmodule AnglerWeb.ProfileEditLive do
 
           <div class="divider">Privacy &amp; display</div>
 
+          <label class="block space-y-1">
+            <span class="text-sm font-medium">Who can quote your posts</span>
+            <span class="block text-xs text-base-content/60">
+              Applies to public and unlisted posts, unless you set it per post.
+            </span>
+            <select
+              id="profile-can-quote"
+              name="profile[can_quote]"
+              class="select select-bordered w-full"
+            >
+              <option
+                :for={{value, label} <- quote_options()}
+                value={value}
+                selected={value == @form[:can_quote].value}
+              >
+                {label}
+              </option>
+            </select>
+          </label>
+
           <div class="space-y-2">
             <label :for={{key, label, help} <- @toggles} class="flex items-start gap-3 cursor-pointer">
               <input type="hidden" name={"profile[#{key}]"} value="false" />
@@ -228,6 +252,9 @@ defmodule AnglerWeb.ProfileEditLive do
           </.link>
           <.link navigate={~p"/settings/followed-tags"} class="btn btn-ghost btn-sm justify-start">
             <.icon name="hero-hashtag" class="size-4" /> Followed tags
+          </.link>
+          <.link navigate={~p"/settings/quotes"} class="btn btn-ghost btn-sm justify-start">
+            <.icon name="hero-chat-bubble-bottom-center-text" class="size-4" /> Quotes
           </.link>
           <.link navigate={~p"/settings/data"} class="btn btn-ghost btn-sm justify-start">
             <.icon name="hero-arrow-down-tray" class="size-4" /> Import &amp; export
