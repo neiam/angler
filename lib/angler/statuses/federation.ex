@@ -333,12 +333,15 @@ defmodule Angler.Statuses.Federation do
             %Profile{id: pid} ->
               insert_mention(status.id, pid)
 
-              Notifications.notify(%{
-                recipient_id: pid,
-                account_id: status.profile_id,
-                type: "mention",
-                status_id: status.id
-              })
+              # A DM's recipients are notified by `Conversations.record/1`.
+              if status.visibility != :direct do
+                Notifications.notify(%{
+                  recipient_id: pid,
+                  account_id: status.profile_id,
+                  type: "mention",
+                  status_id: status.id
+                })
+              end
 
             _ ->
               :ok

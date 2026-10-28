@@ -26,7 +26,7 @@ defmodule Angler.Push.Payload do
       "access_token" => access_token,
       "preferred_locale" => "en",
       "notification_id" => n.id,
-      "notification_type" => n.type,
+      "notification_type" => if(n.type == "direct", do: "mention", else: n.type),
       "icon" => avatar_for(n.account),
       "title" => title_for(n),
       "body" => body_for(n)
@@ -47,6 +47,9 @@ defmodule Angler.Push.Payload do
 
   defp title_for(%Notification{type: "mention", account: %Profile{} = a}),
     do: "#{display_name(a)} mentioned you"
+
+  defp title_for(%Notification{type: "direct", account: %Profile{} = a}),
+    do: "#{display_name(a)} sent you a message"
 
   defp title_for(%Notification{type: type, account: %Profile{} = a}),
     do: "#{display_name(a)}: #{type}"

@@ -71,6 +71,10 @@ defmodule Angler.Push.Workers.PushDeliver do
     )
   end
 
+  # A DM is a mention to Mastodon's push alerts.
+  defp alerts_match?(%Subscription{} = sub, %Notification{type: "direct"} = n),
+    do: alerts_match?(sub, %{n | type: "mention"})
+
   defp alerts_match?(%Subscription{alerts: alerts}, %Notification{type: type}) do
     Map.get(alerts, type, false) == true
   end

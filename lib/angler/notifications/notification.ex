@@ -6,7 +6,8 @@ defmodule Angler.Notifications.Notification do
   Notifications are local-only — never federated. The `account_id` is the
   actor whose action triggered the notification (e.g., the favouriter). The
   `status_id` is the relevant status, when one applies (mention/favourite/
-  reblog), or NULL (follow/follow_request).
+  reblog), or NULL (follow/follow_request). A `direct` notification's
+  status is the DM itself (see `Angler.Conversations`).
   """
 
   use Ecto.Schema
@@ -15,7 +16,7 @@ defmodule Angler.Notifications.Notification do
   alias Angler.Profiles.Profile
   alias Angler.Statuses.Status
 
-  @types ~w(mention favourite reblog follow follow_request status update poll)
+  @types ~w(mention direct favourite reblog follow follow_request status update poll)
 
   @type t :: %__MODULE__{}
 

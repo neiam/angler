@@ -26,6 +26,8 @@ defmodule Angler.Conversations do
   alias Angler.Accounts.{Settings, User}
   alias Angler.Conversations.{Conversation, Message, Participant}
   alias Angler.Follows
+  alias Angler.Notifications
+  alias Angler.Notifications.Notification
   alias Angler.Profiles.{BlocksMutes, Profile}
   alias Angler.Repo
   alias Angler.Statuses.{Mention, Status}
@@ -64,6 +66,16 @@ defmodule Angler.Conversations do
       |> Repo.update_all(set: [last_message_id: status_id, last_message_at: at, updated_at: at])
 
       fan_out(conversation.id, author_id, status_id, at)
+    else
+      # Too many people for a conversation: still a mention to each of them.
+      for pid <- members, pid != author_id do
+        Notifications.notify(%{
+          recipient_id: pid,
+          account_id: author_id,
+          type: "mention",
+          status_id: status_id
+        })
+      end
     end
 
     :ok
@@ -154,7 +166,8 @@ defmodule Angler.Conversations do
 
   # upstream fanOut: the sender has read up to their own message and, by
   # replying, accepts a request; every other local member who hasn't left or
-  # blocked the sender gets an unread. Muted / hidden still count.
+  # blocked the sender gets an unread. Muted / hidden still count, but only
+  # active, unmuted, visible conversations notify.
   defp fan_out(conversation_id, author_id, status_id, at) do
     from(p in Participant,
       where: p.conversation_id == ^conversation_id and p.profile_id == ^author_id
@@ -186,6 +199,25 @@ defmodule Angler.Conversations do
           p.state != "left" and is_nil(pr.domain) and p.profile_id not in ^blockers
     )
     |> Repo.update_all(inc: [unread_count: 1], set: [last_activity_at: at, updated_at: at])
+
+    from(p in Participant,
+      join: pr in Profile,
+      on: pr.id == p.profile_id,
+      where:
+        p.conversation_id == ^conversation_id and p.profile_id != ^author_id and
+          p.state == "active" and is_nil(p.muted_at) and is_nil(p.hidden_at) and
+          is_nil(pr.domain) and p.profile_id not in ^blockers,
+      select: p.profile_id
+    )
+    |> Repo.all()
+    |> Enum.each(fn pid ->
+      Notifications.notify(%{
+        recipient_id: pid,
+        account_id: author_id,
+        type: "direct",
+        status_id: status_id
+      })
+    end)
 
     :ok
   end
@@ -479,7 +511,8 @@ defmodule Angler.Conversations do
 
   @doc """
   After a message is deleted: repoint the conversation at its newest
-  remaining message and take the message off unread counts that included it.
+  remaining message, take the message off unread counts that included it,
+  and drop its notifications.
   """
   @spec message_deleted(integer(), integer()) :: :ok
   def message_deleted(conversation_id, status_id) do
@@ -503,6 +536,11 @@ defmodule Angler.Conversations do
           (is_nil(p.last_read_message_id) or p.last_read_message_id < ^status_id)
     )
     |> Repo.update_all(inc: [unread_count: -1])
+
+    {_, _} =
+      Repo.delete_all(
+        from n in Notification, where: n.type == "direct" and n.status_id == ^status_id
+      )
 
     :ok
   end

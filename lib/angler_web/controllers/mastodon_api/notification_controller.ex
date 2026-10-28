@@ -19,9 +19,8 @@ defmodule AnglerWeb.MastodonAPI.NotificationController do
 
   def index(conn, params) do
     %{profile: profile} = BearerAuth.current_scope(conn)
-    params = normalize_filters(params)
-
-    {rows, cursor_rows} = Notifications.list(profile.id, params)
+    pe? = pe?(params)
+    {rows, cursor_rows} = Notifications.list(profile.id, normalize_filters(params, pe?))
 
     conn =
       case MastodonCursor.link_header(cursor_rows, current_url_without_cursor(conn), :id) do
@@ -29,15 +28,15 @@ defmodule AnglerWeb.MastodonAPI.NotificationController do
         v -> put_resp_header(conn, "link", v)
       end
 
-    json(conn, NotificationJSON.render_many(rows, profile.id))
+    json(conn, NotificationJSON.render_many(rows, profile.id, pe: pe?))
   end
 
-  def show(conn, %{"id" => id}) do
+  def show(conn, %{"id" => id} = params) do
     %{profile: profile} = BearerAuth.current_scope(conn)
 
     with {:ok, int_id} <- parse_id(id),
          %_{} = notification <- Notifications.get(profile.id, int_id) do
-      json(conn, NotificationJSON.render(notification, profile.id))
+      json(conn, NotificationJSON.render(notification, profile.id, pe: pe?(params)))
     else
       _ -> send_error(conn, 404, "Record not found")
     end
@@ -74,14 +73,22 @@ defmodule AnglerWeb.MastodonAPI.NotificationController do
   defp parse_id(id) when is_integer(id), do: {:ok, id}
   defp parse_id(_), do: :error
 
+  defp pe?(params), do: Map.get(params, "_pe") in ["1", "true", 1, true]
+
   # Mastodon passes types as `types[]=mention&types[]=favourite`; Plug
   # surfaces these as `"types" => [...]` already. We also tolerate the
-  # singular `"type"` form for convenience.
-  defp normalize_filters(params) do
+  # singular `"type"` form for convenience. DM notifications are mentions
+  # to Mastodon clients, so filter them the same way.
+  defp normalize_filters(params, pe?) do
     params
     |> Map.update("types", List.wrap(params["type"] || params["types"]), fn v -> List.wrap(v) end)
     |> Map.update("exclude_types", List.wrap(params["exclude_types"]), fn v -> List.wrap(v) end)
+    |> Map.update!("types", &with_direct(&1, pe?))
+    |> Map.update!("exclude_types", &with_direct(&1, pe?))
   end
+
+  defp with_direct(types, false), do: if("mention" in types, do: ["direct" | types], else: types)
+  defp with_direct(types, true), do: types
 
   defp current_url_without_cursor(conn) do
     qs =

@@ -1025,7 +1025,8 @@ defmodule Angler.Statuses do
 
   defp insert_mentions(_status, []), do: :ok
 
-  defp insert_mentions(%Status{id: status_id, profile_id: author_id}, profile_ids) do
+  # A DM's recipients are notified by `Conversations.record/1` instead.
+  defp insert_mentions(%Status{id: status_id, profile_id: author_id} = status, profile_ids) do
     rows =
       for pid <- profile_ids, pid != nil do
         %{status_id: status_id, profile_id: pid, silent: false, inserted_at: DateTime.utc_now()}
@@ -1037,7 +1038,7 @@ defmodule Angler.Statuses do
         conflict_target: [:status_id, :profile_id]
       )
 
-      for pid <- profile_ids, pid != nil and pid != author_id do
+      for pid <- profile_ids, pid != nil and pid != author_id and status.visibility != :direct do
         Notifications.notify(%{
           recipient_id: pid,
           account_id: author_id,

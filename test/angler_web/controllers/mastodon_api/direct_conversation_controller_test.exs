@@ -273,4 +273,59 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationControllerTest do
       |> get(~p"/api/v1.1/direct/conversations", %{"limit" => "1", "cursor" => cursor})
       |> json_response(200)
   end
+
+  defp notifications(conn, who, params \\ %{}) do
+    conn |> api(who) |> get(~p"/api/v1/notifications", params) |> json_response(200)
+  end
+
+  test "notifications: requests stay quiet; accepted ones point at the conversation",
+       %{conn: conn} = ctx do
+    conv = start!(conn, ctx.alice, [ctx.bob])
+    cid = conv["id"]
+    say!(conn, ctx.alice, cid, "hi bob")
+
+    # A request doesn't notify, nor show as a mention.
+    assert notifications(conn, ctx.bob) == []
+
+    conn |> api(ctx.bob) |> post(~p"/api/v1.1/direct/conversations/#{cid}/accept")
+    m2 = say!(conn, ctx.alice, cid, "you there?")
+
+    assert [n] = notifications(conn, ctx.bob, %{"_pe" => "1"})
+    assert n["type"] == "direct"
+    assert n["direct"] == %{"conversation_id" => cid, "message_id" => m2["id"]}
+    assert n["account"]["username"] == "alice"
+
+    # Mastodon clients see a mention, and filter it as one.
+    assert [%{"type" => "mention"}] = notifications(conn, ctx.bob)
+    assert [_] = notifications(conn, ctx.bob, %{"types" => ["mention"]})
+    assert notifications(conn, ctx.bob, %{"exclude_types" => ["mention"]}) == []
+
+    # Deleting the message takes its notification with it.
+    conn
+    |> api(ctx.alice)
+    |> delete(~p"/api/v1.1/direct/conversations/#{cid}/messages/#{m2["id"]}")
+    |> json_response(200)
+
+    assert notifications(conn, ctx.bob) == []
+  end
+
+  test "notifications: muted and hidden conversations stay quiet", %{conn: conn} = ctx do
+    conv = start!(conn, ctx.alice, [ctx.bob])
+    cid = conv["id"]
+    say!(conn, ctx.alice, cid, "one")
+    conn |> api(ctx.bob) |> post(~p"/api/v1.1/direct/conversations/#{cid}/accept")
+    conn |> api(ctx.bob) |> post(~p"/api/v1.1/direct/conversations/#{cid}/mute")
+
+    say!(conn, ctx.alice, cid, "two")
+    assert notifications(conn, ctx.bob) == []
+
+    conn |> api(ctx.bob) |> post(~p"/api/v1.1/direct/conversations/#{cid}/unmute")
+    conn |> api(ctx.bob) |> post(~p"/api/v1.1/direct/conversations/#{cid}/hide")
+    say!(conn, ctx.alice, cid, "three")
+    assert notifications(conn, ctx.bob) == []
+
+    conn |> api(ctx.bob) |> post(~p"/api/v1.1/direct/conversations/#{cid}/unhide")
+    say!(conn, ctx.alice, cid, "four")
+    assert [%{"type" => "mention"}] = notifications(conn, ctx.bob)
+  end
 end
