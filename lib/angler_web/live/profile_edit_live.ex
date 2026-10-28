@@ -66,7 +66,8 @@ defmodule AnglerWeb.ProfileEditLive do
       "is_suggestable" => profile.discoverable,
       "indexable" => profile.indexable_search,
       "default_license" => Settings.default_license(socket.assigns.current_user.id),
-      "can_quote" => settings["can_quote"]
+      "can_quote" => settings["can_quote"],
+      "can_feature" => settings["can_feature"]
     }
 
     toggle_keys = for {k, _, _} <- @toggles, k not in Map.keys(base), do: k
@@ -129,7 +130,7 @@ defmodule AnglerWeb.ProfileEditLive do
   defp pretty_size(bytes) when bytes >= 1_000_000, do: "#{Float.round(bytes / 1_000_000, 1)} MB"
   defp pretty_size(bytes), do: "#{div(bytes, 1000)} KB"
 
-  defp quote_options,
+  defp audience_options,
     do: [{"everyone", "Anyone"}, {"followers", "Your followers"}, {"nobody", "No one"}]
 
   defp split_pronouns(nil), do: []
@@ -247,9 +248,29 @@ defmodule AnglerWeb.ProfileEditLive do
               class="select select-bordered w-full"
             >
               <option
-                :for={{value, label} <- quote_options()}
+                :for={{value, label} <- audience_options()}
                 value={value}
                 selected={value == @form[:can_quote].value}
+              >
+                {label}
+              </option>
+            </select>
+          </label>
+
+          <label class="block space-y-1">
+            <span class="text-sm font-medium">Who can feature you in collections</span>
+            <span class="block text-xs text-base-content/60">
+              Other servers ask before adding your account to a featured collection.
+            </span>
+            <select
+              id="profile-can-feature"
+              name="profile[can_feature]"
+              class="select select-bordered w-full"
+            >
+              <option
+                :for={{value, label} <- audience_options()}
+                value={value}
+                selected={value == @form[:can_feature].value}
               >
                 {label}
               </option>
@@ -292,6 +313,9 @@ defmodule AnglerWeb.ProfileEditLive do
           </.link>
           <.link navigate={~p"/settings/quotes"} class="btn btn-ghost btn-sm justify-start">
             <.icon name="hero-chat-bubble-bottom-center-text" class="size-4" /> Quotes
+          </.link>
+          <.link navigate={~p"/settings/featured"} class="btn btn-ghost btn-sm justify-start">
+            <.icon name="hero-rectangle-stack" class="size-4" /> Featured collections
           </.link>
           <.link navigate={~p"/settings/data"} class="btn btn-ghost btn-sm justify-start">
             <.icon name="hero-arrow-down-tray" class="size-4" /> Import &amp; export

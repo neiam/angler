@@ -91,6 +91,7 @@ defmodule AnglerWeb.Router do
       live "/settings/profile", ProfileEditLive
       live "/settings/followed-tags", FollowedTagsLive
       live "/settings/quotes", QuotesLive
+      live "/settings/featured", FeaturedCollectionsLive
       live "/settings/filters", FiltersLive
       live "/settings/two-factor", TwoFactorSetupLive
       live "/settings/data", DataLive
@@ -161,6 +162,8 @@ defmodule AnglerWeb.Router do
     get "/users/:username/quote_authorizations/:id",
         Federation.UserActorController,
         :quote_authorization
+
+    get "/users/:username/stamps/:id", Federation.UserActorController, :feature_authorization
 
     post "/users/:username/inbox", Federation.InboxController, :user
 

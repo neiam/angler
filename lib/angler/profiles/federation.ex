@@ -43,7 +43,8 @@ defmodule Angler.Profiles.Federation do
         |> Profile.changeset(%{status: "deleted"})
         |> Repo.update!()
 
-        Angler.Quotes.actor_deleted(profile.id)
+        :ok = Angler.Quotes.actor_deleted(profile.id)
+        Angler.FeaturedCollections.actor_deleted(profile.id)
     end
   end
 
