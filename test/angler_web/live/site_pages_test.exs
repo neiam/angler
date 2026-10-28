@@ -58,4 +58,18 @@ defmodule AnglerWeb.SitePagesTest do
     assert Angler.Stories.enabled?()
     assert Angler.Instance.get_settings().toggles["stories_enabled"] == true
   end
+
+  test "the about page links the policy pages", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/about")
+
+    for key <- ~w(terms privacy community-guidelines help) do
+      assert has_element?(view, "#about-page-#{key}"), key
+    end
+
+    # The legal notice only once an admin has written one.
+    refute has_element?(view, "#about-page-legal-notice")
+    {:ok, _} = SitePages.put("legal-notice", %{"content" => "Operated by someone."})
+    {:ok, view, _} = live(conn, ~p"/about")
+    assert has_element?(view, "#about-page-legal-notice")
+  end
 end

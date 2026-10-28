@@ -20,6 +20,15 @@ defmodule AnglerWeb.AboutLive do
     {:quay, "Quay", "quay.io/neiam/angler"}
   ]
 
+  # The /site/* pages worth linking here; the legal notice only once written.
+  @linked_pages ~w(terms privacy community-guidelines help)
+
+  defp site_pages do
+    Enum.filter(Angler.SitePages.list(), fn p ->
+      p.key in @linked_pages or (p.key == "legal-notice" and p.custom?)
+    end)
+  end
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -30,6 +39,7 @@ defmodule AnglerWeb.AboutLive do
      |> assign(:short_description, Instance.short_description())
      |> assign(:contact_email, Instance.contact_email())
      |> assign(:rules, Instance.rules())
+     |> assign(:site_pages, site_pages())
      |> assign(:stats, Instance.stats())
      |> assign(:admins, Enum.map(Accounts.list_admins(), &admin_card/1))
      |> assign(:runtimes, @runtimes)
@@ -176,6 +186,21 @@ defmodule AnglerWeb.AboutLive do
           <ol class="list-decimal pl-5 space-y-1 text-base-content/80">
             <li :for={rule <- @rules}>{rule}</li>
           </ol>
+        </section>
+
+        <section id="about-policies" class="space-y-2">
+          <h2 class="text-lg font-semibold">Policies &amp; help</h2>
+          <ul class="flex flex-wrap gap-2">
+            <li :for={p <- @site_pages}>
+              <.link
+                navigate={p.path}
+                id={"about-page-#{p.key}"}
+                class="btn btn-sm btn-ghost border border-base-300 transition-colors hover:border-base-content/30"
+              >
+                {p.title}
+              </.link>
+            </li>
+          </ul>
         </section>
 
         <section class="space-y-2">
