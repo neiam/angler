@@ -37,18 +37,32 @@ defmodule Angler.Discover.Workers.BeagleDiscover do
   defp run do
     case Beagle.fetch_discover() do
       {:ok, entries} ->
-        ingested =
-          entries
-          |> Enum.reject(&banned?/1)
+        {allowed, banned} = Enum.split_with(entries, &(not banned?(&1)))
+
+        results =
+          allowed
           |> Enum.take(@max_ingest)
           |> Task.async_stream(&ingest/1,
             max_concurrency: @ingest_concurrency,
             timeout: 20_000,
             on_timeout: :kill_task
           )
-          |> Enum.count(&match?({:ok, :ok}, &1))
+          |> Enum.map(fn
+            {:ok, :ok} -> :ok
+            {:ok, {:error, reason}} -> {:error, reason}
+            {:exit, reason} -> {:error, {:exit, reason}}
+          end)
 
-        Logger.info("Beagle discover: mirrored #{ingested} post(s)")
+        failures =
+          for({:error, reason} <- results, do: reason)
+          |> Enum.frequencies_by(&reason_label/1)
+
+        Logger.info(
+          "Beagle discover: #{length(entries)} listed, #{length(banned)} banned, " <>
+            "#{Enum.count(results, &(&1 == :ok))} mirrored, " <>
+            "#{Enum.sum(Map.values(failures))} failed#{failure_summary(failures)}"
+        )
+
         :ok
 
       {:error, reason} ->
@@ -67,6 +81,17 @@ defmodule Angler.Discover.Workers.BeagleDiscover do
         {:error, reason}
     end
   end
+
+  # Group failures by reason for the run summary (`:timeout`, `:bad_status`, ...).
+  defp reason_label({:exit, _}), do: "timeout"
+  defp reason_label(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp reason_label({tag, _}) when is_atom(tag), do: Atom.to_string(tag)
+  defp reason_label(_), do: "other"
+
+  defp failure_summary(f) when map_size(f) == 0, do: ""
+
+  defp failure_summary(f),
+    do: " (" <> Enum.map_join(f, ", ", fn {r, n} -> "#{r}: #{n}" end) <> ")"
 
   defp banned?(%{"domain" => domain}) when is_binary(domain) and domain != "",
     do: Bans.banned?(domain)
