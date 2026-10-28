@@ -1,5 +1,5 @@
 defmodule Angler.CaptchaTest do
-  use ExUnit.Case, async: false
+  use Angler.DataCase, async: false
 
   @moduletag :capture_log
 

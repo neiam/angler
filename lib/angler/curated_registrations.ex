@@ -28,6 +28,7 @@ defmodule Angler.CuratedRegistrations do
   alias Angler.Auth.Username
   alias Angler.CuratedRegistrations.Activity
   alias Angler.CuratedRegistrations.CuratedRegister
+  alias Angler.CuratedRegistrations.Template
   alias Angler.CuratedRegistrations.Workers.SendEmail
   alias Angler.Instance
   alias Angler.Mailer.CuratedRegisterEmail
@@ -512,4 +513,34 @@ defmodule Angler.CuratedRegistrations do
   defp parse_id(_), do: :error
 
   defp base, do: AnglerWeb.Endpoint.url()
+
+  ## Reply templates (upstream AdminCuratedRegisterController template*)
+
+  @doc "Every template, in display order."
+  @spec list_templates() :: [Template.t()]
+  def list_templates,
+    do: Repo.all(from t in Template, order_by: [asc: t.order, asc: t.id])
+
+  @doc "The templates offered while reviewing (upstream getActiveTemplates)."
+  @spec active_templates() :: [Template.t()]
+  def active_templates,
+    do: Repo.all(from t in Template, where: t.is_active, order_by: [asc: t.order, asc: t.id])
+
+  @spec get_template(term()) :: Template.t() | nil
+  def get_template(id) do
+    case Integer.parse(to_string(id)) do
+      {n, ""} -> Repo.get(Template, n)
+      _ -> nil
+    end
+  end
+
+  @spec change_template(Template.t(), map()) :: Ecto.Changeset.t()
+  def change_template(%Template{} = t, attrs \\ %{}), do: Template.changeset(t, attrs)
+
+  @spec save_template(Template.t(), map()) :: {:ok, Template.t()} | {:error, Ecto.Changeset.t()}
+  def save_template(%Template{} = t, attrs),
+    do: t |> Template.changeset(attrs) |> Repo.insert_or_update()
+
+  @spec delete_template(Template.t()) :: {:ok, Template.t()} | {:error, Ecto.Changeset.t()}
+  def delete_template(%Template{} = t), do: Repo.delete(t)
 end

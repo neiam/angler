@@ -4,7 +4,7 @@ defmodule AnglerWeb.AdminCuratedRegisterLive do
   `AdminCuratedRegisterController::show` and its `api*` actions): the
   applicant's details and reason, the message thread, and the admin
   actions: approve, reject (with an optional note, or silently), and request
-  more details.
+  more details. Active reply templates can fill either message.
 
   Gated by `AnglerWeb.LiveAuth` `:require_admin`.
   """
@@ -27,6 +27,7 @@ defmodule AnglerWeb.AdminCuratedRegisterLive do
         {:ok,
          socket
          |> assign(:page_title, "Application @#{record.username}")
+         |> assign(:templates, CuratedRegistrations.active_templates())
          |> assign_record(record)}
     end
   end
@@ -42,6 +43,22 @@ defmodule AnglerWeb.AdminCuratedRegisterLive do
     do: assign_record(socket, CuratedRegistrations.get(socket.assigns.record.id))
 
   @impl true
+  # The picker's change event carries its own form's params (`_target`).
+  def handle_event("use_template", %{"_target" => [field]} = params, socket)
+      when field in ["details_template", "reject_template"] do
+    target = String.trim_trailing(field, "_template")
+
+    case CuratedRegistrations.get_template(params[field]) do
+      %{is_active: true, content: content} ->
+        key = String.to_existing_atom(target <> "_form")
+        params = Map.put(socket.assigns[key].params, "message", content)
+        {:noreply, assign(socket, key, to_form(params, as: String.to_existing_atom(target)))}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_event("approve", _params, socket) do
     case CuratedRegistrations.approve(socket.assigns.record, socket.assigns.current_user) do
       {:ok, _} ->
@@ -184,6 +201,7 @@ defmodule AnglerWeb.AdminCuratedRegisterLive do
             >
               <div class="card-body p-4 space-y-3">
                 <h2 class="font-semibold">Request more details</h2>
+                <.template_picker templates={@templates} target="details" />
                 <.input
                   field={@details_form[:message]}
                   type="textarea"
@@ -203,6 +221,7 @@ defmodule AnglerWeb.AdminCuratedRegisterLive do
             >
               <div class="card-body p-4 space-y-3">
                 <h2 class="font-semibold">Reject</h2>
+                <.template_picker templates={@templates} target="reject" />
                 <.input
                   field={@reject_form[:message]}
                   type="textarea"
@@ -227,6 +246,25 @@ defmodule AnglerWeb.AdminCuratedRegisterLive do
         <% end %>
       </div>
     </Layouts.app>
+    """
+  end
+
+  attr :templates, :list, required: true
+  attr :target, :string, required: true
+
+  # Not a nested <form>: the select posts its own change event.
+  defp template_picker(assigns) do
+    ~H"""
+    <select
+      :if={@templates != []}
+      id={"#{@target}-template"}
+      name={"#{@target}_template"}
+      phx-change="use_template"
+      class="select select-bordered select-sm w-full"
+    >
+      <option value="">Use a template…</option>
+      <option :for={t <- @templates} value={t.id}>{t.name}</option>
+    </select>
     """
   end
 end

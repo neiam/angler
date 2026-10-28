@@ -175,10 +175,47 @@ defmodule Angler.Instance do
       (not open_registration?() or curated_config(:only_enabled_on_closed_reg, true) != true)
   end
 
-  @doc "A curated-registration setting (`config :angler, :curated_registration`)."
+  @doc """
+  A curated-registration setting: the admin override (admin settings page),
+  else `config :angler, :curated_registration`.
+  """
   @spec curated_config(atom(), term()) :: term()
   def curated_config(key, default) do
-    Keyword.get(Application.get_env(:angler, :curated_registration, []), key, default)
+    case override(:curated_registration, key) do
+      {:ok, v} -> v
+      :error -> Keyword.get(Application.get_env(:angler, :curated_registration, []), key, default)
+    end
+  end
+
+  @doc """
+  An admin override of a registration setting group (`:captcha` or
+  `:curated_registration`), `:error` when unset so env applies.
+  """
+  @spec override(:captcha | :curated_registration, atom()) :: {:ok, term()} | :error
+  def override(group, key) when group in [:captcha, :curated_registration] do
+    case Map.get(settings(), group) do
+      %{} = m ->
+        case Map.fetch(m, Atom.to_string(key)) do
+          {:ok, v} when not is_nil(v) -> {:ok, v}
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  @doc """
+  Set (or with `nil` clear back to env) a registration setting group's
+  overrides.
+  """
+  @spec update_registration_settings(:captcha | :curated_registration, map() | nil) ::
+          {:ok, Settings.t()} | {:error, Ecto.Changeset.t()}
+  def update_registration_settings(group, value)
+      when group in [:captcha, :curated_registration] do
+    get_settings()
+    |> Settings.registration_changeset(%{group => value})
+    |> Repo.insert_or_update()
   end
 
   @doc "Minimum age to register (upstream `pixelfed.min_registration_age`)."

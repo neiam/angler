@@ -1,7 +1,8 @@
 defmodule AnglerWeb.AdminSettingsLive do
   @moduledoc """
   Admin-only settings: edit the instance metadata shown on the about page
-  (title, descriptions, contact, rules) and manage the admin team. Backed by
+  (title, descriptions, contact, rules), registration (curated mode and
+  captcha, as upstream's admin settings), and the admin team. Backed by
   `Angler.Instance` (DB overrides env) and `Angler.Accounts.set_admin/2`.
 
   Gated by `AnglerWeb.LiveAuth` `:require_admin`.
@@ -9,7 +10,15 @@ defmodule AnglerWeb.AdminSettingsLive do
   use AnglerWeb, :live_view
 
   alias Angler.Accounts
+  alias Angler.Captcha
   alias Angler.Instance
+
+  @surfaces [
+    {"login", "Login"},
+    {"register", "Registration"},
+    {"curated_register", "Curated applications"},
+    {"forgot_password", "Password reset requests"}
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -17,6 +26,8 @@ defmodule AnglerWeb.AdminSettingsLive do
      socket
      |> assign(:page_title, "Admin settings")
      |> assign_settings_form()
+     |> assign(:surfaces, @surfaces)
+     |> assign_registration_form()
      |> assign_admins()}
   end
 
@@ -35,6 +46,39 @@ defmodule AnglerWeb.AdminSettingsLive do
     assign(socket, :settings_form, to_form(data, as: :settings))
   end
 
+  # Effective values (admin override, else env), so the form shows what's live.
+  defp assign_registration_form(socket) do
+    active = Captcha.setting(:active) || []
+
+    data =
+      %{
+        "curated_enabled" => Instance.curated_registration_enabled?(),
+        "curated_only_on_closed" => Instance.curated_config(:only_enabled_on_closed_reg, true),
+        "captcha_enabled" => Captcha.enabled?(),
+        "captcha_driver" => Atom.to_string(Captcha.driver()),
+        "captcha_sitekey" => Captcha.setting(:sitekey) || "",
+        "captcha_secret" => "",
+        "cap_endpoint" => Captcha.setting(:cap_endpoint) || ""
+      }
+      |> Map.merge(
+        Map.new(@surfaces, fn {s, _} ->
+          {"active_" <> s, Keyword.get(active, String.to_existing_atom(s), true)}
+        end)
+      )
+
+    socket
+    |> assign(:registration_form, to_form(data, as: :registration))
+    |> assign(:captcha_secret_set?, present?(Captcha.setting(:secret)))
+    |> assign(:registration_overridden?, overridden?())
+  end
+
+  defp overridden? do
+    s = Instance.get_settings()
+    s.captcha not in [nil, %{}] or s.curated_registration not in [nil, %{}]
+  end
+
+  defp present?(v), do: is_binary(v) and String.trim(v) != ""
+
   defp assign_admins(socket), do: assign(socket, :admins, Accounts.list_admins())
 
   @impl true
@@ -51,6 +95,52 @@ defmodule AnglerWeb.AdminSettingsLive do
       {:error, changeset} ->
         {:noreply, put_flash(socket, :error, "Couldn't save: #{changeset_error(changeset)}")}
     end
+  end
+
+  def handle_event("save_registration", %{"registration" => p}, socket) do
+    on? = &(p[&1] == "true")
+
+    curated = %{
+      "enabled" => on?.("curated_enabled"),
+      "only_enabled_on_closed_reg" => on?.("curated_only_on_closed")
+    }
+
+    # A blank secret keeps the current one (it's never echoed back).
+    existing_secret =
+      case Instance.override(:captcha, :secret) do
+        {:ok, s} -> s
+        :error -> nil
+      end
+
+    captcha =
+      %{
+        "enabled" => on?.("captcha_enabled"),
+        "driver" => p["captcha_driver"],
+        "sitekey" => blank_to_nil(p["captcha_sitekey"]),
+        "secret" => blank_to_nil(p["captcha_secret"]) || existing_secret,
+        "cap_endpoint" => blank_to_nil(p["cap_endpoint"]),
+        "active" => Map.new(@surfaces, fn {s, _} -> {s, on?.("active_" <> s)} end)
+      }
+      |> Map.reject(fn {_, v} -> is_nil(v) end)
+
+    with true <- p["captcha_driver"] in Enum.map(Captcha.drivers(), &Atom.to_string/1),
+         {:ok, _} <- Instance.update_registration_settings(:curated_registration, curated),
+         {:ok, _} <- Instance.update_registration_settings(:captcha, captcha) do
+      {:noreply,
+       socket |> put_flash(:info, "Registration settings saved.") |> assign_registration_form()}
+    else
+      _ -> {:noreply, put_flash(socket, :error, "Couldn't save registration settings.")}
+    end
+  end
+
+  def handle_event("reset_registration", _params, socket) do
+    {:ok, _} = Instance.update_registration_settings(:curated_registration, nil)
+    {:ok, _} = Instance.update_registration_settings(:captcha, nil)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Registration settings now follow the environment.")
+     |> assign_registration_form()}
   end
 
   def handle_event("promote", %{"username" => username}, socket) do
@@ -84,6 +174,9 @@ defmodule AnglerWeb.AdminSettingsLive do
         end
     end
   end
+
+  defp blank_to_nil(nil), do: nil
+  defp blank_to_nil(s), do: if(String.trim(s) == "", do: nil, else: String.trim(s))
 
   defp split_lines(nil), do: []
 
@@ -130,6 +223,91 @@ defmodule AnglerWeb.AdminSettingsLive do
             />
             <button type="submit" class="btn btn-primary" phx-disable-with="Saving…">
               Save instance settings
+            </button>
+          </.form>
+        </section>
+
+        <section id="registration-settings" class="space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold">Registration</h2>
+            <button
+              :if={@registration_overridden?}
+              id="reset-registration"
+              type="button"
+              phx-click="reset_registration"
+              data-confirm="Drop these overrides and use the environment configuration?"
+              class="btn btn-ghost btn-xs"
+            >
+              Use environment settings
+            </button>
+          </div>
+          <p class="text-sm text-base-content/60">
+            Saving here overrides the environment variables (INSTANCE_CUR_REG, CAPTCHA_*)
+            for every server until you switch back.
+          </p>
+
+          <.form
+            for={@registration_form}
+            id="registration-form"
+            phx-submit="save_registration"
+            class="space-y-6"
+          >
+            <fieldset class="space-y-2">
+              <legend class="text-sm font-semibold">Curated registration</legend>
+              <.input
+                field={@registration_form[:curated_enabled]}
+                type="checkbox"
+                label="People apply for an account and an admin approves them"
+              />
+              <.input
+                field={@registration_form[:curated_only_on_closed]}
+                type="checkbox"
+                label="Only while open registration is off"
+              />
+              <.link navigate={~p"/admin/curated-onboarding/templates"} class="link text-sm">
+                Reply templates
+              </.link>
+            </fieldset>
+
+            <fieldset class="space-y-3">
+              <legend class="text-sm font-semibold">Captcha</legend>
+              <.input field={@registration_form[:captcha_enabled]} type="checkbox" label="Enabled" />
+              <.input
+                field={@registration_form[:captcha_driver]}
+                type="select"
+                label="Provider"
+                options={[
+                  {"hCaptcha", "hcaptcha"},
+                  {"Cloudflare Turnstile", "turnstile"},
+                  {"Cap", "cap"}
+                ]}
+              />
+              <.input field={@registration_form[:captcha_sitekey]} label="Site key" />
+              <.input
+                field={@registration_form[:captcha_secret]}
+                type="password"
+                label="Secret key"
+                placeholder={if(@captcha_secret_set?, do: "Saved — leave blank to keep", else: "")}
+                autocomplete="off"
+              />
+              <.input
+                field={@registration_form[:cap_endpoint]}
+                label="Cap endpoint (Cap only)"
+                placeholder="https://cap.example.com"
+              />
+              <div class="space-y-1">
+                <div class="text-sm font-medium">Ask on</div>
+                <.input
+                  :for={{key, label} <- @surfaces}
+                  field={@registration_form["active_" <> key]}
+                  type="checkbox"
+                  label={label}
+                />
+              </div>
+            </fieldset>
+
+            <button type="submit" class="btn btn-primary" phx-disable-with="Saving…">
+              Save registration settings
             </button>
           </.form>
         </section>

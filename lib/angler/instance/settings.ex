@@ -15,12 +15,20 @@ defmodule Angler.Instance.Settings do
     field :contact_email, :string
     field :contact_username, :string
     field :rules, {:array, :string}
+    # Admin overrides for `config :angler, :captcha` / `:curated_registration`,
+    # string-keyed; a missing key (or a nil map) falls back to env.
+    field :captcha, :map
+    field :curated_registration, :map
     timestamps(type: :utc_datetime_usec)
   end
 
   @fields ~w(title short_description description contact_email contact_username rules)a
 
   @string_fields ~w(title short_description description contact_email contact_username)a
+
+  @doc "Changeset for the captcha / curated-registration overrides."
+  def registration_changeset(settings, attrs),
+    do: cast(settings, attrs, [:captcha, :curated_registration])
 
   def changeset(settings, attrs) do
     settings

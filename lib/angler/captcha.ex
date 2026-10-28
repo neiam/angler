@@ -72,7 +72,12 @@ defmodule Angler.Captcha do
   What the browser widget needs: the script to load, the driver and site key,
   plus Cap's API endpoint. Returned as string-keyed data for `data-*` attrs.
   """
-  @spec widget() :: %{driver: String.t(), sitekey: String.t(), script: String.t(), api: String.t()}
+  @spec widget() :: %{
+          driver: String.t(),
+          sitekey: String.t(),
+          script: String.t(),
+          api: String.t()
+        }
   def widget do
     %{
       driver: Atom.to_string(driver()),
@@ -170,7 +175,26 @@ defmodule Angler.Captcha do
 
   defp present?(v), do: is_binary(v) and String.trim(v) != ""
 
+  # Admin overrides (admin settings page) win over env, key by key.
   defp config(key, default \\ nil) do
-    Keyword.get(Application.get_env(:angler, :captcha, []), key, default)
+    case Angler.Instance.override(:captcha, key) do
+      {:ok, %{} = active} when key == :active ->
+        Enum.flat_map(@surfaces, fn s ->
+          case Map.fetch(active, Atom.to_string(s)) do
+            {:ok, v} when is_boolean(v) -> [{s, v}]
+            _ -> []
+          end
+        end)
+
+      {:ok, v} ->
+        v
+
+      :error ->
+        Keyword.get(Application.get_env(:angler, :captcha, []), key, default)
+    end
   end
+
+  @doc "The effective setting `key` (env or admin override), for the admin page."
+  @spec setting(atom()) :: term()
+  def setting(key), do: config(key)
 end
