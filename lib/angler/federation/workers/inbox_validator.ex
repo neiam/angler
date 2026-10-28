@@ -22,6 +22,7 @@ defmodule Angler.Federation.Workers.InboxValidator do
   alias Angler.Federation.Activity
   alias Angler.Federation.Actor
   alias Angler.Federation.Bans
+  alias Angler.Federation.FollowersSync
   alias Angler.Federation.HTTPSignature
   alias Angler.Federation.Workers.ActivityHandler
   alias Angler.Repo
@@ -95,6 +96,7 @@ defmodule Angler.Federation.Workers.InboxValidator do
 
     case HTTPSignature.verify(:post, path, headers_list, raw_body, key_resolver) do
       :ok ->
+        FollowersSync.handle_inbound(headers, actor_url)
         record_and_dispatch(payload, raw_body, actor_url, recipient_id)
 
       {:error, reason} ->
@@ -108,8 +110,12 @@ defmodule Angler.Federation.Workers.InboxValidator do
                    raw_body,
                    key_resolver
                  ) do
-              :ok -> record_and_dispatch(payload, raw_body, actor_url, recipient_id)
-              {:error, _} -> log_rejected(payload, actor_url, reason)
+              :ok ->
+                FollowersSync.handle_inbound(headers, actor_url)
+                record_and_dispatch(payload, raw_body, actor_url, recipient_id)
+
+              {:error, _} ->
+                log_rejected(payload, actor_url, reason)
             end
 
           {:error, fetch_error} ->

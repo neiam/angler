@@ -20,6 +20,7 @@ defmodule Angler.Statuses.Workers.StatusDeliver do
   import Ecto.Query, warn: false
 
   alias Angler.Federation.Activity
+  alias Angler.Federation.FollowersSync
   alias Angler.Federation.HTTPSignature
   alias Angler.Profiles
   alias Angler.Profiles.Profile
@@ -62,6 +63,14 @@ defmodule Angler.Statuses.Workers.StatusDeliver do
 
   ## Build + sign + POST
 
+  # FEP-8fcf: lets the receiver check its copy of who follows us there.
+  defp sync_header(actor, inbox_url) do
+    case FollowersSync.header(actor, inbox_url) do
+      nil -> []
+      value -> [{FollowersSync.header_name(), value}]
+    end
+  end
+
   defp deliver(%Profile{} = actor, %Status{} = status, inbox_url) do
     activity = build_activity(actor, status)
     body = Jason.encode!(activity)
@@ -79,7 +88,7 @@ defmodule Angler.Statuses.Workers.StatusDeliver do
         [
           {"Content-Type", "application/activity+json"},
           {"Accept", "application/activity+json"}
-        ]
+        ] ++ sync_header(actor, inbox_url)
       )
 
     case Angler.Federation.HTTP.deliver(

@@ -58,6 +58,51 @@ defmodule Angler.Federation.HTTPSignature do
   end
 
   @doc """
+  Verify a signed fetch (a `GET`, so no body or `Digest`). Returns the
+  `keyId` that signed it, for the caller to resolve to its owner.
+  """
+  @spec verify_fetch(
+          String.t(),
+          [{String.t(), String.t()}],
+          (String.t() -> {:ok, String.t()} | {:error, atom()})
+        ) :: {:ok, String.t()} | {:error, term()}
+  def verify_fetch(path, headers, key_resolver)
+      when is_binary(path) and is_list(headers) and is_function(key_resolver, 1) do
+    with {:ok, sig_header} <- header(headers, "signature") |> ok_or(:missing_signature),
+         {:ok, parts} <- parse_signature_header(sig_header),
+         {:ok, key_id} <- Map.fetch(parts, "keyId") |> ok_or(:missing_key_id),
+         {:ok, header_list_str} <- Map.fetch(parts, "headers") |> ok_or(:missing_headers),
+         {:ok, sig_b64} <- Map.fetch(parts, "signature") |> ok_or(:missing_signature),
+         {:ok, sig} <- Base.decode64(sig_b64) |> ok_or(:bad_signature_base64),
+         header_names = String.split(header_list_str, " "),
+         true <-
+           Enum.all?(~w[(request-target) host date], &(&1 in header_names)) ||
+             {:error, :missing_headers},
+         {:ok, signing_string} <- build_signing_string(:get, path, headers, header_names),
+         :ok <- verify_date_skew(headers),
+         {:ok, public_pem} <- key_resolver.(key_id) |> ok_or(:key_not_found),
+         {:ok, public_key} <- decode_public_pem(public_pem) do
+      if :public_key.verify(signing_string, :sha256, sig, public_key),
+        do: {:ok, key_id},
+        else: {:error, :bad_signature}
+    end
+  end
+
+  @doc """
+  The lowercased names of the headers a request's `Signature` covers, or
+  `[]` when there is no parsable signature.
+  """
+  @spec signed_header_names([{String.t(), String.t()}]) :: [String.t()]
+  def signed_header_names(headers) when is_list(headers) do
+    with sig when is_binary(sig) <- header(headers, "signature"),
+         {:ok, %{"headers" => names}} <- parse_signature_header(sig) do
+      names |> String.downcase() |> String.split(" ", trim: true)
+    else
+      _ -> []
+    end
+  end
+
+  @doc """
   Sign an outbound request.
 
   Args:

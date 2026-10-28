@@ -169,12 +169,15 @@ defmodule Angler.Federation.Workers.FollowDeliver do
       "id" => undo_id,
       "type" => "Undo",
       "actor" => actor_url,
-      "object" => %{
-        "id" => follow_activity_id,
-        "type" => "Follow",
-        "actor" => actor_url,
-        "object" => target_actor_url
-      }
+      # No id when undoing a follow we have no record of (followers sync).
+      "object" =>
+        %{
+          "id" => follow_activity_id,
+          "type" => "Follow",
+          "actor" => actor_url,
+          "object" => target_actor_url
+        }
+        |> Map.reject(fn {_, v} -> is_nil(v) end)
     }
 
     body = Jason.encode!(activity)

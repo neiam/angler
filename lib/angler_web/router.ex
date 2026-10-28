@@ -154,6 +154,10 @@ defmodule AnglerWeb.Router do
     get "/users/:username/followers", Federation.UserActorController, :followers
     get "/users/:username/following", Federation.UserActorController, :following
 
+    get "/users/:username/followers_synchronization",
+        Federation.UserActorController,
+        :followers_synchronization
+
     get "/users/:username/quote_authorizations/:id",
         Federation.UserActorController,
         :quote_authorization
