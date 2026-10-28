@@ -3,7 +3,8 @@ defmodule Angler.Timelines.Workers.FeedInsert do
   Fan a status into followers' `home_feed_entries`.
 
   Triggered after status creation (local or inbound). Skips `:direct`
-  statuses (those go to participants only via the DM grouping). Idempotent
+  statuses (those go to participants only via the DM grouping) and replies
+  (those show in their thread, not the feed, as upstream). Idempotent
   — `INSERT ... ON CONFLICT DO NOTHING` against the `(profile_id, status_id)`
   unique.
 
@@ -87,6 +88,9 @@ defmodule Angler.Timelines.Workers.FeedInsert do
         :ok
 
       %Status{visibility: :direct} ->
+        :ok
+
+      %Status{in_reply_to_id: parent} when not is_nil(parent) ->
         :ok
 
       %Status{} = status ->

@@ -35,6 +35,9 @@ defmodule Angler.Timelines do
         where: h.profile_id == ^viewer_id,
         join: s in Status,
         on: s.id == h.status_id and is_nil(s.deleted_at),
+        # Replies live in their thread, not the feed (upstream filters
+        # `in_reply_to_id`); a boost of one still shows.
+        where: is_nil(s.in_reply_to_id) or not is_nil(h.reblog_id),
         select: %{id: h.id, status: s, reblog_id: h.reblog_id}
 
     rows =
@@ -107,7 +110,8 @@ defmodule Angler.Timelines do
   end
 
   @doc """
-  Public timeline. Visibility = `:public`, optionally restricted by
+  Public timeline. Visibility = `:public`, top-level posts only (replies
+  stay in their thread, as upstream), optionally restricted by
   `local_only` / `remote_only` / `only_media`.
   """
   @spec public(MastodonCursor.cursor(), keyword()) ::
@@ -115,7 +119,7 @@ defmodule Angler.Timelines do
   def public(cursor, opts \\ []) when is_map(cursor) do
     base =
       from s in Status,
-        where: s.visibility == :public and is_nil(s.deleted_at)
+        where: s.visibility == :public and is_nil(s.deleted_at) and is_nil(s.in_reply_to_id)
 
     base = filter_local(base, opts)
     base = filter_only_media(base, opts)

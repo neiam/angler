@@ -196,6 +196,21 @@ defmodule Angler.TimelinesTest do
       assert statuses == []
     end
 
+    test "leaves replies out of the feed, even ones already fanned in", ctx do
+      post = insert_status!(ctx.bob)
+      reply = insert_status!(ctx.bob, %{in_reply_to_id: post.id})
+
+      Enum.each([post, reply], &FeedInsert.enqueue(&1.id))
+      Oban.drain_queue(queue: :feed)
+      refute Repo.get_by(HomeFeedEntry, profile_id: ctx.alice.id, status_id: reply.id)
+
+      # An entry from before replies were skipped at fan-out.
+      Repo.insert!(%HomeFeedEntry{profile_id: ctx.alice.id, status_id: reply.id})
+
+      {statuses, _} = Timelines.home(ctx.alice.id, default_cursor())
+      assert Enum.map(statuses, & &1.id) == [post.id]
+    end
+
     test "fans hashtag-followed posts to a follower who doesn't follow the author", ctx do
       # carol follows #photography but does NOT follow bob.
       carol = local!("carol")
@@ -385,6 +400,15 @@ defmodule Angler.TimelinesTest do
       )
 
       assert {[], _} = Timelines.public(default_cursor())
+    end
+
+    test "replies excluded" do
+      alice = local!("alice")
+      post = insert_status!(alice)
+      _reply = insert_status!(alice, %{in_reply_to_id: post.id})
+
+      {statuses, _} = Timelines.public(default_cursor())
+      assert Enum.map(statuses, & &1.id) == [post.id]
     end
   end
 
