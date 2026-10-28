@@ -3,10 +3,10 @@ defmodule Angler.Stories.Workers.StoryFetch do
   Fetches a remote story named by an inbound `Add` (upstream StoryPipeline
   StoryFetch): a GET of the bearcap URL with its token as a bearer, which
   goes through the guarded federation fetcher and never leaves the story's
-  host. The document is validated and mirrored by
+  host. The document is validated and mirrored, media and all, by
   `Angler.Stories.Federation.ingest/3`.
 
-  Temporary failures retry: the origin only serves a story for its first
+  Temporary failures, of the document or its media, retry: the origin only serves a story for its first
   20 minutes, so there's no point retrying for long.
   """
 
@@ -40,8 +40,10 @@ defmodule Angler.Stories.Workers.StoryFetch do
       true ->
         case HTTP.fetch(url, bearer: token, accept: @accept) do
           {:ok, doc} ->
-            _ = Federation.ingest(doc, url, actor_url)
-            :ok
+            case Federation.ingest(doc, url, actor_url) do
+              {:error, reason} -> {:error, reason}
+              _ -> :ok
+            end
 
           {:error, reason} ->
             if HTTP.transient_error?(reason), do: {:error, reason}, else: :ok

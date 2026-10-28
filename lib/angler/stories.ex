@@ -29,7 +29,7 @@ defmodule Angler.Stories do
   alias Angler.Repo
   alias Angler.Statuses
   alias Angler.Statuses.{Mention, Status}
-  alias Angler.Stories.{Outbound, Story, View}
+  alias Angler.Stories.{Outbound, RemoteMedia, Story, View}
 
   @max_per_day 30
   @ttl_seconds 24 * 60 * 60
@@ -680,8 +680,9 @@ defmodule Angler.Stories do
   ## Expiry (called by the cron worker)
 
   @doc """
-  Flip every published story past its `expires_at` to inactive, and send
-  the `Delete` of each local one (upstream StoryExpire). Returns the count.
+  Flip every published story past its `expires_at` to inactive and send
+  the `Delete` of each local one; mirrored remote stories are dropped with
+  their media (upstream StoryExpire). Returns the count.
   """
   @spec expire_due() :: non_neg_integer()
   def expire_due do
@@ -691,9 +692,20 @@ defmodule Angler.Stories do
       from(s in Story, where: s.active == true and s.expires_at <= ^now, select: s)
       |> Repo.update_all(set: [active: false, updated_at: now])
 
-    for %Story{local: true} = story <- expired, do: Outbound.removed(story)
+    {local, remote} = Enum.split_with(expired, & &1.local)
+    Enum.each(local, &Outbound.removed/1)
+    purge_remote(remote)
 
     n
+  end
+
+  @doc "Delete mirrored remote stories and their stored media."
+  @spec purge_remote([Story.t()]) :: :ok
+  def purge_remote(stories) when is_list(stories) do
+    stories = Enum.reject(stories, & &1.local)
+    ids = Enum.map(stories, & &1.id)
+    {_, _} = Repo.delete_all(from s in Story, where: s.id in ^ids)
+    Enum.each(stories, &RemoteMedia.delete(&1.path))
   end
 
   ## Rendering helpers (used by both this module and the controller)
@@ -739,16 +751,21 @@ defmodule Angler.Stories do
   end
 
   @doc """
-  A story's media URL. Remote stories (`Angler.Stories.Federation`) are
-  hotlinked, so their `path` is already the URL.
+  A story's media URL. Remote stories mirrored before their media was
+  downloaded (`Angler.Stories.RemoteMedia`) hotlink it, so their `path` is
+  already the URL.
   """
   @spec media_url(Story.t()) :: String.t()
-  def media_url(%Story{local: false, path: url}), do: url
+  def media_url(%Story{local: false, path: url}) when is_binary(url) do
+    if RemoteMedia.hotlinked?(url), do: url, else: stored_url(url)
+  end
+
+  def media_url(%Story{path: path}), do: stored_url(path)
 
   # Stories don't share the Asset schema; the storage backend's `url/2`
   # signature wants an Asset, so we synthesize a minimal one.
-  def media_url(%Story{} = s),
-    do: Storage.backend().url(%Angler.Media.Asset{path_original: s.path}, :original) || s.path
+  defp stored_url(path),
+    do: Storage.backend().url(%Angler.Media.Asset{path_original: path}, :original) || path
 
   @doc """
   The v1.1 DM `{type, meta}` of a story reply or reaction status, or nil for

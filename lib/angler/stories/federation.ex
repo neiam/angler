@@ -5,8 +5,8 @@ defmodule Angler.Stories.Federation do
 
     * `Add` of a `Story` — a followed remote account posted one. The object
       is only a bearcap (`bear:?t=<token>&u=<url>`); `Workers.StoryFetch`
-      fetches it with the token and mirrors it as a remote story. Its media
-      is hotlinked, like remote post media.
+      fetches it with the token and mirrors it as a remote story, with its
+      media downloaded and stored here (`Angler.Stories.RemoteMedia`).
     * `View` of a `Story` — a remote follower saw one of ours.
     * `Story:Reaction` / `Story:Reply` — a remote follower reacted to or
       answered one of ours. It becomes a `:direct` status from them to the
@@ -28,7 +28,8 @@ defmodule Angler.Stories.Federation do
   alias Angler.Repo
   alias Angler.Statuses.Status
   alias Angler.Stories
-  alias Angler.Stories.Story
+  alias Angler.Federation.HTTP
+  alias Angler.Stories.{RemoteMedia, Story}
   alias Angler.Stories.Workers.StoryFetch
 
   @max_text 500
@@ -77,29 +78,43 @@ defmodule Angler.Stories.Federation do
 
   @doc """
   Mirror a fetched `Story` document from `actor_url`, if someone here
-  follows them. Dedupes on the story id. Returns `{:ok, story}`, `:exists`
-  or `:skip`.
+  follows them, downloading its media (`Angler.Stories.RemoteMedia`).
+  Dedupes on the story id. Returns `{:ok, story}`, `:exists`, `:skip`, or
+  `{:error, reason}` when the media download failed in a way worth retrying.
   """
-  @spec ingest(map(), String.t(), String.t()) :: {:ok, Story.t()} | :exists | :skip
+  @spec ingest(map(), String.t(), String.t()) ::
+          {:ok, Story.t()} | :exists | :skip | {:error, term()}
   def ingest(doc, url, actor_url) do
     with {:ok, %Profile{domain: d, status: nil} = author} when is_binary(d) <-
            Actor.resolve(actor_url),
          true <- local_followers?(author.id),
-         {:ok, attrs} <- parse_story(doc, url, actor_url) do
+         {:ok, attrs} <- parse_story(doc, url, actor_url),
+         {:ok, path} <- download(attrs, author) do
       %Story{id: Angler.Snowflake.next(), profile_id: author.id, local: false, active: true}
-      |> Ecto.Changeset.change(attrs)
+      |> Ecto.Changeset.change(%{attrs | path: path})
       |> Repo.insert!(
         on_conflict: :nothing,
         conflict_target: {:unsafe_fragment, "(remote_url) WHERE remote_url IS NOT NULL"}
       )
       |> then(fn story ->
         # On a conflict nothing was written and the id we chose is unused.
-        if Repo.exists?(from s in Story, where: s.id == ^story.id),
-          do: {:ok, story},
-          else: :exists
+        if Repo.exists?(from s in Story, where: s.id == ^story.id) do
+          {:ok, story}
+        else
+          RemoteMedia.delete(path)
+          :exists
+        end
       end)
     else
+      {:error, _} = error -> error
       _ -> :skip
+    end
+  end
+
+  defp download(%{path: media_url, mime: mime}, %Profile{id: profile_id}) do
+    case RemoteMedia.fetch(media_url, mime, profile_id) do
+      {:ok, path} -> {:ok, path}
+      {:error, reason} -> if HTTP.transient_error?(reason), do: {:error, reason}, else: :skip
     end
   end
 
@@ -225,7 +240,7 @@ defmodule Angler.Stories.Federation do
              preload: [profile: p]
          ) do
       %Story{profile: %Profile{remote_url: owner}} = story ->
-        if Actor.same_actor?(owner, actor_url), do: Repo.delete!(story)
+        if Actor.same_actor?(owner, actor_url), do: Stories.purge_remote([story])
         :ok
 
       nil ->

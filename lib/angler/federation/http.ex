@@ -57,8 +57,36 @@ defmodule Angler.Federation.HTTP do
              | :bad_json
              | term()}
   def fetch(url, opts \\ []) when is_binary(url) do
-    accept = Keyword.get(opts, :accept, "application/activity+json")
     allowed = Keyword.get(opts, :content_types, @ap_content_types)
+
+    with {:ok, resp} <- get(url, Keyword.put_new(opts, :accept, "application/activity+json")),
+         :ok <- check_content_type(resp.headers, allowed),
+         {:ok, json} <- Jason.decode(resp.body) do
+      {:ok, json}
+    end
+  end
+
+  @doc """
+  Download a file (remote media) under the same guards as `fetch/2` and
+  return its raw bytes. The response Content-Type isn't checked: callers
+  sniff the bytes themselves. Not retried in-request (`retry: false` unless
+  given); callers retry through their job.
+
+  Options:
+    * `:max_bytes` — body cap (required); a larger body is `:too_large`
+    * `:accept` — Accept header (default `*/*`)
+  """
+  @spec download(String.t(), keyword()) :: {:ok, binary()} | {:error, term()}
+  def download(url, opts) when is_binary(url) do
+    _ = Keyword.fetch!(opts, :max_bytes)
+
+    with {:ok, resp} <-
+           get(url, opts |> Keyword.put_new(:accept, "*/*") |> Keyword.put_new(:retry, false)) do
+      {:ok, resp.body}
+    end
+  end
+
+  defp get(url, opts) do
     max_bytes = Keyword.get(opts, :max_bytes, @max_body_bytes)
 
     bearer =
@@ -67,15 +95,17 @@ defmodule Angler.Federation.HTTP do
         _ -> nil
       end
 
-    auth = %{signed_with: opts[:signed_with], bearer: bearer}
+    auth = %{
+      signed_with: opts[:signed_with],
+      bearer: bearer,
+      retry: Keyword.get(opts, :retry, :safe_transient)
+    }
 
     with {:ok, resp} <-
-           get_following_redirects(url, accept, auth, max_bytes, @max_redirects),
+           get_following_redirects(url, opts[:accept], auth, max_bytes, @max_redirects),
          :ok <- check_status(resp.status),
-         :ok <- check_content_type(resp.headers, allowed),
-         :ok <- check_size(resp.body, max_bytes),
-         {:ok, json} <- Jason.decode(resp.body) do
-      {:ok, json}
+         :ok <- check_size(resp.body, max_bytes) do
+      {:ok, resp}
     end
   end
 
@@ -149,6 +179,7 @@ defmodule Angler.Federation.HTTP do
                url: url,
                headers: maybe_sign_get(uri, accept, auth.signed_with) ++ bearer_header(uri, auth),
                redirect: false,
+               retry: auth.retry,
                receive_timeout: 10_000,
                connect_options: [timeout: 5_000],
                decode_body: false
