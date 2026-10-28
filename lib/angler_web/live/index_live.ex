@@ -8,6 +8,9 @@ defmodule AnglerWeb.IndexLive do
 
   Local/Network seed from `Timelines.public/2` and stay current by subscribing
   to the matching streaming topic; switching feeds re-subscribes.
+
+  Each feed is its own URL (`/`, `/network`, `/trending`, the live action),
+  so tabs patch the address bar and can be linked to directly.
   """
   use AnglerWeb, :live_view
 
@@ -22,16 +25,15 @@ defmodule AnglerWeb.IndexLive do
 
   @feed_limit 30
 
+  # {feed, label, path}
   @feeds [
-    {:local, "Local", "public:local"},
-    {:network, "Known Network", "public"},
-    {:trending, "Trending", nil}
+    {:local, "Local", "/"},
+    {:network, "Known Network", "/network"},
+    {:trending, "Trending", "/trending"}
   ]
 
   @impl true
   def mount(_params, _session, socket) do
-    {socket, rendered} = load_feed(socket, :local, connected?(socket))
-
     {:ok,
      socket
      |> assign(:page_title, Instance.title())
@@ -39,12 +41,15 @@ defmodule AnglerWeb.IndexLive do
      |> assign(:instance, instance_meta())
      |> assign(:registration, registration_state())
      |> assign(:feeds, @feeds)
-     |> stream(:posts, rendered, dom_id: &dom_id/1)}
+     |> assign(:feed, nil)
+     |> assign(:feed_topic, nil)
+     |> stream(:posts, [], dom_id: &dom_id/1)}
   end
 
+  # The feed follows the URL: first load, tab patches, and back/forward.
   @impl true
-  def handle_event("switch_feed", %{"feed" => feed}, socket) do
-    feed = String.to_existing_atom(feed)
+  def handle_params(_params, _uri, socket) do
+    feed = socket.assigns.live_action
 
     if feed == socket.assigns.feed do
       {:noreply, socket}
@@ -55,6 +60,8 @@ defmodule AnglerWeb.IndexLive do
       {:noreply, stream(socket, :posts, rendered, reset: true, dom_id: &dom_id/1)}
     end
   end
+
+  @impl true
 
   def handle_event("favourite", %{"id" => id}, socket), do: react(socket, id, :favourite)
   def handle_event("reblog", %{"id" => id}, socket), do: react(socket, id, :reblog)
@@ -197,11 +204,12 @@ defmodule AnglerWeb.IndexLive do
 
       <section class="mt-8 space-y-3">
         <div role="tablist" class="tabs tabs-bordered">
-          <button
-            :for={{key, label, _topic} <- @feeds}
+          <.link
+            :for={{key, label, path} <- @feeds}
+            id={"feed-tab-#{key}"}
+            patch={path}
             role="tab"
-            phx-click="switch_feed"
-            phx-value-feed={key}
+            aria-selected={to_string(@feed == key)}
             class={["tab", @feed == key && "tab-active font-semibold"]}
           >
             {label}
@@ -209,7 +217,7 @@ defmodule AnglerWeb.IndexLive do
               :if={key in [:local, :network] && @feed == key}
               class="ml-2 inline-block size-2 rounded-full bg-success motion-safe:animate-pulse"
             />
-          </button>
+          </.link>
         </div>
 
         <div id="feed" phx-update="stream" class="space-y-3">

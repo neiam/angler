@@ -12,10 +12,21 @@ defmodule AnglerWeb.WebPagesTest do
     assert html =~ "Known Network"
     assert html =~ "Trending"
 
-    # Switching feeds doesn't crash and updates the empty-state label.
-    assert lv |> render_click("switch_feed", %{"feed" => "network"}) =~ "federated posts"
-    assert lv |> render_click("switch_feed", %{"feed" => "trending"}) =~ "trending"
-    assert lv |> render_click("switch_feed", %{"feed" => "local"}) =~ "local posts"
+    # Tabs patch the URL, and each feed's empty-state label follows.
+    assert lv |> element("#feed-tab-network") |> render_click() =~ "federated posts"
+    assert_patch(lv, ~p"/network")
+    assert lv |> element("#feed-tab-trending") |> render_click() =~ "trending"
+    assert_patch(lv, ~p"/trending")
+    assert lv |> element("#feed-tab-local") |> render_click() =~ "local posts"
+    assert_patch(lv, ~p"/")
+  end
+
+  test "feeds are deep-linkable", %{conn: conn} do
+    {:ok, lv, _} = live(conn, ~p"/network")
+    assert has_element?(lv, "#feed-tab-network.tab-active")
+
+    {:ok, lv, _} = live(conn, ~p"/trending")
+    assert has_element?(lv, "#feed-tab-trending.tab-active")
   end
 
   test "index links to about + features", %{conn: conn} do

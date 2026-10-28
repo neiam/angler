@@ -80,7 +80,9 @@ defmodule AnglerWeb.Router do
     pipe_through :browser
 
     live_session :public, on_mount: {AnglerWeb.LiveAuth, :mount_current_user} do
-      live "/", IndexLive
+      live "/", IndexLive, :local
+      live "/network", IndexLive, :network
+      live "/trending", IndexLive, :trending
       live "/about", AboutLive
       live "/site/terms", SitePageLive, :terms
       live "/site/privacy", SitePageLive, :privacy
