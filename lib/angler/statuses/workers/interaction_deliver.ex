@@ -162,6 +162,9 @@ defmodule Angler.Statuses.Workers.InteractionDeliver do
         log(:error, activity_id, activity_type, actor_url, inbox_url, body, "remote #{code}")
         {:error, "remote #{code}"}
 
+      {:error, :host_unavailable} ->
+        {:cancel, :host_unavailable}
+
       {:error, reason} ->
         log(:error, activity_id, activity_type, actor_url, inbox_url, body, inspect(reason))
         {:error, reason}

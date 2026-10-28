@@ -62,10 +62,20 @@ defmodule Angler.Quotes.Workers.QuoteDeliver do
 
     {status, error, ret} =
       case result do
-        {:ok, %{status: code}} when code in 200..299 -> {:delivered, nil, :ok}
-        {:ok, %{status: code}} when code in 400..499 -> {:rejected, "remote #{code}", :ok}
-        {:ok, %{status: code}} -> {:error, "remote #{code}", {:error, "remote #{code}"}}
-        {:error, reason} -> {:error, inspect(reason), {:error, reason}}
+        {:ok, %{status: code}} when code in 200..299 ->
+          {:delivered, nil, :ok}
+
+        {:ok, %{status: code}} when code in 400..499 ->
+          {:rejected, "remote #{code}", :ok}
+
+        {:ok, %{status: code}} ->
+          {:error, "remote #{code}", {:error, "remote #{code}"}}
+
+        {:error, :host_unavailable} ->
+          {:rejected, "host unavailable", {:cancel, :host_unavailable}}
+
+        {:error, reason} ->
+          {:error, inspect(reason), {:error, reason}}
       end
 
     Activity.changeset(%{

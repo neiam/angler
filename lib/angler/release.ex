@@ -160,6 +160,38 @@ defmodule Angler.Release do
     end
   end
 
+  @doc """
+  Outbound delivery health (`Angler.Federation.DeliveryHosts`), as upstream's
+  `app:federation` delivery check and its `DeliveryHostService::reset`:
+
+      bin/angler rpc 'Angler.Release.delivery_hosts()'
+      bin/angler rpc 'Angler.Release.delivery_host_reset("example.com")'
+  """
+  def delivery_hosts do
+    now = DateTime.utc_now()
+
+    case Angler.Federation.DeliveryHosts.list_failing() do
+      [] ->
+        IO.puts("No hosts with delivery failures.")
+
+      hosts ->
+        Enum.each(hosts, fn i ->
+          state =
+            if (i.delivery_timeout and i.delivery_next_after) &&
+                 DateTime.after?(i.delivery_next_after, now),
+               do: "skipped until #{DateTime.to_iso8601(i.delivery_next_after)}",
+               else: "retrying"
+
+          IO.puts("#{i.domain}\t#{i.delivery_failures} failures\t#{state}")
+        end)
+    end
+  end
+
+  def delivery_host_reset(domain) when is_binary(domain) do
+    :ok = Angler.Federation.DeliveryHosts.reset(domain)
+    IO.puts("Cleared delivery failures for #{domain}.")
+  end
+
   defp relay_resolve(id) when is_integer(id), do: Angler.Federation.Relays.get(id)
 
   defp relay_resolve(str) when is_binary(str) do

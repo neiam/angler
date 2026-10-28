@@ -33,6 +33,11 @@ defmodule Angler.Federation.Instance do
     field :last_fetched_at, :utc_datetime_usec
     field :unreachable_since, :utc_datetime_usec
 
+    # Outbound delivery health, managed by `Angler.Federation.DeliveryHosts`.
+    field :delivery_failures, :integer, default: 0
+    field :delivery_timeout, :boolean, default: false
+    field :delivery_next_after, :utc_datetime_usec
+
     timestamps(type: :utc_datetime_usec)
   end
 

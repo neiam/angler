@@ -253,6 +253,9 @@ defmodule Angler.Federation.Workers.FollowDeliver do
 
         {:error, "remote #{status}"}
 
+      {:error, :host_unavailable} ->
+        {:cancel, :host_unavailable}
+
       {:error, reason} ->
         log_outbound(
           :error,

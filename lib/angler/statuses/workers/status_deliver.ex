@@ -117,6 +117,9 @@ defmodule Angler.Statuses.Workers.StatusDeliver do
         log(:error, activity["id"], actor_url, inbox_url, body, "remote #{code}")
         {:error, "remote #{code}"}
 
+      {:error, :host_unavailable} ->
+        {:cancel, :host_unavailable}
+
       {:error, reason} ->
         log(:error, activity["id"], actor_url, inbox_url, body, inspect(reason))
         {:error, reason}
