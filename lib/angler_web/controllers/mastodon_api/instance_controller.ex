@@ -36,7 +36,7 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
         Application.get_env(:angler, :instance_banner_url) || base <> "/images/banner.jpg",
       "languages" => ["en"],
       "registrations" => Instance.open_registration?(),
-      "approval_required" => Instance.approval_required?(),
+      "approval_required" => approval_required?(),
       "invites_enabled" => false,
       "contact_account" => if(contact, do: Account.render(contact), else: nil),
       "rules" => render_rules(Instance.rules()),
@@ -86,7 +86,7 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
       },
       "registrations" => %{
         "enabled" => Instance.open_registration?(),
-        "approval_required" => Instance.approval_required?(),
+        "approval_required" => approval_required?(),
         "message" => nil,
         "url" => nil
       },
@@ -101,6 +101,11 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
   def peers(conn, _params), do: json(conn, [])
 
   ## Helpers
+
+  # Upstream reports curated registration as `approval_required`; Angler's
+  # own pending-approval mode means the same thing to a client.
+  defp approval_required?,
+    do: Instance.approval_required?() or Instance.curated_registration_enabled?()
 
   defp configuration_block do
     %{
@@ -130,7 +135,7 @@ defmodule AnglerWeb.MastodonAPI.InstanceController do
       "version" => Angler.Federation.Nodeinfo.pixelfed_compat(),
       "oauth" => true,
       "signup" => %{
-        "curated" => false,
+        "curated" => Instance.curated_registration_enabled?(),
         "mobile_registration" =>
           Instance.open_registration?() and
             Application.get_env(:angler, :in_app_registration_enabled, false) == true

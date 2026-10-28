@@ -156,6 +156,35 @@ defmodule Angler.Instance do
     Application.get_env(:angler, :registration_approval_required, false) == true
   end
 
+  @doc """
+  Whether curated registration is switched on (upstream
+  `instance.curated_registration.enabled`). This is what the instance API
+  reports as `approval_required`.
+  """
+  @spec curated_registration_enabled?() :: boolean()
+  def curated_registration_enabled?, do: curated_config(:enabled, false) == true
+
+  @doc """
+  Whether the curated application form is open right now: switched on, and
+  either registration is closed or the operator allows it alongside open
+  registration (upstream `state.only_enabled_on_closed_reg`, default true).
+  """
+  @spec curated_registration?() :: boolean()
+  def curated_registration? do
+    curated_registration_enabled?() and
+      (not open_registration?() or curated_config(:only_enabled_on_closed_reg, true) != true)
+  end
+
+  @doc "A curated-registration setting (`config :angler, :curated_registration`)."
+  @spec curated_config(atom(), term()) :: term()
+  def curated_config(key, default) do
+    Keyword.get(Application.get_env(:angler, :curated_registration, []), key, default)
+  end
+
+  @doc "Minimum age to register (upstream `pixelfed.min_registration_age`)."
+  @spec min_registration_age() :: pos_integer()
+  def min_registration_age, do: Application.get_env(:angler, :min_registration_age, 16)
+
   defp host_from_endpoint do
     AnglerWeb.Endpoint.url() |> URI.parse() |> Map.get(:host) || "localhost"
   end

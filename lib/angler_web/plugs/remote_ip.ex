@@ -33,6 +33,27 @@ defmodule AnglerWeb.Plugs.RemoteIp do
   end
 
   @doc """
+  The client address behind a connected LiveView socket. The socket's peer
+  is the ingress proxy, so this resolves it the same way `call/2` does.
+  Only valid during `mount/3`, where connect info is available.
+  """
+  @spec from_socket(Phoenix.LiveView.Socket.t()) :: :inet.ip_address() | nil
+  def from_socket(socket) do
+    peer =
+      case Phoenix.LiveView.get_connect_info(socket, :peer_data) do
+        %{address: address} -> address
+        _ -> nil
+      end
+
+    forwarded_for =
+      for {"x-forwarded-for", value} <-
+            Phoenix.LiveView.get_connect_info(socket, :x_headers) || [],
+          do: value
+
+    from(peer, forwarded_for)
+  end
+
+  @doc """
   The client address for a request from `peer_ip` carrying the given
   `X-Forwarded-For` header values. Returns `peer_ip` unless it is a
   trusted proxy and the header names an untrusted address.

@@ -405,6 +405,31 @@ defmodule Angler.Accounts do
     end
   end
 
+  @doc """
+  Create an active local user + profile from an already-hashed password —
+  how an approved curated-registration application becomes an account
+  (upstream `AdminCuratedRegisterController::apiHandleApprove`). The email
+  counts as verified, since the applicant confirmed it.
+  """
+  @spec register_prehashed(map(), String.t()) ::
+          {:ok, %{user: User.t(), profile: Profile.t()}} | {:error, Ecto.Changeset.t()}
+  def register_prehashed(attrs, password_hash) when is_binary(password_hash) do
+    Repo.transaction(fn ->
+      with {:ok, profile} <-
+             Profiles.create_profile(%{username: attrs[:username], name: attrs[:name]}),
+           {:ok, user} <-
+             %User{password_hash: password_hash}
+             |> User.prehashed_registration_changeset(
+               Map.merge(attrs, %{profile_id: profile.id, email_verified_at: DateTime.utc_now()})
+             )
+             |> Repo.insert() do
+        %{user: user, profile: profile}
+      else
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
   defp do_register(attrs, approved?) do
     Repo.transaction(fn ->
       profile_attrs = %{
