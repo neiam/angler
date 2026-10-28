@@ -7,6 +7,10 @@ defmodule Angler.Federation.HTTP do
   * Resolved host must not be in a private, loopback, link-local, CGNAT,
     multicast or reserved range — blocks SSRF into private infrastructure.
     Redirects are followed by hand so every hop is re-checked.
+  * The connection goes to the address that was checked
+    (`Angler.Federation.HTTP.PinnedAdapter`), not to a second DNS answer, so
+    DNS rebinding can't slip past the check. Host header, SNI and
+    certificate verification still use the hostname.
   * Host must not be in the banned-domain set
   * Response Content-Type must be in the allowlist (default: AP / JSON-LD)
   * Body capped at 1 MiB
@@ -16,6 +20,7 @@ defmodule Angler.Federation.HTTP do
   """
 
   alias Angler.Federation.Bans
+  alias Angler.Federation.HTTP.PinnedAdapter
 
   @ap_content_types ~w(
     application/activity+json
@@ -53,7 +58,8 @@ defmodule Angler.Federation.HTTP do
     allowed = Keyword.get(opts, :content_types, @ap_content_types)
     max_bytes = Keyword.get(opts, :max_bytes, @max_body_bytes)
 
-    with {:ok, resp} <- get_following_redirects(url, accept, opts[:signed_with], @max_redirects),
+    with {:ok, resp} <-
+           get_following_redirects(url, accept, opts[:signed_with], max_bytes, @max_redirects),
          :ok <- check_status(resp.status),
          :ok <- check_content_type(resp.headers, allowed),
          :ok <- check_size(resp.body, max_bytes),
@@ -70,11 +76,10 @@ defmodule Angler.Federation.HTTP do
   """
   @spec deliver(keyword()) :: {:ok, Req.Response.t()} | {:error, term()}
   def deliver(req_opts) when is_list(req_opts) do
-    with {:ok, _uri} <- check_url(Keyword.fetch!(req_opts, :url)) do
+    with {:ok, uri, ip} <- check_url(Keyword.fetch!(req_opts, :url)) do
       req_opts
-      |> Keyword.merge(redirect: false)
-      |> Keyword.merge(req_overrides())
-      |> Req.post()
+      |> Keyword.merge(method: :post, redirect: false)
+      |> request(uri, ip)
     end
   end
 
@@ -92,24 +97,28 @@ defmodule Angler.Federation.HTTP do
 
   ## Internals
 
-  defp get_following_redirects(url, accept, signed_with, hops_left) do
-    with {:ok, uri} <- check_url(url),
+  defp get_following_redirects(url, accept, signed_with, max_bytes, hops_left) do
+    with {:ok, uri, ip} <- check_url(url),
          {:ok, resp} <-
-           [
-             url: url,
-             headers: maybe_sign_get(uri, accept, signed_with),
-             redirect: false,
-             receive_timeout: 10_000,
-             connect_options: [timeout: 5_000],
-             decode_body: false
-           ]
-           |> Keyword.merge(req_overrides())
-           |> Req.get() do
+           request(
+             [
+               method: :get,
+               url: url,
+               headers: maybe_sign_get(uri, accept, signed_with),
+               redirect: false,
+               receive_timeout: 10_000,
+               connect_options: [timeout: 5_000],
+               decode_body: false
+             ],
+             uri,
+             ip,
+             max_bytes
+           ) do
       case {resp.status, header(resp.headers, "location")} do
         {status, location} when status in [301, 302, 303, 307, 308] and location != nil ->
           if hops_left > 0 do
             next = uri |> URI.merge(location |> List.wrap() |> List.first()) |> URI.to_string()
-            get_following_redirects(next, accept, signed_with, hops_left - 1)
+            get_following_redirects(next, accept, signed_with, max_bytes, hops_left - 1)
           else
             {:error, :too_many_redirects}
           end
@@ -120,12 +129,31 @@ defmodule Angler.Federation.HTTP do
     end
   end
 
+  # `ip` is nil only when the address guard is off (test env, no resolver
+  # injected); the request then goes through Req's default adapter.
+  defp request(req_opts, uri, ip, max_bytes \\ @max_body_bytes)
+
+  defp request(req_opts, _uri, nil, _max_bytes) do
+    req_opts |> Keyword.merge(req_overrides()) |> Req.request()
+  end
+
+  defp request(req_opts, uri, ip, max_bytes) do
+    # A `:plug` in the overrides replaces the adapter, so Req.Test stubs win.
+    req_opts
+    |> Keyword.put(:adapter, PinnedAdapter)
+    |> Keyword.merge(req_overrides())
+    |> Req.new()
+    |> Req.Request.put_private(:angler_pin, {ip, uri.host})
+    |> Req.Request.put_private(:angler_max_body_bytes, max_bytes)
+    |> Req.request()
+  end
+
   defp check_url(url) do
     with {:ok, %URI{scheme: scheme, host: host} = uri} <- parse_uri(url),
          :ok <- check_scheme(scheme),
          :ok <- check_banned(host),
-         :ok <- check_resolved_host(host) do
-      {:ok, uri}
+         {:ok, ip} <- check_resolved_host(host) do
+      {:ok, uri, ip}
     end
   end
 
@@ -148,37 +176,40 @@ defmodule Angler.Federation.HTTP do
     if Bans.banned?(host), do: {:error, :banned_domain}, else: :ok
   end
 
+  # Returns the vetted address to connect to. The test env skips the guard
+  # unless a resolver is injected (`config :angler, Angler.Federation.HTTP,
+  # resolver: fn charlist_host, :inet | :inet6 -> ... end`, same contract as
+  # `:inet.getaddrs/2`).
   defp check_resolved_host(host) do
+    case Application.get_env(:angler, __MODULE__, [])[:resolver] do
+      nil -> if test_env?(), do: {:ok, nil}, else: resolve_and_check(host, &:inet.getaddrs/2)
+      resolver -> resolve_and_check(host, resolver)
+    end
+  end
+
+  # IP literals skip DNS. Every resolved address must be public; the first
+  # one is what we connect to.
+  defp resolve_and_check(host, resolver) do
+    host = String.to_charlist(host)
+
+    addrs =
+      case :inet.parse_address(host) do
+        {:ok, addr} ->
+          [addr]
+
+        _ ->
+          with {:error, _} <- resolver.(host, :inet),
+               {:error, _} <- resolver.(host, :inet6) do
+            []
+          else
+            {:ok, addrs} -> addrs
+          end
+      end
+
     cond do
-      test_env?() -> :ok
-      private_literal?(host) -> {:error, :private_address}
-      true -> resolve_and_check(host)
-    end
-  end
-
-  # If the host string itself is a private/loopback IP literal, reject without
-  # DNS lookup. Helpful for tests too.
-  defp private_literal?(host) do
-    case :inet.parse_address(String.to_charlist(host)) do
-      {:ok, addr} -> private_ip?(addr)
-      _ -> false
-    end
-  end
-
-  defp resolve_and_check(host) do
-    case :inet.getaddrs(String.to_charlist(host), :inet) do
-      {:ok, addrs} ->
-        if Enum.any?(addrs, &private_ip?/1), do: {:error, :private_address}, else: :ok
-
-      _ ->
-        # IPv4 lookup failed; try v6 before giving up.
-        case :inet.getaddrs(String.to_charlist(host), :inet6) do
-          {:ok, addrs} ->
-            if Enum.any?(addrs, &private_ip?/1), do: {:error, :private_address}, else: :ok
-
-          _ ->
-            {:error, :unresolvable}
-        end
+      addrs == [] -> {:error, :unresolvable}
+      Enum.any?(addrs, &private_ip?/1) -> {:error, :private_address}
+      true -> {:ok, hd(addrs)}
     end
   end
 
