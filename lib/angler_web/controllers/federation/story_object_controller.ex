@@ -4,7 +4,8 @@ defmodule AnglerWeb.Federation.StoryObjectController do
   published story. Authorized by a `bearcap_token` (capabilities-based,
   not OAuth) presented as `Authorization: Bearer <token>`.
 
-  Mirrors Pixelfed's `StoryController@getActivityObject`. Constraints:
+  Mirrors Pixelfed's `StoryController@getActivityObject` (the object is
+  `Angler.Stories.Outbound.object/2`, upstream StoryVerb). Constraints:
 
     * Stories must be enabled (`:stories_enabled`); else 404.
     * The bearer must match the story's `bearcap_token` (constant-time).
@@ -22,7 +23,7 @@ defmodule AnglerWeb.Federation.StoryObjectController do
   alias Angler.Profiles.Profile
   alias Angler.Repo
   alias Angler.Stories
-  alias Angler.Stories.Story
+  alias Angler.Stories.{Outbound, Story}
 
   @freshness_seconds 20 * 60
 
@@ -39,7 +40,7 @@ defmodule AnglerWeb.Federation.StoryObjectController do
              {:ok, sid} <- parse_id(id),
              %Story{} = story <- Repo.get_by(Story, id: sid, profile_id: author.id),
              :ok <- validate(story, conn) do
-          json(conn, render_ap(story, author))
+          json(conn, Outbound.object(story, author))
         else
           _ -> not_found(conn)
         end
@@ -73,38 +74,6 @@ defmodule AnglerWeb.Federation.StoryObjectController do
       _ -> false
     end
   end
-
-  defp render_ap(%Story{} = s, %Profile{} = author) do
-    actor_url = AnglerWeb.Endpoint.url() <> "/users/" <> author.username
-
-    %{
-      "@context" => "https://www.w3.org/ns/activitystreams",
-      "type" => "Story",
-      "id" =>
-        AnglerWeb.Endpoint.url() <>
-          "/stories/" <> author.username <> "/" <> Integer.to_string(s.id),
-      "actor" => actor_url,
-      "to" => [actor_url <> "/followers"],
-      "published" => DateTime.to_iso8601(s.inserted_at),
-      "expires" => DateTime.to_iso8601(s.expires_at),
-      "duration" => "PT#{div(s.duration_ms, 1000)}S",
-      "attachment" => [
-        %{
-          "type" => media_ap_type(s.type),
-          "mediaType" => s.mime,
-          "url" =>
-            Angler.Media.Storage.backend().url(
-              %Angler.Media.Asset{path_original: s.path},
-              :original
-            ) || s.path
-        }
-      ]
-    }
-  end
-
-  defp media_ap_type("photo"), do: "Image"
-  defp media_ap_type("video"), do: "Video"
-  defp media_ap_type(_), do: "Document"
 
   defp wants_json?(conn) do
     case get_req_header(conn, "accept") do

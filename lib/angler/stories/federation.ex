@@ -20,15 +20,13 @@ defmodule Angler.Stories.Federation do
 
   import Ecto.Query, warn: false
 
-  alias Angler.Conversations
   alias Angler.Federation.Actor
   alias Angler.Follows
   alias Angler.Follows.Follower
   alias Angler.Profiles
   alias Angler.Profiles.{BlocksMutes, DomainBlocks, Profile}
   alias Angler.Repo
-  alias Angler.Statuses
-  alias Angler.Statuses.{Mention, Status}
+  alias Angler.Statuses.Status
   alias Angler.Stories
   alias Angler.Stories.Story
   alias Angler.Stories.Workers.StoryFetch
@@ -199,7 +197,8 @@ defmodule Angler.Stories.Federation do
            Actor.resolve(actor_url),
          false <- shut_out?(story.profile_id, sender),
          true <- follows?(sender.id, story.profile_id) do
-      store_message(story, sender, kind, text, uri)
+      _ = Stories.record_message(story, sender, kind, text, local: false, uri: uri, url: uri)
+      :ok
     else
       _ -> :ok
     end
@@ -213,32 +212,6 @@ defmodule Angler.Stories.Federation do
   end
 
   defp open_to?(_, _), do: false
-
-  defp store_message(%Story{} = story, %Profile{} = sender, kind, text, uri) do
-    attrs = %{
-      profile_id: sender.id,
-      caption: text,
-      rendered: "",
-      visibility: :direct,
-      scope: "direct",
-      type: if(kind == :reply, do: "story:reply", else: "story:reaction"),
-      local: false,
-      uri: uri,
-      url: uri,
-      in_reply_to_profile_id: story.profile_id,
-      story_id: story.id
-    }
-
-    with {:ok, %Status{} = status} <- Statuses.create_remote(attrs) do
-      %{status_id: status.id, profile_id: story.profile_id}
-      |> Mention.changeset()
-      |> Repo.insert!(on_conflict: :nothing, conflict_target: [:status_id, :profile_id])
-
-      Conversations.record_story_message(status)
-    else
-      _ -> :ok
-    end
-  end
 
   ## Delete
 
