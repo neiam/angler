@@ -190,7 +190,81 @@ defmodule AnglerWeb.PixelfedAdmin.AdminController do
     end
   end
 
+  ## Posts and profiles
+
+  def posts_list(conn, params) do
+    %{statuses: rows, next_cursor: next} = AdminCtx.posts_list(params)
+
+    json(conn, %{"data" => StatusJSON.render_many(rows, nil), "meta" => page_meta(conn, 30, next)})
+  end
+
+  def posts_get(conn, params) do
+    case AdminCtx.get_post(params["id"]) do
+      nil -> not_found(conn)
+      {status, meta} -> json(conn, %{"data" => StatusJSON.render(status, nil), "meta" => meta})
+    end
+  end
+
+  def profiles_list(conn, params) do
+    %{profiles: rows, next_cursor: next} = AdminCtx.profiles_list(params)
+
+    json(conn, %{
+      "data" => Enum.map(rows, &render_admin_profile/1),
+      "meta" => page_meta(conn, 20, next)
+    })
+  end
+
+  def profiles_get(conn, params) do
+    case AdminCtx.get_profile(params["id"]) do
+      nil -> not_found(conn)
+      {profile, meta} -> json(conn, %{"data" => render_admin_profile(profile), "meta" => meta})
+    end
+  end
+
+  def profiles_moderate(conn, params) do
+    %{user: actor} = BearerAuth.current_scope(conn)
+
+    with {:ok, id} <- require_field(params, "id"),
+         {:ok, key} <- require_field(params, "key"),
+         {:ok, value} <- require_field(params, "value"),
+         {:ok, profile} <- AdminCtx.moderate_profile(actor, id, key, value) do
+      json(conn, %{"data" => render_admin_profile(profile)})
+    else
+      {:error, :missing_field} -> bad_request(conn, "Missing required field")
+      {:error, :invalid_key} -> bad_request(conn, "Invalid key")
+      {:error, :cannot_moderate_admin} -> bad_request(conn, "Cannot moderate admin accounts")
+      {:error, :not_found} -> not_found(conn)
+    end
+  end
+
+  # Laravel cursorPaginate's meta block.
+  defp page_meta(conn, per_page, next) do
+    %{
+      "path" => AnglerWeb.Endpoint.url() <> conn.request_path,
+      "per_page" => per_page,
+      "next_cursor" => next,
+      "prev_cursor" => nil
+    }
+  end
+
   ## Renderers
+
+  # upstream AdminProfile: the account plus domain, status and limits.
+  defp render_admin_profile(%Profile{} = p) do
+    p
+    |> AccountJSON.render()
+    |> Map.merge(%{
+      "domain" => p.domain,
+      "status" => p.status,
+      "limits" => %{
+        "exist" => p.cw or p.unlisted or p.no_autolink,
+        "autocw" => p.cw,
+        "unlisted" => p.unlisted,
+        "no_autolink" => p.no_autolink,
+        "banned" => p.status == "banned" or p.is_suspended
+      }
+    })
+  end
 
   defp render_admin_user(%User{} = user, %Profile{} = profile, opts \\ []) do
     base = %{

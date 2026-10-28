@@ -469,4 +469,125 @@ defmodule AnglerWeb.PixelfedAdmin.AdminControllerTest do
              )
     end
   end
+
+  describe "posts and profiles" do
+    test "posts/list filters, searches and pages; posts/get adds moderation meta",
+         %{conn: conn} = ctx do
+      %{profile: p} = register_user!()
+
+      posts =
+        for n <- 1..31 do
+          {:ok, s} = Statuses.create_local(p, %{"status" => "post #{n}"}, broadcast: false)
+          s
+        end
+
+      %{"data" => page1, "meta" => %{"next_cursor" => cursor, "per_page" => 30}} =
+        conn |> auth(ctx.bearer) |> get(~p"/api/admin/posts/list") |> json_response(200)
+
+      assert length(page1) == 30
+      assert hd(page1)["id"] == Integer.to_string(List.last(posts).id)
+
+      %{"data" => [last], "meta" => %{"next_cursor" => nil}} =
+        conn
+        |> auth(ctx.bearer)
+        |> get(~p"/api/admin/posts/list", %{"cursor" => cursor})
+        |> json_response(200)
+
+      assert last["id"] == Integer.to_string(hd(posts).id)
+
+      assert %{"data" => [%{"content" => content}]} =
+               conn
+               |> auth(ctx.bearer)
+               |> get(~p"/api/admin/posts/list", %{"q" => "post 17"})
+               |> json_response(200)
+
+      assert content =~ "post 17"
+
+      assert %{"data" => []} =
+               conn
+               |> auth(ctx.bearer)
+               |> get(~p"/api/admin/posts/list", %{"q" => "@nobody"})
+               |> json_response(200)
+
+      assert %{"meta" => meta} =
+               conn
+               |> auth(ctx.bearer)
+               |> get(~p"/api/admin/posts/get", %{"id" => Integer.to_string(hd(posts).id)})
+               |> json_response(200)
+
+      assert meta["is_local"] == true
+      assert meta["report_count"] == 0
+      assert meta["profile"]["username"] == p.username
+    end
+
+    test "profiles/list, get and moderate", %{conn: conn} = ctx do
+      %{profile: p} = register_user!()
+
+      %{"data" => rows} =
+        conn
+        |> auth(ctx.bearer)
+        |> get(~p"/api/admin/profiles/list", %{"q" => "@" <> p.username, "filter" => "local"})
+        |> json_response(200)
+
+      assert [%{"username" => username, "limits" => %{"exist" => false}}] = rows
+      assert username == p.username
+
+      assert %{"data" => %{"limits" => %{"unlisted" => true, "exist" => true}}} =
+               conn
+               |> auth(ctx.bearer)
+               |> post(~p"/api/admin/profiles/moderate", %{
+                 "id" => Integer.to_string(p.id),
+                 "key" => "unlisted",
+                 "value" => "true"
+               })
+               |> json_response(200)
+
+      assert Repo.get(Angler.Profiles.Profile, p.id).unlisted
+
+      assert %{"meta" => %{"open_report_count" => 0, "is_admin" => false}} =
+               conn
+               |> auth(ctx.bearer)
+               |> get(~p"/api/admin/profiles/get", %{"id" => Integer.to_string(p.id)})
+               |> json_response(200)
+
+      # Admins can't be moderated; unknown keys are refused.
+      assert conn
+             |> auth(ctx.bearer)
+             |> post(~p"/api/admin/profiles/moderate", %{
+               "id" => Integer.to_string(ctx.profile.id),
+               "key" => "cw",
+               "value" => "true"
+             })
+             |> json_response(400)
+
+      assert conn
+             |> auth(ctx.bearer)
+             |> post(~p"/api/admin/profiles/moderate", %{
+               "id" => Integer.to_string(p.id),
+               "key" => "is_admin",
+               "value" => "true"
+             })
+             |> json_response(400)
+    end
+
+    test "profiles/list sorts by followers with a stable cursor", %{conn: conn} = ctx do
+      for _ <- 1..21, do: register_user!()
+
+      %{"data" => page1, "meta" => %{"next_cursor" => cursor}} =
+        conn
+        |> auth(ctx.bearer)
+        |> get(~p"/api/admin/profiles/list", %{"sort_by" => "followers_count"})
+        |> json_response(200)
+
+      %{"data" => page2} =
+        conn
+        |> auth(ctx.bearer)
+        |> get(~p"/api/admin/profiles/list", %{"sort_by" => "followers_count", "cursor" => cursor})
+        |> json_response(200)
+
+      ids = Enum.map(page1 ++ page2, & &1["id"])
+      assert length(ids) == 22
+      assert ids == Enum.uniq(ids)
+    end
+  end
 end

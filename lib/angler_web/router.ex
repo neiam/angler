@@ -832,6 +832,11 @@ defmodule AnglerWeb.Router do
 
     get "/instances/list", AdminController, :instances_list
     get "/instances/get", AdminController, :instances_get
+
+    get "/posts/list", AdminController, :posts_list
+    get "/posts/get", AdminController, :posts_get
+    get "/profiles/list", AdminController, :profiles_list
+    get "/profiles/get", AdminController, :profiles_get
   end
 
   scope "/api/admin", AnglerWeb.PixelfedAdmin do
@@ -845,6 +850,7 @@ defmodule AnglerWeb.Router do
     post "/instances/moderate", AdminController, :instances_moderate
     post "/instances/refresh-stats", AdminController, :instances_refresh_stats
     post "/moderate/post/:id", AdminController, :moderate_post
+    post "/profiles/moderate", AdminController, :profiles_moderate
   end
 
   scope "/", AnglerWeb do

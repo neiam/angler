@@ -545,6 +545,276 @@ defmodule Angler.Admin.Pixelfed do
 
   ## Post moderation
 
+  ## Posts and profiles (upstream AdminApiController getPosts / getPost /
+  ## getProfiles / getProfile / moderateProfile). Paged with an opaque cursor,
+  ## as upstream's cursorPaginate: 30 posts or 20 profiles a page.
+
+  @post_filters ~w(all local remote nsfw unlisted private)
+
+  @doc "A page of statuses for the admin post browser."
+  @spec posts_list(map()) :: %{statuses: [Status.t()], next_cursor: String.t() | nil}
+  def posts_list(params) do
+    sort = if params["sort"] == "asc", do: :asc, else: :desc
+    filter = if params["filter"] in @post_filters, do: params["filter"], else: "local"
+    q = String.trim(to_string(params["q"] || ""))
+
+    base =
+      from(s in Status, where: is_nil(s.reblog_of_id) and is_nil(s.deleted_at))
+      |> filter_posts(filter)
+      |> filter_posts_profile(params["profile_id"])
+
+    case search_posts(base, q) do
+      nil ->
+        %{statuses: [], next_cursor: nil}
+
+      query ->
+        rows =
+          query
+          |> after_cursor(params["cursor"], sort)
+          |> order_by([s], [{^sort, s.id}])
+          |> limit(31)
+          |> preload([:profile, :mentions, :media_attachments, status_hashtags: :hashtag])
+          |> Repo.all()
+
+        page(rows, 30, :statuses)
+    end
+  end
+
+  defp filter_posts(q, "local"), do: where(q, [s], s.local == true)
+  defp filter_posts(q, "remote"), do: where(q, [s], s.local == false)
+  defp filter_posts(q, "nsfw"), do: where(q, [s], s.is_nsfw == true)
+  defp filter_posts(q, "unlisted"), do: where(q, [s], s.visibility == :unlisted)
+  defp filter_posts(q, "private"), do: where(q, [s], s.visibility == :private)
+  defp filter_posts(q, _all), do: q
+
+  defp filter_posts_profile(q, id) do
+    case parse_id(id) do
+      {:ok, pid} -> where(q, [s], s.profile_id == ^pid)
+      _ -> q
+    end
+  end
+
+  # A number is a post id, `@name` a profile, anything else caption text.
+  # nil when `@name` matches nobody.
+  defp search_posts(q, ""), do: q
+
+  defp search_posts(q, "@" <> username) do
+    case Repo.get_by(Profile, username: username) do
+      %Profile{id: pid} -> where(q, [s], s.profile_id == ^pid)
+      nil -> nil
+    end
+  end
+
+  defp search_posts(q, text) do
+    case Integer.parse(text) do
+      {id, ""} -> where(q, [s], s.id == ^id)
+      _ -> where(q, [s], ilike(s.caption, ^("%" <> escape_like(text) <> "%")))
+    end
+  end
+
+  defp after_cursor(q, cursor, sort) do
+    case decode_cursor(cursor) do
+      [id] when sort == :asc -> where(q, [s], s.id > ^id)
+      [id] -> where(q, [s], s.id < ^id)
+      _ -> q
+    end
+  end
+
+  defp page(rows, per_page, key) do
+    {items, more} = Enum.split(rows, per_page)
+    next = if more != [], do: encode_cursor(List.last(items)), else: nil
+    %{key => items, next_cursor: next}
+  end
+
+  @doc "The admin view of one status: the status plus moderation facts."
+  @spec get_post(term()) :: {Status.t(), map()} | nil
+  def get_post(id) do
+    with {:ok, sid} <- parse_id(id),
+         %Status{} = status <-
+           Status
+           |> Repo.get(sid)
+           |> Repo.preload([:profile, :mentions, :media_attachments, status_hashtags: :hashtag]) do
+      profile = status.profile
+
+      reports =
+        from(r in Report, where: r.object_type == "post" and r.object_id == ^status.id)
+
+      meta = %{
+        "is_local" => status.local,
+        "type" => status.type,
+        "scope" => status.scope,
+        "is_nsfw" => status.is_nsfw,
+        "report_count" => Repo.aggregate(reports, :count),
+        "open_report_count" =>
+          reports |> where([r], is_nil(r.resolved_at)) |> Repo.aggregate(:count),
+        "autospam" => false,
+        "profile" => %{
+          "id" => Integer.to_string(profile.id),
+          "username" => profile.username,
+          "is_local" => is_nil(profile.domain),
+          "user_id" => user_id_string(profile),
+          "is_admin" => admin_target?(profile),
+          "moderation" => %{
+            "unlisted" => profile.unlisted,
+            "cw" => profile.cw,
+            "no_autolink" => profile.no_autolink
+          }
+        }
+      }
+
+      {status, meta}
+    else
+      _ -> nil
+    end
+  end
+
+  @profile_sorts %{
+    "id" => :id,
+    "followers_count" => :followers_count,
+    "status_count" => :statuses_count
+  }
+
+  @doc "A page of profiles for the admin profile browser."
+  @spec profiles_list(map()) :: %{profiles: [Profile.t()], next_cursor: String.t() | nil}
+  def profiles_list(params) do
+    sort = if params["sort"] == "asc", do: :asc, else: :desc
+    field = Map.get(@profile_sorts, params["sort_by"], :id)
+    q = params["q"] |> to_string() |> String.trim() |> String.trim_leading("@")
+
+    base =
+      from(p in Profile, where: is_nil(p.status))
+      |> then(fn base ->
+        case params["filter"] do
+          "local" -> where(base, [p], is_nil(p.domain))
+          "remote" -> where(base, [p], not is_nil(p.domain))
+          _ -> base
+        end
+      end)
+      |> then(fn base ->
+        if q == "", do: base, else: where(base, [p], ilike(p.username, ^(escape_like(q) <> "%")))
+      end)
+
+    rows =
+      base
+      |> profile_cursor(params["cursor"], field, sort)
+      |> order_by([p], [{^sort, field(p, ^field)}, {^sort, p.id}])
+      |> limit(21)
+      |> Repo.all()
+
+    {items, more} = Enum.split(rows, 20)
+
+    next =
+      case {more, List.last(items)} do
+        {[_ | _], %Profile{} = last} -> encode_cursor(last, Map.get(last, field) || 0)
+        _ -> nil
+      end
+
+    %{profiles: items, next_cursor: next}
+  end
+
+  defp profile_cursor(q, cursor, :id, sort) do
+    case decode_cursor(cursor) do
+      [id] when sort == :asc -> where(q, [p], p.id > ^id)
+      [id] -> where(q, [p], p.id < ^id)
+      _ -> q
+    end
+  end
+
+  defp profile_cursor(q, cursor, field, sort) do
+    case decode_cursor(cursor) do
+      [v, id] when sort == :asc ->
+        where(
+          q,
+          [p],
+          coalesce(field(p, ^field), 0) > ^v or
+            (coalesce(field(p, ^field), 0) == ^v and p.id > ^id)
+        )
+
+      [v, id] ->
+        where(
+          q,
+          [p],
+          coalesce(field(p, ^field), 0) < ^v or
+            (coalesce(field(p, ^field), 0) == ^v and p.id < ^id)
+        )
+
+      _ ->
+        q
+    end
+  end
+
+  defp encode_cursor(%{id: id}), do: [id] |> Jason.encode!() |> Base.url_encode64(padding: false)
+
+  defp encode_cursor(%{id: id}, value),
+    do: [value, id] |> Jason.encode!() |> Base.url_encode64(padding: false)
+
+  defp decode_cursor(c) when is_binary(c) do
+    with {:ok, json} <- Base.url_decode64(c, padding: false),
+         {:ok, list} when is_list(list) <- Jason.decode(json),
+         true <- Enum.all?(list, &is_integer/1) do
+      list
+    else
+      _ -> nil
+    end
+  end
+
+  defp decode_cursor(_), do: nil
+
+  @doc "The admin view of one profile: the profile plus report counts."
+  @spec get_profile(term()) :: {Profile.t(), map()} | nil
+  def get_profile(id) do
+    with {:ok, pid} <- parse_id(id),
+         %Profile{} = profile <- Repo.get(Profile, pid) do
+      reports = from(r in Report, where: r.reported_profile_id == ^pid)
+
+      {profile,
+       %{
+         "report_count" => Repo.aggregate(reports, :count),
+         "open_report_count" =>
+           reports |> where([r], is_nil(r.resolved_at)) |> Repo.aggregate(:count),
+         "autospam_count" => 0,
+         "is_admin" => admin_target?(profile)
+       }}
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Set one of a profile's moderation flags (`unlisted`, `cw`, `no_autolink`).
+  Admin accounts can't be moderated.
+  """
+  @spec moderate_profile(User.t(), term(), term(), term()) ::
+          {:ok, Profile.t()} | {:error, :not_found | :invalid_key | :cannot_moderate_admin}
+  def moderate_profile(%User{} = actor, id, key, value)
+      when key in ["unlisted", "cw", "no_autolink"] do
+    with {:ok, pid} <- parse_id(id),
+         %Profile{} = profile <- Repo.get(Profile, pid),
+         false <- admin_target?(profile) && :admin do
+      value = coerce_bool(value, false)
+
+      updated =
+        profile
+        |> Ecto.Changeset.change([{String.to_existing_atom(key), value}])
+        |> Repo.update!()
+
+      log!(actor, "profile.#{key}", "profile", pid, %{"value" => value})
+      {:ok, updated}
+    else
+      :admin -> {:error, :cannot_moderate_admin}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  def moderate_profile(_actor, _id, _key, _value), do: {:error, :invalid_key}
+
+  defp user_id_string(%Profile{id: pid}) do
+    case Repo.one(from u in User, where: u.profile_id == ^pid, select: u.id) do
+      nil -> nil
+      uid -> Integer.to_string(uid)
+    end
+  end
+
   @spec moderate_post(User.t(), integer() | String.t(), String.t()) ::
           {:ok, Status.t()} | {:error, atom()}
   def moderate_post(%User{} = actor, id, action) do
