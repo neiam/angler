@@ -84,6 +84,30 @@ defmodule Angler.Conversations do
   def record(_), do: :ok
 
   @doc """
+  File a story reply or reaction (a `:direct` status mentioning only the
+  story's author). Only followers can send one, so it never sits in
+  requests (upstream DirectMessageService::storeStoryMessage).
+  """
+  @spec record_story_message(Status.t()) :: :ok
+  def record_story_message(%Status{visibility: :direct, profile_id: sender_id} = status) do
+    case mentioned_profile_ids(status.id) do
+      [author_id] when author_id != sender_id ->
+        conversation = find_or_create!([sender_id, author_id], sender_id)
+
+        {_, _} =
+          from(p in Participant,
+            where: p.conversation_id == ^conversation.id and p.state == "request"
+          )
+          |> Repo.update_all(set: [state: "active"])
+
+        record(status)
+
+      _ ->
+        record(status)
+    end
+  end
+
+  @doc """
   Find the conversation for exactly `member_ids`, or create it with each
   member's starting state. `creator_id` is who is starting it.
   """

@@ -35,6 +35,8 @@ defmodule Angler.Federation.HTTP do
     * `:content_types` — list of allowed response content types (default AP set)
     * `:max_bytes` — body cap (default 1 MiB)
     * `:signed_with` — `{key_id, private_key_pem}` to sign the GET request
+    * `:bearer` — a token sent as `Authorization: Bearer`, only ever to the
+      URL's own host (dropped if a redirect leaves it)
   """
   @spec fetch(String.t(), keyword()) ::
           {:ok, map()}
@@ -53,7 +55,15 @@ defmodule Angler.Federation.HTTP do
     allowed = Keyword.get(opts, :content_types, @ap_content_types)
     max_bytes = Keyword.get(opts, :max_bytes, @max_body_bytes)
 
-    with {:ok, resp} <- get_following_redirects(url, accept, opts[:signed_with], @max_redirects),
+    bearer =
+      case {opts[:bearer], URI.parse(url)} do
+        {token, %URI{host: host}} when is_binary(token) and is_binary(host) -> {host, token}
+        _ -> nil
+      end
+
+    auth = %{signed_with: opts[:signed_with], bearer: bearer}
+
+    with {:ok, resp} <- get_following_redirects(url, accept, auth, @max_redirects),
          :ok <- check_status(resp.status),
          :ok <- check_content_type(resp.headers, allowed),
          :ok <- check_size(resp.body, max_bytes),
@@ -92,12 +102,12 @@ defmodule Angler.Federation.HTTP do
 
   ## Internals
 
-  defp get_following_redirects(url, accept, signed_with, hops_left) do
+  defp get_following_redirects(url, accept, auth, hops_left) do
     with {:ok, uri} <- check_url(url),
          {:ok, resp} <-
            [
              url: url,
-             headers: maybe_sign_get(uri, accept, signed_with),
+             headers: maybe_sign_get(uri, accept, auth.signed_with) ++ bearer_header(uri, auth),
              redirect: false,
              receive_timeout: 10_000,
              connect_options: [timeout: 5_000],
@@ -109,7 +119,7 @@ defmodule Angler.Federation.HTTP do
         {status, location} when status in [301, 302, 303, 307, 308] and location != nil ->
           if hops_left > 0 do
             next = uri |> URI.merge(location |> List.wrap() |> List.first()) |> URI.to_string()
-            get_following_redirects(next, accept, signed_with, hops_left - 1)
+            get_following_redirects(next, accept, auth, hops_left - 1)
           else
             {:error, :too_many_redirects}
           end
@@ -279,6 +289,11 @@ defmodule Angler.Federation.HTTP do
       v -> v
     end
   end
+
+  defp bearer_header(%URI{host: host}, %{bearer: {host, token}}),
+    do: [{"authorization", "Bearer " <> token}]
+
+  defp bearer_header(_uri, _auth), do: []
 
   defp maybe_sign_get(_uri, accept, nil), do: [{"accept", accept}]
 

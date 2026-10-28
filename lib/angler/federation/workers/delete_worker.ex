@@ -6,8 +6,8 @@ defmodule Angler.Federation.Workers.DeleteWorker do
   because Delete floods can overwhelm the regular inbox queue. We follow the
   same pattern via `priority`/queue choice.
 
-  This slice supports `Delete Person` and `Delete Tombstone` (status purge).
-  Story delete will land with the stories grouping.
+  Supports `Delete Person`, `Delete Tombstone` (status purge) and `Delete
+  Story` (a mirrored remote story, `Angler.Stories.Federation`).
 
   See plans/federation/queues/delete_worker.md.
   """
@@ -22,6 +22,7 @@ defmodule Angler.Federation.Workers.DeleteWorker do
   alias Angler.Profiles
   alias Angler.Quotes
   alias Angler.Statuses
+  alias Angler.Stories
 
   @spec enqueue(map()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(activity) do
@@ -61,12 +62,9 @@ defmodule Angler.Federation.Workers.DeleteWorker do
     tombstone(object_id, actor)
   end
 
-  defp do_handle(%{"object" => %{"type" => "Story"}} = activity) do
-    Logger.info(
-      "Delete Story received but stories grouping not yet implemented: #{activity["id"]}"
-    )
-
-    :ok
+  defp do_handle(%{"actor" => actor, "object" => %{"type" => "Story", "id" => story_url}})
+       when is_binary(actor) and is_binary(story_url) do
+    Stories.Federation.handle_delete(story_url, actor)
   end
 
   defp do_handle(activity) do

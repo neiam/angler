@@ -606,7 +606,7 @@ defmodule Angler.Stories do
       "id" => Integer.to_string(s.id),
       "pid" => Integer.to_string(s.profile_id),
       "type" => s.type,
-      "src" => Storage.backend().url(struct_for_storage(s), :original) || s.path,
+      "src" => media_url(s),
       "duration" => div(s.duration_ms, 1000),
       "seen" => seen,
       "can_reply" => s.can_reply,
@@ -618,11 +618,46 @@ defmodule Angler.Stories do
     }
   end
 
+  @doc """
+  A story's media URL. Remote stories (`Angler.Stories.Federation`) are
+  hotlinked, so their `path` is already the URL.
+  """
+  @spec media_url(Story.t()) :: String.t()
+  def media_url(%Story{local: false, path: url}), do: url
+
   # Stories don't share the Asset schema; the storage backend's `url/2`
   # signature wants an Asset, so we synthesize a minimal one.
-  defp struct_for_storage(%Story{} = s) do
-    %Angler.Media.Asset{path_original: s.path}
+  def media_url(%Story{} = s),
+    do: Storage.backend().url(%Angler.Media.Asset{path_original: s.path}, :original) || s.path
+
+  @doc """
+  The v1.1 DM `{type, meta}` of a story reply or reaction status, or nil for
+  any other message (upstream DmMessage story:comment / story:react).
+  """
+  @spec message_meta(Statuses.Status.t()) :: {String.t(), map()} | nil
+  def message_meta(%Statuses.Status{type: type, story_id: sid} = status)
+      when type in ["story:reply", "story:reaction"] and is_integer(sid) do
+    with %Story{} = story <- Repo.get(Story, sid) |> Repo.preload(:profile),
+         %Profile{} = sender <- Repo.get(Profile, status.profile_id) do
+      {dm_type, key} =
+        if type == "story:reply",
+          do: {"story:comment", "caption"},
+          else: {"story:react", "reaction"}
+
+      {dm_type,
+       %{
+         "story_id" => Integer.to_string(story.id),
+         "story_username" => story.profile.username,
+         "story_actor_username" => sender.username,
+         "story_media_url" => media_url(story),
+         key => status.caption
+       }}
+    else
+      _ -> nil
+    end
   end
+
+  def message_meta(_), do: nil
 
   ## Internals
 

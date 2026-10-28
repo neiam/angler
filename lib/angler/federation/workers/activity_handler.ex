@@ -25,6 +25,7 @@ defmodule Angler.Federation.Workers.ActivityHandler do
   alias Angler.Quotes
   alias Angler.Reblogs
   alias Angler.Statuses
+  alias Angler.Stories
 
   @spec enqueue(map(), String.t(), integer() | nil) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(payload, actor_url, recipient_id) do
@@ -102,6 +103,22 @@ defmodule Angler.Federation.Workers.ActivityHandler do
 
   defp dispatch(%{"type" => "FeatureRequest"} = activity, actor_url) do
     FeaturedCollections.Federation.handle_feature_request(activity, actor_url)
+  end
+
+  defp dispatch(%{"type" => "Add", "object" => %{"type" => "Story"}} = activity, actor_url) do
+    Stories.Federation.handle_add(activity, actor_url)
+  end
+
+  defp dispatch(%{"type" => "View", "object" => %{"type" => "Story"}} = activity, actor_url) do
+    Stories.Federation.handle_view(activity, actor_url)
+  end
+
+  defp dispatch(%{"type" => "Story:Reaction"} = activity, actor_url) do
+    Stories.Federation.handle_interaction(activity, actor_url, :reaction)
+  end
+
+  defp dispatch(%{"type" => "Story:Reply"} = activity, actor_url) do
+    Stories.Federation.handle_interaction(activity, actor_url, :reply)
   end
 
   defp dispatch(%{"type" => "Like"} = activity, actor_url) do

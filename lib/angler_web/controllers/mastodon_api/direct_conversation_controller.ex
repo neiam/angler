@@ -27,6 +27,7 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationController do
   alias Angler.Repo
   alias Angler.Statuses
   alias Angler.Statuses.Status
+  alias Angler.Stories
   alias AnglerWeb.MastodonAPI.Account
   alias AnglerWeb.MastodonAPI.Media, as: MediaJSON
   alias AnglerWeb.Plugs.BearerAuth
@@ -388,16 +389,17 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationController do
     s = Repo.preload(s, [:media_attachments])
     media = s.media_attachments
     text = body_text(s)
+    {type, meta} = Stories.message_meta(s) || {message_type(media, text), nil}
 
     %{
       "id" => Integer.to_string(s.id),
       "conversation_id" => Integer.to_string(conversation_id),
       "sender_id" => Integer.to_string(s.profile_id),
       "is_author" => s.profile_id == viewer_id,
-      "type" => message_type(media, text),
+      "type" => type,
       "text" => if(text == "", do: nil, else: text),
       "media" => Enum.map(media, &MediaJSON.render/1),
-      "meta" => nil,
+      "meta" => meta,
       "sensitive" => s.is_nsfw,
       "in_reply_to_id" => s.in_reply_to_id && Integer.to_string(s.in_reply_to_id),
       "edited_at" => ts(s.edited_at),

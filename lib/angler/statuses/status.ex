@@ -48,6 +48,8 @@ defmodule Angler.Statuses.Status do
     field :scheduled_at, :utc_datetime_usec
     field :place_id, :id
     field :group_id, :id
+    # The story a story reply / reaction DM answers (`Angler.Stories.Federation`).
+    field :story_id, :integer
 
     has_many :mentions, Angler.Statuses.Mention
     has_many :status_hashtags, Angler.Statuses.StatusHashtag
@@ -64,7 +66,7 @@ defmodule Angler.Statuses.Status do
     language comments_disabled quote_policy
     reply_count reblogs_count likes_count
     edited_at deleted_at scheduled_at
-    place_id group_id
+    place_id group_id story_id
   )a
 
   @doc false
