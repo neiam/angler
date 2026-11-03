@@ -20,6 +20,7 @@ defmodule Angler.Trends do
   alias Angler.Statuses.{Status, StatusHashtag}
 
   @window_days 7
+  @media_types ~w(photo photo:album video video:album)
 
   @doc "Top trending hashtags by usage over the last #{@window_days} days."
   @spec tags(pos_integer()) :: [
@@ -45,17 +46,29 @@ defmodule Angler.Trends do
     )
   end
 
-  @doc "Top public statuses by engagement over the last #{@window_days} days."
-  @spec statuses(pos_integer()) :: [Status.t()]
-  def statuses(limit \\ 20) do
+  @doc """
+  Top public top-level statuses by engagement over the last #{@window_days}
+  days. `only_media: true` keeps photo and video posts.
+  """
+  @spec statuses(pos_integer(), keyword()) :: [Status.t()]
+  def statuses(limit \\ 20, opts \\ []) do
     cutoff = DateTime.add(DateTime.utc_now(), -@window_days * 86_400, :second)
 
-    Repo.all(
+    base =
       from s in Status,
         where:
           is_nil(s.deleted_at) and
             s.visibility == :public and
-            s.inserted_at >= ^cutoff,
+            s.inserted_at >= ^cutoff and
+            is_nil(s.in_reply_to_id) and is_nil(s.in_reply_to_uri)
+
+    base =
+      if opts[:only_media],
+        do: from(s in base, where: s.type in @media_types),
+        else: base
+
+    Repo.all(
+      from s in base,
         order_by: [desc: s.likes_count + s.reblogs_count, desc: s.id],
         limit: ^limit,
         preload: [:profile, mentions: :profile, status_hashtags: :hashtag, media_attachments: []]

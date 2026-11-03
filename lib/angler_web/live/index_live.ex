@@ -1,6 +1,7 @@
 defmodule AnglerWeb.IndexLive do
   @moduledoc """
   Public landing page: instance summary + stats, with a switchable live feed.
+  Every feed shows photo and video posts only, as upstream's do.
 
     * **Local** — local public posts (`public:local` stream)
     * **Known Network** — all public posts, local + federated (`public` stream)
@@ -77,7 +78,8 @@ defmodule AnglerWeb.IndexLive do
   def handle_info({:streaming, topic, "update", payload}, socket) do
     if topic == socket.assigns.feed_topic do
       case Jason.decode(payload) do
-        {:ok, status} ->
+        # Photo and video posts only, like the seeded feed.
+        {:ok, %{"media_attachments" => [_ | _]} = status} ->
           {:noreply,
            socket
            |> stream_insert(:posts, status, at: 0, dom_id: &dom_id/1)
@@ -124,16 +126,21 @@ defmodule AnglerWeb.IndexLive do
   end
 
   defp fetch(:local) do
-    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), local_only: true)
+    {posts, _} =
+      Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40),
+        local_only: true,
+        only_media: true
+      )
+
     {posts, "public:local"}
   end
 
   defp fetch(:network) do
-    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), [])
+    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), only_media: true)
     {posts, "public"}
   end
 
-  defp fetch(:trending), do: {Trends.statuses(@feed_limit), nil}
+  defp fetch(:trending), do: {Trends.statuses(@feed_limit, only_media: true), nil}
 
   defp dom_id(status), do: "post-" <> status["id"]
 

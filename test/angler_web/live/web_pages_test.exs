@@ -29,6 +29,33 @@ defmodule AnglerWeb.WebPagesTest do
     assert has_element?(lv, "#feed-tab-trending.tab-active")
   end
 
+  test "landing feeds show photo and video posts only", %{conn: conn} do
+    {:ok, alice} = Angler.Profiles.create_profile(%{username: "alice"})
+
+    post = fn type ->
+      {:ok, s} =
+        Angler.Statuses.create_remote(%{
+          profile_id: alice.id,
+          visibility: :public,
+          caption: type,
+          rendered: "<p>#{type}</p>",
+          type: type,
+          local: true
+        })
+
+      s
+    end
+
+    photo = post.("photo")
+    text = post.("text")
+
+    for path <- [~p"/", ~p"/network"] do
+      {:ok, lv, _} = live(conn, path)
+      assert has_element?(lv, "#post-#{photo.id}")
+      refute has_element?(lv, "#post-#{text.id}")
+    end
+  end
+
   test "index links to about + features", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/")
     assert html =~ ~s(href="/about")

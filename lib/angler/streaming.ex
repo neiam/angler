@@ -45,7 +45,7 @@ defmodule Angler.Streaming do
 
     # Replies stay out of the home and public feeds (see `Timelines`), so
     # they only reach hashtag streams.
-    reply? = not is_nil(status.in_reply_to_id)
+    reply? = Status.reply?(status)
 
     if not reply?, do: publish("user:#{status.profile_id}", "update", rendered)
 

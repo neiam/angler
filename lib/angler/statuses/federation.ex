@@ -124,6 +124,7 @@ defmodule Angler.Statuses.Federation do
       attach_hashtags(status, object)
       bump_author_count(status.profile_id)
       maybe_increment_reply_count(status)
+      adopt_replies(status)
 
       if status.visibility == :direct, do: Conversations.record(status)
 
@@ -224,6 +225,7 @@ defmodule Angler.Statuses.Federation do
       url: object["url"] || object["id"],
       in_reply_to_id: lookup_reply_target_id(object),
       in_reply_to_profile_id: lookup_reply_target_author_id(object),
+      in_reply_to_uri: reply_uri(object),
       language: language_of(object)
     }
   end
@@ -286,6 +288,10 @@ defmodule Angler.Statuses.Federation do
   end
 
   defp language_of(_), do: "en"
+
+  defp reply_uri(%{"inReplyTo" => uri}) when is_binary(uri) and uri != "", do: uri
+  defp reply_uri(%{"inReplyTo" => %{"id" => uri}}) when is_binary(uri) and uri != "", do: uri
+  defp reply_uri(_), do: nil
 
   defp lookup_reply_target_id(%{"inReplyTo" => uri}) when is_binary(uri) do
     case Statuses.get_by_uri(uri) do
@@ -403,6 +409,22 @@ defmodule Angler.Statuses.Federation do
 
     :ok
   end
+
+  # Replies that arrived before this post did: point them at it now.
+  defp adopt_replies(%Status{uri: uri} = status) when is_binary(uri) do
+    {n, _} =
+      Repo.update_all(
+        from(s in Status, where: s.in_reply_to_uri == ^uri and is_nil(s.in_reply_to_id)),
+        set: [in_reply_to_id: status.id, in_reply_to_profile_id: status.profile_id]
+      )
+
+    if n > 0,
+      do: Repo.update_all(from(s in Status, where: s.id == ^status.id), inc: [reply_count: n])
+
+    :ok
+  end
+
+  defp adopt_replies(_), do: :ok
 
   defp maybe_increment_reply_count(%Status{in_reply_to_id: nil}), do: :ok
 

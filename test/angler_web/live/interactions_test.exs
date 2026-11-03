@@ -21,6 +21,8 @@ defmodule AnglerWeb.LiveInteractionsTest do
       Accounts.register(%{username: "bob", email: "bob@example.com", password: "verysecret123"})
 
     {:ok, status} = Statuses.create_local(alice, %{"status" => "hello world"})
+    # The landing feeds show photo posts only.
+    {:ok, status} = status |> Ecto.Changeset.change(type: "photo") |> Angler.Repo.update()
 
     conn = Plug.Test.init_test_session(build_conn(), %{user_id: bob_user.id})
     %{conn: conn, alice: alice, bob: bob, status: status}

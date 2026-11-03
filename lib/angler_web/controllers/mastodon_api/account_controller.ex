@@ -392,7 +392,7 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
   end
 
   defp exclude_replies(q, val) when val in ["true", "1", true] do
-    from s in q, where: is_nil(s.in_reply_to_id)
+    from s in q, where: is_nil(s.in_reply_to_id) and is_nil(s.in_reply_to_uri)
   end
 
   defp exclude_replies(q, _), do: q

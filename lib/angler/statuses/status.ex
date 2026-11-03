@@ -32,6 +32,8 @@ defmodule Angler.Statuses.Status do
 
     field :in_reply_to_id, :integer
     field :in_reply_to_profile_id, :integer
+    # A remote reply's `inReplyTo`, set even when the parent isn't stored.
+    field :in_reply_to_uri, :string
     field :reblog_of_id, :integer
 
     field :language, :string, default: "en"
@@ -62,12 +64,20 @@ defmodule Angler.Statuses.Status do
     id
     profile_id caption rendered is_nsfw cw_summary visibility scope type pf_type
     local uri url
-    in_reply_to_id in_reply_to_profile_id reblog_of_id
+    in_reply_to_id in_reply_to_profile_id in_reply_to_uri reblog_of_id
     language comments_disabled quote_policy
     reply_count reblogs_count likes_count
     edited_at deleted_at scheduled_at
     place_id group_id story_id
   )a
+
+  @doc """
+  Whether `status` answers another post, including a remote reply whose
+  parent we never stored.
+  """
+  @spec reply?(%__MODULE__{}) :: boolean()
+  def reply?(%__MODULE__{in_reply_to_id: id, in_reply_to_uri: uri}),
+    do: not is_nil(id) or not is_nil(uri)
 
   @doc false
   def changeset(status \\ %__MODULE__{}, attrs) do

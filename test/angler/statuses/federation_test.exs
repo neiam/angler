@@ -44,6 +44,31 @@ defmodule Angler.Statuses.FederationTest do
   end
 
   describe "handle_create/2" do
+    test "a reply to a post we don't have stays a reply, and is adopted when it arrives",
+         ctx do
+      parent_uri = "http://remote.test/notes/parent"
+      reply_uri = "http://remote.test/notes/orphan"
+
+      reply = create_note(reply_uri, extra_object: %{"inReplyTo" => parent_uri})
+      assert :ok = Federation.handle_create(reply, ctx.bob.remote_url)
+
+      orphan = Statuses.get_by_uri(reply_uri)
+      assert orphan.in_reply_to_id == nil
+      assert orphan.in_reply_to_uri == parent_uri
+      assert Status.reply?(orphan)
+
+      cursor = Angler.Pagination.MastodonCursor.parse(%{}, 20, 40)
+      assert {[], _} = Angler.Timelines.public(cursor)
+
+      assert :ok = Federation.handle_create(create_note(parent_uri), ctx.bob.remote_url)
+      parent = Statuses.get_by_uri(parent_uri)
+
+      assert Statuses.get_by_uri(reply_uri).in_reply_to_id == parent.id
+      assert parent.reply_count == 1
+      assert {[%Status{id: id}], _} = Angler.Timelines.public(cursor)
+      assert id == parent.id
+    end
+
     test "materializes a remote Note as a public Status", ctx do
       uri = "http://remote.test/notes/1"
       assert :ok = Federation.handle_create(create_note(uri), ctx.bob.remote_url)

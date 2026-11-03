@@ -37,7 +37,8 @@ defmodule Angler.Timelines do
         on: s.id == h.status_id and is_nil(s.deleted_at),
         # Replies live in their thread, not the feed (upstream filters
         # `in_reply_to_id`); a boost of one still shows.
-        where: is_nil(s.in_reply_to_id) or not is_nil(h.reblog_id),
+        where:
+          (is_nil(s.in_reply_to_id) and is_nil(s.in_reply_to_uri)) or not is_nil(h.reblog_id),
         select: %{id: h.id, status: s, reblog_id: h.reblog_id}
 
     rows =
@@ -119,7 +120,9 @@ defmodule Angler.Timelines do
   def public(cursor, opts \\ []) when is_map(cursor) do
     base =
       from s in Status,
-        where: s.visibility == :public and is_nil(s.deleted_at) and is_nil(s.in_reply_to_id)
+        where:
+          s.visibility == :public and is_nil(s.deleted_at) and is_nil(s.in_reply_to_id) and
+            is_nil(s.in_reply_to_uri)
 
     base = filter_local(base, opts)
     base = filter_only_media(base, opts)

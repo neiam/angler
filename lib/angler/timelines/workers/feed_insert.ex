@@ -90,11 +90,8 @@ defmodule Angler.Timelines.Workers.FeedInsert do
       %Status{visibility: :direct} ->
         :ok
 
-      %Status{in_reply_to_id: parent} when not is_nil(parent) ->
-        :ok
-
       %Status{} = status ->
-        fan_out(status)
+        if Status.reply?(status), do: :ok, else: fan_out(status)
     end
   end
 

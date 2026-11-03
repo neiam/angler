@@ -15,6 +15,8 @@ defmodule AnglerWeb.WebFrontendTest do
       })
 
     {:ok, status} = Statuses.create_local(alice, %{"status" => "hello world"})
+    # The landing feeds show photo posts only.
+    {:ok, status} = status |> Ecto.Changeset.change(type: "photo") |> Angler.Repo.update()
     %{alice: alice, status: status}
   end
 

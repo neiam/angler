@@ -35,7 +35,7 @@ defmodule Angler.Statuses do
     Status
     |> where([s], s.profile_id == ^profile_id)
     |> where([s], s.visibility == :public and is_nil(s.deleted_at))
-    |> where([s], is_nil(s.in_reply_to_id))
+    |> where([s], is_nil(s.in_reply_to_id) and is_nil(s.in_reply_to_uri))
     |> order_by([s], desc: s.id)
     |> limit(^limit)
     |> Repo.all()
@@ -85,6 +85,7 @@ defmodule Angler.Statuses do
     |> where([s], s.profile_id == ^profile_id)
     |> where([s], s.visibility in ^profile_page_visibilities(filter))
     |> where([s], is_nil(s.deleted_at) and is_nil(s.in_reply_to_id))
+    |> where([s], is_nil(s.in_reply_to_uri))
     |> profile_page_before(opts[:max_id])
     |> order_by([s], desc: s.id)
     |> limit(^limit)
