@@ -32,6 +32,9 @@ defmodule Angler.Profiles.Profile do
     field :status, :string
 
     field :avatar_path, :string
+    # A remote profile's actor `icon` / `image` URLs (`Angler.Federation.Actor`).
+    field :avatar_remote_url, :string
+    field :header_remote_url, :string
     field :header_path, :string
 
     field :public_key_pem, :string
@@ -67,7 +70,7 @@ defmodule Angler.Profiles.Profile do
   @cast_fields ~w(
     username domain name bio bio_text website location pronouns
     is_private discoverable indexable_search directory_opt_in is_bot is_suspended status
-    avatar_path header_path
+    avatar_path header_path avatar_remote_url header_remote_url
     public_key_pem private_key_pem
     inbox_url outbox_url shared_inbox_url followers_url following_url remote_url
     last_status_at last_fetched_at last_active_at

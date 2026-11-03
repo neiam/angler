@@ -3,7 +3,12 @@ defmodule Angler.Federation.Actor do
   Resolve and cache remote ActivityPub actors.
 
   * `resolve/1` returns a local `Profile` for a remote actor URL, fetching the
-    actor doc if we haven't seen them before.
+    actor doc if we haven't seen them before, and refreshing it in the
+    background once it's more than 3 days old.
+  * The actor's `icon` and `image` become the avatar and header. They show
+    the origin's URL straight away; with `REMOTE_AVATARS` on (the default)
+    `Workers.RemoteAvatarFetch` then swaps in a local copy, and only fetches
+    again when the actor points at a new image.
   * `public_key_for/1` resolves a sig `keyId` to a PEM, going through the
     `http_signature_keys` cache and falling back to a fresh actor fetch on miss
     (rotation case).
@@ -16,6 +21,7 @@ defmodule Angler.Federation.Actor do
 
   alias Angler.Federation.{HttpSignatureKey, Instance}
   alias Angler.Federation.HTTP, as: FedHTTP
+  alias Angler.Federation.Workers.{ActorRefresh, RemoteAvatarFetch}
   alias Angler.Profiles
   alias Angler.Profiles.Profile
   alias Angler.Repo
@@ -28,10 +34,21 @@ defmodule Angler.Federation.Actor do
   @spec resolve(String.t()) :: {:ok, Profile.t()} | {:error, atom()}
   def resolve(actor_url) when is_binary(actor_url) do
     case Repo.get_by(Profile, remote_url: actor_url) do
-      %Profile{} = p -> {:ok, p}
-      nil -> fetch_and_create(actor_url)
+      %Profile{} = p ->
+        if stale?(p), do: ActorRefresh.enqueue(actor_url)
+        {:ok, p}
+
+      nil ->
+        fetch_and_create(actor_url)
     end
   end
+
+  @stale_after 3 * 86_400
+
+  defp stale?(%Profile{last_fetched_at: nil}), do: true
+
+  defp stale?(%Profile{last_fetched_at: at}),
+    do: DateTime.diff(DateTime.utc_now(), at) > @stale_after
 
   @doc """
   Resolve a `keyId` (typically `<actor_url>#main-key`) to a public-key PEM.
@@ -116,16 +133,51 @@ defmodule Angler.Federation.Actor do
 
       :ok = ensure_instance(domain)
 
+      existing = Repo.get_by(Profile, remote_url: actor_url)
+      {image_attrs, fetches} = images(existing, attrs.images)
+
       profile_attrs =
         attrs
+        |> Map.delete(:images)
+        |> Map.merge(image_attrs)
         |> Map.put(:domain, domain)
         |> Map.put(:remote_url, actor_url)
 
-      case Repo.get_by(Profile, remote_url: actor_url) do
-        nil -> insert_profile(profile_attrs, attrs)
-        %Profile{} = existing -> update_profile(existing, profile_attrs, attrs)
+      result =
+        case existing do
+          nil -> insert_profile(profile_attrs, attrs)
+          %Profile{} -> update_profile(existing, profile_attrs, attrs)
+        end
+
+      with {:ok, %Profile{id: id}} <- result, true <- RemoteAvatarFetch.enabled?() do
+        Enum.each(fetches, fn {kind, url} -> RemoteAvatarFetch.enqueue(id, kind, url) end)
       end
+
+      result
     end
+  end
+
+  # Avatar/header attrs for this fetch, and the downloads to queue. An image
+  # we already have (same source URL) is left as it is, so a refresh keeps
+  # the local copy; a new one shows the origin's URL until it's downloaded.
+  defp images(existing, sources) do
+    Enum.reduce(sources, {%{}, []}, fn {kind, url}, {attrs, fetches} ->
+      {path_field, source_field} =
+        if kind == "avatar",
+          do: {:avatar_path, :avatar_remote_url},
+          else: {:header_path, :header_remote_url}
+
+      cond do
+        not is_nil(url) and not is_nil(existing) and Map.get(existing, source_field) == url ->
+          {attrs, fetches}
+
+        is_nil(url) ->
+          {Map.merge(attrs, %{path_field => nil, source_field => nil}), fetches}
+
+        true ->
+          {Map.merge(attrs, %{path_field => url, source_field => url}), [{kind, url} | fetches]}
+      end
+    end)
   end
 
   defp insert_profile(profile_attrs, %{public_key: %{key_id: kid, pem: pem}} = _) do
@@ -233,7 +285,11 @@ defmodule Angler.Federation.Actor do
         following_url: doc["following"],
         is_private: doc["manuallyApprovesFollowers"] == true,
         is_bot: doc["type"] == "Service",
-        last_fetched_at: DateTime.utc_now()
+        last_fetched_at: DateTime.utc_now(),
+        images: %{
+          "avatar" => image_url(doc["icon"], actor_url),
+          "header" => image_url(doc["image"], actor_url)
+        }
       }
 
       attrs =
@@ -247,6 +303,28 @@ defmodule Angler.Federation.Actor do
       _ -> {:error, :bad_actor_doc}
     end
   end
+
+  # An actor `icon` / `image`: an Image object (or a list of them, first
+  # wins) whose `url` is a string, a Link, or a list of either. Only http(s).
+  defp image_url([first | _], actor_url), do: image_url(first, actor_url)
+
+  defp image_url(%{"url" => url} = img, actor_url) do
+    if img["type"] in [nil, "Image"], do: link_href(url, actor_url)
+  end
+
+  defp image_url(_, _), do: nil
+
+  defp link_href([first | _], actor_url), do: link_href(first, actor_url)
+  defp link_href(%{"href" => href}, actor_url), do: link_href(href, actor_url)
+
+  defp link_href(url, _actor_url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: s, host: h} when s in ["http", "https"] and is_binary(h) -> url
+      _ -> nil
+    end
+  end
+
+  defp link_href(_, _), do: nil
 
   # The key must live on the actor's own host, and when it names an owner,
   # that owner must be the actor (upstream 1905da723).

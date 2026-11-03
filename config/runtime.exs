@@ -306,6 +306,10 @@ if config_env() != :test do
     max_pages: int.("AP_BLOCK_SYNC_MAX_PAGES", 10),
     reconcile_limit: int.("AP_BLOCK_SYNC_RECONCILE_LIMIT", 1000)
 
+  # REMOTE_AVATARS: keep local copies of remote avatars and headers
+  # (upstream federation.avatars.store_local); off hotlinks the origin's.
+  config :angler, :remote_avatars, bool.("REMOTE_AVATARS", true)
+
   ## Registration protections (upstream config/captcha.php, config/honeypot.php,
   ## pixelfed.min_registration_age, instance.curated_registration)
   captcha_driver = str.("CAPTCHA_DRIVER", "hcaptcha")
