@@ -126,17 +126,12 @@ defmodule AnglerWeb.IndexLive do
   end
 
   defp fetch(:local) do
-    {posts, _} =
-      Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40),
-        local_only: true,
-        only_media: true
-      )
-
+    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), local_only: true)
     {posts, "public:local"}
   end
 
   defp fetch(:network) do
-    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), only_media: true)
+    {posts, _} = Timelines.public(MastodonCursor.parse(%{}, @feed_limit, 40), [])
     {posts, "public"}
   end
 

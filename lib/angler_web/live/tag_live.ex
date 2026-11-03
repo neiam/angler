@@ -27,7 +27,10 @@ defmodule AnglerWeb.TagLive do
     viewer_id = profile && profile.id
 
     {posts, _} =
-      Timelines.hashtag(name, MastodonCursor.parse(%{}, @feed_limit, 40), viewer_id: viewer_id)
+      Timelines.hashtag(name, MastodonCursor.parse(%{}, @feed_limit, 40),
+        viewer_id: viewer_id,
+        only_media: true
+      )
 
     rendered = StatusJSON.render_many(posts, viewer_id)
 

@@ -60,7 +60,22 @@ defmodule Angler.Statuses.FederationTest do
       cursor = Angler.Pagination.MastodonCursor.parse(%{}, 20, 40)
       assert {[], _} = Angler.Timelines.public(cursor)
 
-      assert :ok = Federation.handle_create(create_note(parent_uri), ctx.bob.remote_url)
+      photo = %{
+        "attachment" => [
+          %{
+            "type" => "Document",
+            "mediaType" => "image/jpeg",
+            "url" => "http://remote.test/p.jpg"
+          }
+        ]
+      }
+
+      assert :ok =
+               Federation.handle_create(
+                 create_note(parent_uri, extra_object: photo),
+                 ctx.bob.remote_url
+               )
+
       parent = Statuses.get_by_uri(parent_uri)
 
       assert Statuses.get_by_uri(reply_uri).in_reply_to_id == parent.id
@@ -180,6 +195,21 @@ defmodule Angler.Statuses.FederationTest do
   end
 
   describe "remote media attachments" do
+    test "a mix of photos and videos is a photo:video:album, as upstream", ctx do
+      uri = "http://remote.test/notes/mixed"
+      att = &%{"type" => "Document", "mediaType" => &1, "url" => "http://remote.test/" <> &2}
+
+      activity =
+        create_note(uri,
+          extra_object: %{
+            "attachment" => [att.("image/jpeg", "a.jpg"), att.("video/mp4", "b.mp4")]
+          }
+        )
+
+      assert :ok = Federation.handle_create(activity, ctx.bob.remote_url)
+      assert %Status{type: "photo:video:album"} = Statuses.get_by_uri(uri)
+    end
+
     test "ingests AP attachments as remote assets the API renders by origin URL", ctx do
       uri = "http://remote.test/notes/media-1"
 

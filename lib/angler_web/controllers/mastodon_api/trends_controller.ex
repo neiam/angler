@@ -44,7 +44,7 @@ defmodule AnglerWeb.MastodonAPI.TrendsController do
         _ -> nil
       end
 
-    json(conn, Trends.statuses(limit) |> StatusJSON.render_many(viewer_id))
+    json(conn, Trends.statuses(limit, only_media: true) |> StatusJSON.render_many(viewer_id))
   end
 
   def links(conn, _params) do

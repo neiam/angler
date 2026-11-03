@@ -135,7 +135,10 @@ defmodule AnglerWeb.MastodonAPI.StatusCreateTest do
       _ =
         ctx.conn
         |> put_req_header("authorization", "Bearer " <> ctx.write_token)
-        |> post(~p"/api/v1/statuses", %{"status" => "first"})
+        |> post(~p"/api/v1/statuses", %{
+          "status" => "first",
+          "media_ids" => [photo_asset!(ctx.alice).id]
+        })
 
       Oban.drain_queue(queue: :feed)
 

@@ -43,9 +43,10 @@ defmodule Angler.Streaming do
   def broadcast_status_update(%Status{} = status) do
     rendered = status |> StatusJSON.render(nil) |> Jason.encode!()
 
-    # Replies stay out of the home and public feeds (see `Timelines`), so
-    # they only reach hashtag streams.
-    reply? = Status.reply?(status)
+    # The home and public feeds hold top-level photo and video posts only
+    # (see `Timelines`), so other posts aren't streamed there; replies still
+    # reach hashtag streams.
+    reply? = Status.reply?(status) or not Status.media?(status)
 
     if not reply?, do: publish("user:#{status.profile_id}", "update", rendered)
 
@@ -55,9 +56,11 @@ defmodule Angler.Streaming do
         if status.local, do: publish("public:local", "update", rendered)
       end
 
-      Enum.each(hashtags_for(status.id), fn name ->
-        publish("hashtag:#{name}", "update", rendered)
-      end)
+      if Status.media?(status) do
+        Enum.each(hashtags_for(status.id), fn name ->
+          publish("hashtag:#{name}", "update", rendered)
+        end)
+      end
     end
 
     if not reply?, do: fan_to_followers(status, "update", rendered)

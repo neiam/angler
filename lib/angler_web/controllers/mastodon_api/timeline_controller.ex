@@ -51,10 +51,10 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
   def public(conn, params) do
     cursor = MastodonCursor.parse(params, @default_limit, @max_limit)
 
+    # Always photo and video posts, as upstream (`only_media` is implied).
     opts = [
       local_only: truthy?(params["local"]),
       remote_only: truthy?(params["remote"]),
-      only_media: truthy?(params["only_media"]),
       viewer_id: viewer_id(conn)
     ]
 
@@ -70,7 +70,8 @@ defmodule AnglerWeb.MastodonAPI.TimelineController do
     opts = [
       local_only: truthy?(params["local"]),
       remote_only: truthy?(params["remote"]),
-      only_media: truthy?(params["only_media"]),
+      # Upstream defaults `only_media` to true here.
+      only_media: bool_param(params["only_media"], true),
       viewer_id: viewer_id(conn)
     ]
 

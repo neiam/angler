@@ -39,7 +39,7 @@ defmodule AnglerWeb.MastodonAPI.TimelineControllerTest do
       visibility: :public,
       caption: "hi",
       rendered: "<p>hi</p>",
-      type: "text",
+      type: "photo",
       local: is_nil(profile.domain),
       uri:
         if(is_nil(profile.domain),

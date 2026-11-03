@@ -34,7 +34,11 @@ defmodule Angler.StreamingTest do
     :ok = Streaming.subscribe("public:local")
 
     {:ok, _status} =
-      Statuses.create_local(alice, %{"status" => "hello world", "visibility" => "public"})
+      Statuses.create_local(alice, %{
+        "status" => "hello world",
+        "visibility" => "public",
+        "media_ids" => [photo_asset!(alice).id]
+      })
 
     assert_receive {:streaming, "public", "update", payload}, 500
     assert_receive {:streaming, "public:local", "update", _}, 500
@@ -59,7 +63,11 @@ defmodule Angler.StreamingTest do
     :ok = Streaming.subscribe("user:#{alice.id}")
 
     {:ok, status} =
-      Statuses.create_local(alice, %{"status" => "x", "visibility" => "public"})
+      Statuses.create_local(alice, %{
+        "status" => "x",
+        "visibility" => "public",
+        "media_ids" => [photo_asset!(alice).id]
+      })
 
     {:ok, _} = Statuses.delete_local(status.id, alice)
 
@@ -75,7 +83,11 @@ defmodule Angler.StreamingTest do
     :ok = Streaming.subscribe("user:#{alice.id}")
 
     {:ok, status} =
-      Statuses.create_local(alice, %{"status" => "before", "visibility" => "public"})
+      Statuses.create_local(alice, %{
+        "status" => "before",
+        "visibility" => "public",
+        "media_ids" => [photo_asset!(alice).id]
+      })
 
     {:ok, _} = Statuses.update_local(status.id, alice, %{"status" => "after"})
 

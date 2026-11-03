@@ -35,6 +35,9 @@ defmodule Angler.Timelines do
         where: h.profile_id == ^viewer_id,
         join: s in Status,
         on: s.id == h.status_id and is_nil(s.deleted_at),
+        # Photo and video posts only, as upstream; a boost is kept and
+        # judged by `photos_reblogs_only` below.
+        where: s.type in ^Status.media_types() or not is_nil(h.reblog_id),
         # Replies live in their thread, not the feed (upstream filters
         # `in_reply_to_id`); a boost of one still shows.
         where:
@@ -99,7 +102,7 @@ defmodule Angler.Timelines do
     end)
   end
 
-  defp media?(%Status{type: type}), do: type in ~w(photo photo:album video video:album)
+  defp media?(%Status{} = s), do: Status.media?(s)
 
   defp following_ids(viewer_id) do
     Repo.all(
@@ -111,9 +114,9 @@ defmodule Angler.Timelines do
   end
 
   @doc """
-  Public timeline. Visibility = `:public`, top-level posts only (replies
-  stay in their thread, as upstream), optionally restricted by
-  `local_only` / `remote_only` / `only_media`.
+  Public timeline. Visibility = `:public`, top-level photo and video posts
+  only (as upstream's public and network feeds), optionally restricted by
+  `local_only` / `remote_only`.
   """
   @spec public(MastodonCursor.cursor(), keyword()) ::
           {[Status.t()], [%{id: integer()}]}
@@ -125,7 +128,7 @@ defmodule Angler.Timelines do
             is_nil(s.in_reply_to_uri)
 
     base = filter_local(base, opts)
-    base = filter_only_media(base, opts)
+    base = filter_only_media(base, only_media: true)
     base = exclude_authors(base, hidden_author_ids(opts[:viewer_id]))
 
     statuses =
@@ -187,10 +190,7 @@ defmodule Angler.Timelines do
 
   defp filter_only_media(base, opts) do
     if opts[:only_media] do
-      # We don't have a media table yet; treat `type` containing "photo" or
-      # "video" as the proxy. Once the media slice lands, switch to a join
-      # against `media`.
-      from [s] in base, where: s.type in ["photo", "photo:album", "video", "video:album"]
+      from [s] in base, where: s.type in ^Status.media_types()
     else
       base
     end

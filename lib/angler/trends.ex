@@ -20,7 +20,6 @@ defmodule Angler.Trends do
   alias Angler.Statuses.{Status, StatusHashtag}
 
   @window_days 7
-  @media_types ~w(photo photo:album video video:album)
 
   @doc "Top trending hashtags by usage over the last #{@window_days} days."
   @spec tags(pos_integer()) :: [
@@ -64,7 +63,7 @@ defmodule Angler.Trends do
 
     base =
       if opts[:only_media],
-        do: from(s in base, where: s.type in @media_types),
+        do: from(s in base, where: s.type in ^Status.media_types()),
         else: base
 
     Repo.all(

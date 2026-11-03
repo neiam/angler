@@ -71,6 +71,16 @@ defmodule Angler.Statuses.Status do
     place_id group_id story_id
   )a
 
+  @media_types ~w(photo photo:album video video:album photo:video:album)
+
+  @doc "The photo and video post types upstream's feeds are limited to."
+  @spec media_types() :: [String.t()]
+  def media_types, do: @media_types
+
+  @doc "Whether `status` is a photo or video post."
+  @spec media?(%__MODULE__{}) :: boolean()
+  def media?(%__MODULE__{type: type}), do: type in @media_types
+
   @doc """
   Whether `status` answers another post, including a remote reply whose
   parent we never stored.

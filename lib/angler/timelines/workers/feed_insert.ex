@@ -4,7 +4,8 @@ defmodule Angler.Timelines.Workers.FeedInsert do
 
   Triggered after status creation (local or inbound). Skips `:direct`
   statuses (those go to participants only via the DM grouping) and replies
-  (those show in their thread, not the feed, as upstream). Idempotent
+  (those show in their thread, not the feed, as upstream), and anything that
+  isn't a photo or video post (upstream's FeedInsertPipeline types). Idempotent
   — `INSERT ... ON CONFLICT DO NOTHING` against the `(profile_id, status_id)`
   unique.
 
@@ -91,7 +92,9 @@ defmodule Angler.Timelines.Workers.FeedInsert do
         :ok
 
       %Status{} = status ->
-        if Status.reply?(status), do: :ok, else: fan_out(status)
+        if Status.reply?(status) or not Status.media?(status),
+          do: :ok,
+          else: fan_out(status)
     end
   end
 

@@ -29,7 +29,11 @@ defmodule AnglerWeb.MastodonAPI.TrendsControllerTest do
       })
 
     {:ok, hot_status} =
-      Statuses.create_local(alice, %{"status" => "the hot one", "visibility" => "public"})
+      Statuses.create_local(alice, %{
+        "status" => "the hot one",
+        "visibility" => "public",
+        "media_ids" => [photo_asset!(alice).id]
+      })
 
     Statuses.inc_counter(hot_status.id, :likes_count, 5)
 

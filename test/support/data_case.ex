@@ -48,6 +48,21 @@ defmodule Angler.DataCase do
   end
 
   @doc """
+  An unattached photo asset owned by `profile`, for `"media_ids"`: feeds
+  only carry photo and video posts, so a post meant for one needs media.
+  """
+  def photo_asset!(profile) do
+    Angler.Media.Asset.changeset(%{
+      profile_id: profile.id,
+      media_type: "image/jpeg",
+      storage: "remote",
+      status: "ready",
+      remote_url: "https://cdn.test/#{System.unique_integer([:positive])}.jpg"
+    })
+    |> Angler.Repo.insert!()
+  end
+
+  @doc """
   A helper that transforms changeset errors into a map of messages.
 
       assert {:error, changeset} = Accounts.create_user(%{password: "short"})

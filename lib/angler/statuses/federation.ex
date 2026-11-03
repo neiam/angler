@@ -264,6 +264,7 @@ defmodule Angler.Statuses.Federation do
       Enum.all?(atts, &(media_kind(&1) == :image)) -> "photo:album"
       Enum.all?(atts, &(media_kind(&1) == :video)) and length(atts) == 1 -> "video"
       Enum.all?(atts, &(media_kind(&1) == :video)) -> "video:album"
+      Enum.all?(atts, &(media_kind(&1) in [:image, :video])) -> "photo:video:album"
       true -> "text"
     end
   end

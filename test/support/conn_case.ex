@@ -28,6 +28,7 @@ defmodule AnglerWeb.ConnCase do
       import Plug.Conn
       import Phoenix.ConnTest
       import AnglerWeb.ConnCase
+      import Angler.DataCase, only: [photo_asset!: 1]
     end
   end
 

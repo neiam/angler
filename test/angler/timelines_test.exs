@@ -35,7 +35,7 @@ defmodule Angler.TimelinesTest do
       visibility: :public,
       caption: "hi",
       rendered: "<p>hi</p>",
-      type: "text",
+      type: "photo",
       local: is_nil(profile.domain),
       uri:
         if(is_nil(profile.domain),
@@ -201,6 +201,15 @@ defmodule Angler.TimelinesTest do
 
       {statuses, _} = Timelines.home(ctx.alice.id, default_cursor())
       assert statuses == []
+    end
+
+    test "doesn't fan text posts into home feeds", ctx do
+      text = insert_status!(ctx.bob, %{type: "text"})
+      FeedInsert.enqueue(text.id)
+      Oban.drain_queue(queue: :feed)
+
+      refute Repo.get_by(HomeFeedEntry, profile_id: ctx.alice.id, status_id: text.id)
+      assert {[], _} = Timelines.home(ctx.alice.id, default_cursor())
     end
 
     test "leaves replies out of the feed, even ones already fanned in", ctx do
@@ -407,6 +416,16 @@ defmodule Angler.TimelinesTest do
       )
 
       assert {[], _} = Timelines.public(default_cursor())
+    end
+
+    test "photo and video posts only, as upstream" do
+      alice = local!("alice")
+      photo = insert_status!(alice)
+      _text = insert_status!(alice, %{type: "text"})
+      mixed = insert_status!(alice, %{type: "photo:video:album"})
+
+      {statuses, _} = Timelines.public(default_cursor())
+      assert Enum.map(statuses, & &1.id) == [mixed.id, photo.id]
     end
 
     test "replies excluded" do
