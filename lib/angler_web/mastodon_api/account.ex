@@ -69,7 +69,7 @@ defmodule AnglerWeb.MastodonAPI.Account do
 
   defp pe_fields(%Profile{} = p, opts) do
     %{
-      "is_admin" => is_admin?(opts),
+      "is_admin" => admin?(opts),
       "local" => is_nil(p.domain),
       # Pixelfed-rn types these as `string`; send "" rather than null so the
       # app's `LoginUserResponse` never sees a null where it expects a string.
@@ -104,7 +104,7 @@ defmodule AnglerWeb.MastodonAPI.Account do
     end
   end
 
-  defp is_admin?(opts) do
+  defp admin?(opts) do
     case Keyword.get(opts, :user) do
       %User{is_admin: true} -> true
       _ -> false

@@ -52,7 +52,7 @@ defmodule AnglerWeb.MastodonAPI.DiscoverControllerTest do
       body = ctx.conn |> auth(ctx.read) |> get(~p"/api/v1/discover/posts") |> json_response(200)
 
       assert is_list(body["posts"])
-      assert length(body["posts"]) >= 1
+      assert body["posts"] != []
     end
 
     test "excludes text-only posts", ctx do

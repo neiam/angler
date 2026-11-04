@@ -172,7 +172,7 @@ defmodule Angler.Push.WebPush do
 
     jwk =
       JOSE.JWK.from_key(
-        {:ECPrivateKey, 1, private_key, {:namedCurve, {1, 2, 840, 10045, 3, 1, 7}}, public_key,
+        {:ECPrivateKey, 1, private_key, {:namedCurve, {1, 2, 840, 10_045, 3, 1, 7}}, public_key,
          nil}
       )
 
