@@ -202,9 +202,15 @@ defmodule Angler.Quotes do
     cond do
       not quotable?(status) or is_nil(actor.domain) or not is_nil(actor.status) -> false
       blocked?(author_id, actor) -> false
+      true -> automatically_approved?(automatic, actor.id, author_id)
+    end
+  end
+
+  defp automatically_approved?(automatic, actor_id, author_id) do
+    cond do
       Bitwise.band(automatic, @flag_public) != 0 -> true
-      Bitwise.band(automatic, @flag_followers) != 0 and follows?(actor.id, author_id) -> true
-      Bitwise.band(automatic, @flag_following) != 0 and follows?(author_id, actor.id) -> true
+      Bitwise.band(automatic, @flag_followers) != 0 and follows?(actor_id, author_id) -> true
+      Bitwise.band(automatic, @flag_following) != 0 and follows?(author_id, actor_id) -> true
       true -> false
     end
   end

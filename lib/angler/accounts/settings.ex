@@ -89,30 +89,36 @@ defmodule Angler.Accounts.Settings do
         {f, truthy?(params[f])}
       end
 
-    scope =
-      case get_in(params, ["source", "privacy"]) do
-        s when s in ["public", "unlisted", "private"] -> %{"default_scope" => s}
-        _ -> %{}
-      end
-
-    can_quote =
-      case Angler.Quotes.account_policy_param(
-             params["can_quote"] || get_in(params, ["source", "quote_policy"])
-           ) do
-        nil -> %{}
-        p -> %{"can_quote" => p}
-      end
-
-    can_feature =
-      case Angler.FeaturedCollections.policy_param(params["can_feature"]) do
-        nil -> %{}
-        p -> %{"can_feature" => p}
-      end
-
     merge_account(
       user_id,
-      bools |> Map.merge(scope) |> Map.merge(can_quote) |> Map.merge(can_feature)
+      bools
+      |> Map.merge(scope_param(params))
+      |> Map.merge(can_quote_param(params))
+      |> Map.merge(can_feature_param(params))
     )
+  end
+
+  defp scope_param(params) do
+    case get_in(params, ["source", "privacy"]) do
+      s when s in ["public", "unlisted", "private"] -> %{"default_scope" => s}
+      _ -> %{}
+    end
+  end
+
+  defp can_quote_param(params) do
+    case Angler.Quotes.account_policy_param(
+           params["can_quote"] || get_in(params, ["source", "quote_policy"])
+         ) do
+      nil -> %{}
+      p -> %{"can_quote" => p}
+    end
+  end
+
+  defp can_feature_param(params) do
+    case Angler.FeaturedCollections.policy_param(params["can_feature"]) do
+      nil -> %{}
+      p -> %{"can_feature" => p}
+    end
   end
 
   defp truthy?(true), do: true

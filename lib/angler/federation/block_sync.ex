@@ -328,9 +328,7 @@ defmodule Angler.Federation.BlockSync do
     host = Sync.host(authority)
 
     cond do
-      not receiving?() or not is_binary(authority) or Sync.authority(authority) != authority or
-        authority == Sync.local_authority() or Sync.authority(url) != authority or
-          (expected != nil and normalized == nil) ->
+      unusable_source?(authority, url, expected, normalized) ->
         result
 
       Bans.banned?(host) or Admin.instance_suspended?(host) ->
@@ -347,6 +345,14 @@ defmodule Angler.Federation.BlockSync do
     end
   end
 
+  # Not a list we'll take: sync is off, the authority or url doesn't check
+  # out, or the expected digest was given but unparsable.
+  defp unusable_source?(authority, url, expected, normalized) do
+    not receiving?() or not is_binary(authority) or Sync.authority(authority) != authority or
+      authority == Sync.local_authority() or Sync.authority(url) != authority or
+      (expected != nil and normalized == nil)
+  end
+
   defp reconcile(authority, collection, deadline, result) do
     %{items: items, complete: complete?, malformed: malformed?, digest: claimed} = collection
 
@@ -354,59 +360,18 @@ defmodule Angler.Federation.BlockSync do
     # that matches its own digest.
     can_remove? = complete? and not malformed? and claimed != nil and claimed == digest(items)
 
-    {pairs, foreign?} =
-      Enum.reduce(items, {[], false}, fn {actor, object}, {acc, foreign?} ->
-        username = Sync.local_username(object)
-
-        if Sync.authority(actor) == authority and username != nil,
-          do: {[{actor, String.downcase(username)} | acc], foreign?},
-          else: {acc, true}
-      end)
+    {pairs, foreign?} = own_pairs(items, authority)
 
     locals = resolve_locals(pairs |> Enum.map(&elem(&1, 1)) |> Enum.uniq())
     remotes = resolve_remotes(pairs |> Enum.map(&elem(&1, 0)) |> Enum.uniq(), deadline)
 
-    {desired, unplaced?, unresolved} =
-      pairs
-      |> Enum.reverse()
-      |> Enum.reduce({%{}, foreign?, 0}, fn {actor, name}, {desired, unplaced?, unresolved} ->
-        case {locals[name], remotes[actor]} do
-          {nil, _} ->
-            {desired, true, unresolved}
-
-          {_, nil} ->
-            {desired, unplaced?, unresolved + 1}
-
-          {local, remote} ->
-            {Map.put(desired, {remote.id, local.id}, {remote, local}), unplaced?, unresolved}
-        end
-      end)
+    {desired, unplaced?, unresolved} = desired_blocks(pairs, locals, remotes, foreign?)
 
     can_remove? = can_remove? and not unplaced?
     known = received_blocks(authority)
 
-    added =
-      desired
-      |> Enum.reject(fn {key, _} -> Map.has_key?(known, key) end)
-      |> Enum.reduce_while(0, fn {_, {remote, local}}, n ->
-        cond do
-          n >= @max_apply_per_run -> {:halt, n}
-          apply_remote_block(remote, local) -> {:cont, n + 1}
-          true -> {:cont, n}
-        end
-      end)
-
-    removed =
-      if can_remove? do
-        cutoff = DateTime.add(DateTime.utc_now(), -@removal_grace_s)
-
-        known
-        |> Enum.reject(fn {key, _} -> Map.has_key?(desired, key) end)
-        |> Enum.filter(fn {_, row} -> DateTime.compare(row.inserted_at, cutoff) == :lt end)
-        |> Enum.count(fn {_, row} -> remove_block_row(row) end)
-      else
-        0
-      end
+    added = apply_additions(desired, known)
+    removed = if can_remove?, do: apply_removals(known, desired), else: 0
 
     result = %{
       result
@@ -421,6 +386,59 @@ defmodule Angler.Federation.BlockSync do
     end
 
     result
+  end
+
+  # `{actor, lowercased local username}` for each item `authority` itself
+  # asserts about one of our users (reversed), and whether any item didn't.
+  defp own_pairs(items, authority) do
+    Enum.reduce(items, {[], false}, fn {actor, object}, {acc, foreign?} ->
+      username = Sync.local_username(object)
+
+      if Sync.authority(actor) == authority and username != nil,
+        do: {[{actor, String.downcase(username)} | acc], foreign?},
+        else: {acc, true}
+    end)
+  end
+
+  # `{%{{remote_id, local_id} => {remote, local}}, unplaced?, unresolved}`:
+  # unplaced when a pair names an unknown local user, unresolved when its
+  # remote actor couldn't be fetched.
+  defp desired_blocks(pairs, locals, remotes, foreign?) do
+    pairs
+    |> Enum.reverse()
+    |> Enum.reduce({%{}, foreign?, 0}, fn {actor, name}, {desired, unplaced?, unresolved} ->
+      case {locals[name], remotes[actor]} do
+        {nil, _} ->
+          {desired, true, unresolved}
+
+        {_, nil} ->
+          {desired, unplaced?, unresolved + 1}
+
+        {local, remote} ->
+          {Map.put(desired, {remote.id, local.id}, {remote, local}), unplaced?, unresolved}
+      end
+    end)
+  end
+
+  defp apply_additions(desired, known) do
+    desired
+    |> Enum.reject(fn {key, _} -> Map.has_key?(known, key) end)
+    |> Enum.reduce_while(0, fn {_, {remote, local}}, n ->
+      cond do
+        n >= @max_apply_per_run -> {:halt, n}
+        apply_remote_block(remote, local) -> {:cont, n + 1}
+        true -> {:cont, n}
+      end
+    end)
+  end
+
+  defp apply_removals(known, desired) do
+    cutoff = DateTime.add(DateTime.utc_now(), -@removal_grace_s)
+
+    known
+    |> Enum.reject(fn {key, _} -> Map.has_key?(desired, key) end)
+    |> Enum.filter(fn {_, row} -> DateTime.compare(row.inserted_at, cutoff) == :lt end)
+    |> Enum.count(fn {_, row} -> remove_block_row(row) end)
   end
 
   # Lowercased username => local profile.

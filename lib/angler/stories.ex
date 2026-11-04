@@ -504,20 +504,7 @@ defmodule Angler.Stories do
         {:error, :inactive}
 
       %Story{} ->
-        base =
-          from v in View,
-            where: v.story_id == ^story_id,
-            order_by: [desc: v.id],
-            limit: ^limit,
-            preload: [:profile]
-
-        query =
-          case max_id do
-            n when is_integer(n) -> from v in base, where: v.id < ^n
-            _ -> base
-          end
-
-        rows = Repo.all(query)
+        rows = viewer_rows(story_id, limit, max_id)
 
         next =
           case rows do
@@ -531,6 +518,23 @@ defmodule Angler.Stories do
            next_max_id: next
          }}
     end
+  end
+
+  defp viewer_rows(story_id, limit, max_id) do
+    base =
+      from v in View,
+        where: v.story_id == ^story_id,
+        order_by: [desc: v.id],
+        limit: ^limit,
+        preload: [:profile]
+
+    query =
+      case max_id do
+        n when is_integer(n) -> from v in base, where: v.id < ^n
+        _ -> base
+      end
+
+    Repo.all(query)
   end
 
   defp render_viewer(%View{id: vid, profile: %Profile{} = p, inserted_at: at}, viewer_id) do

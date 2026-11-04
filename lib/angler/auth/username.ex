@@ -12,6 +12,9 @@ defmodule Angler.Auth.Username do
   Returns `:ok` or `{:error, message}`.
   """
   @spec validate(String.t()) :: :ok | {:error, String.t()}
+  # One flat rule per upstream check, in upstream's order; splitting it would
+  # only hide the list.
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   def validate(name) when is_binary(name) do
     cond do
       String.length(name) < 2 or String.length(name) > 30 ->

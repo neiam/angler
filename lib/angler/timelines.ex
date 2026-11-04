@@ -74,32 +74,37 @@ defmodule Angler.Timelines do
           Repo.all(from r in Reblog, where: r.id in ^ids, preload: :profile)
           |> Map.new(&{&1.id, &1})
 
-    include? = Keyword.get(opts, :include_reblogs, true)
-    photos_only? = Keyword.get(opts, :photos_reblogs_only, false)
-    hidden = hidden_author_ids(viewer_id) |> MapSet.new()
-    following = if ids == [], do: MapSet.new(), else: following_ids(viewer_id)
+    ctx = %{
+      viewer_id: viewer_id,
+      include?: Keyword.get(opts, :include_reblogs, true),
+      photos_only?: Keyword.get(opts, :photos_reblogs_only, false),
+      hidden: hidden_author_ids(viewer_id) |> MapSet.new(),
+      following: if(ids == [], do: MapSet.new(), else: following_ids(viewer_id))
+    }
 
-    Enum.flat_map(rows, fn %{status: s} = row ->
-      reblog = row.reblog_id && Map.get(reblogs, row.reblog_id)
-
-      show_boost? =
-        reblog != nil and include? and not MapSet.member?(hidden, reblog.profile_id) and
-          (not photos_only? or media?(s))
-
-      cond do
-        reblog == nil ->
-          [Map.put(row, :item, s)]
-
-        show_boost? ->
-          [Map.put(row, :item, %{reblog | status: s})]
-
-        s.profile_id == viewer_id or MapSet.member?(following, s.profile_id) ->
-          [Map.put(row, :item, s)]
-
-        true ->
-          []
-      end
+    Enum.flat_map(rows, fn row ->
+      resolve_boost(row, row.reblog_id && Map.get(reblogs, row.reblog_id), ctx)
     end)
+  end
+
+  defp resolve_boost(%{status: s} = row, nil, _ctx), do: [Map.put(row, :item, s)]
+
+  defp resolve_boost(%{status: s} = row, reblog, ctx) do
+    cond do
+      show_boost?(reblog, s, ctx) ->
+        [Map.put(row, :item, %{reblog | status: s})]
+
+      s.profile_id == ctx.viewer_id or MapSet.member?(ctx.following, s.profile_id) ->
+        [Map.put(row, :item, s)]
+
+      true ->
+        []
+    end
+  end
+
+  defp show_boost?(reblog, s, ctx) do
+    ctx.include? and not MapSet.member?(ctx.hidden, reblog.profile_id) and
+      (not ctx.photos_only? or media?(s))
   end
 
   defp media?(%Status{} = s), do: Status.media?(s)

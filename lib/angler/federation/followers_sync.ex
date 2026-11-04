@@ -184,9 +184,7 @@ defmodule Angler.Federation.FollowersSync do
     expected = String.downcase(expected)
 
     cond do
-      is_nil(sender.domain) or not is_nil(sender.status) or
-        not Regex.match?(~r/\A[0-9a-f]{64}\z/, expected) or
-          not sender_matches?(sender, collection_id, url) ->
+      unusable_request?(sender, collection_id, url, expected) ->
         result
 
       sender.followers_url != collection_id ->
@@ -203,6 +201,14 @@ defmodule Angler.Federation.FollowersSync do
     end
   end
 
+  # Not one we'll act on: a local or gone sender, a malformed digest, or
+  # urls that aren't the sender's.
+  defp unusable_request?(sender, collection_id, url, expected) do
+    is_nil(sender.domain) or not is_nil(sender.status) or
+      not Regex.match?(~r/\A[0-9a-f]{64}\z/, expected) or
+      not sender_matches?(sender, collection_id, url)
+  end
+
   defp reconcile(sender, %{items: items, complete: complete?}, expected, result) do
     items = Enum.uniq(items)
     segments = Enum.map(items, &Sync.local_username/1)
@@ -211,26 +217,11 @@ defmodule Angler.Federation.FollowersSync do
     # to what they signed and holds nothing we can't read as a local actor.
     can_remove? = complete? and digest(items) == expected and nil not in segments
 
-    listed =
-      case Enum.reject(segments, &is_nil/1) do
-        [] -> []
-        names -> Repo.all(from p in Profile, where: is_nil(p.domain) and p.username in ^names)
-      end
-
-    listed_ids = MapSet.new(listed, & &1.id)
+    listed = listed_locals(segments)
     known = local_followers(sender)
     known_ids = MapSet.new(known, fn {p, _} -> p.id end)
-    cutoff = DateTime.add(DateTime.utc_now(), -@removal_grace_s)
 
-    stale =
-      if can_remove? do
-        for {p, at} <- known,
-            not MapSet.member?(listed_ids, p.id),
-            DateTime.compare(at, cutoff) == :lt,
-            do: p
-      else
-        []
-      end
+    stale = if can_remove?, do: stale_followers(known, listed), else: []
 
     Enum.each(stale, fn p -> :ok = Follows.remove_inbound_follow(sender.id, p.id) end)
     removed = length(stale)
@@ -238,20 +229,7 @@ defmodule Angler.Federation.FollowersSync do
     {accepted, undone} =
       listed
       |> Enum.reject(&MapSet.member?(known_ids, &1.id))
-      |> Enum.reduce({0, 0}, fn local, {acc, und} ->
-        case Follows.get_follower(sender.id, local.id) do
-          %Follower{accepted_at: nil, remote_url: follow_id} when is_binary(follow_id) ->
-            {:ok, _} = Follows.accept_remote!(follow_id)
-            {acc + 1, und}
-
-          _ when und < @max_undo_per_run ->
-            send_undo(local, sender)
-            {acc, und + 1}
-
-          _ ->
-            {acc, und}
-        end
-      end)
+      |> settle_unknown(sender)
 
     result = %{
       result
@@ -266,6 +244,43 @@ defmodule Angler.Federation.FollowersSync do
     end
 
     result
+  end
+
+  defp listed_locals(segments) do
+    case Enum.reject(segments, &is_nil/1) do
+      [] -> []
+      names -> Repo.all(from p in Profile, where: is_nil(p.domain) and p.username in ^names)
+    end
+  end
+
+  # Known followers they no longer list, past the grace period.
+  defp stale_followers(known, listed) do
+    listed_ids = MapSet.new(listed, & &1.id)
+    cutoff = DateTime.add(DateTime.utc_now(), -@removal_grace_s)
+
+    for {p, at} <- known,
+        not MapSet.member?(listed_ids, p.id),
+        DateTime.compare(at, cutoff) == :lt,
+        do: p
+  end
+
+  # Listed locals we don't know as followers: accept a pending follow, or
+  # undo (up to the per-run cap). `{accepted, undone}`.
+  defp settle_unknown(locals, sender) do
+    Enum.reduce(locals, {0, 0}, fn local, {acc, und} ->
+      case Follows.get_follower(sender.id, local.id) do
+        %Follower{accepted_at: nil, remote_url: follow_id} when is_binary(follow_id) ->
+          {:ok, _} = Follows.accept_remote!(follow_id)
+          {acc + 1, und}
+
+        _ when und < @max_undo_per_run ->
+          send_undo(local, sender)
+          {acc, und + 1}
+
+        _ ->
+          {acc, und}
+      end
+    end)
   end
 
   # They list a local profile that doesn't follow them here.

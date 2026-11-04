@@ -208,6 +208,16 @@ defmodule Angler.Conversations do
   # blocked the sender gets an unread. Muted / hidden still count, but only
   # active, unmuted, visible conversations notify.
   defp fan_out(conversation_id, author_id, status_id, at) do
+    mark_author_read(conversation_id, author_id, status_id, at)
+
+    blockers = BlocksMutes.blocked_by_ids(author_id)
+    bump_unread(conversation_id, author_id, blockers, at)
+    notify_recipients(conversation_id, author_id, blockers, status_id)
+
+    :ok
+  end
+
+  defp mark_author_read(conversation_id, author_id, status_id, at) do
     from(p in Participant,
       where: p.conversation_id == ^conversation_id and p.profile_id == ^author_id
     )
@@ -227,9 +237,9 @@ defmodule Angler.Conversations do
           p.state == "request"
     )
     |> Repo.update_all(set: [state: "active"])
+  end
 
-    blockers = BlocksMutes.blocked_by_ids(author_id)
-
+  defp bump_unread(conversation_id, author_id, blockers, at) do
     from(p in Participant,
       join: pr in Profile,
       on: pr.id == p.profile_id,
@@ -238,7 +248,9 @@ defmodule Angler.Conversations do
           p.state != "left" and is_nil(pr.domain) and p.profile_id not in ^blockers
     )
     |> Repo.update_all(inc: [unread_count: 1], set: [last_activity_at: at, updated_at: at])
+  end
 
+  defp notify_recipients(conversation_id, author_id, blockers, status_id) do
     from(p in Participant,
       join: pr in Profile,
       on: pr.id == p.profile_id,
@@ -257,8 +269,6 @@ defmodule Angler.Conversations do
         status_id: status_id
       })
     end)
-
-    :ok
   end
 
   defp mentioned_profile_ids(status_id) do
