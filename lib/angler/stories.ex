@@ -32,6 +32,7 @@ defmodule Angler.Stories do
   alias Angler.Stories.{Outbound, RemoteMedia, Story, View}
 
   @max_per_day 30
+  @max_overlays 4
   @ttl_seconds 24 * 60 * 60
 
   @image_mimes ~w(image/jpeg image/png)
@@ -368,7 +369,7 @@ defmodule Angler.Stories do
       not enabled?() ->
         {:error, :disabled}
 
-      length(overlays) > 4 ->
+      length(overlays) > @max_overlays ->
         {:error, :too_many_overlays}
 
       active_today_count(author.id) >= @max_per_day ->

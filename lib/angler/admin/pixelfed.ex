@@ -25,6 +25,10 @@ defmodule Angler.Admin.Pixelfed do
   @config_keys ~w(federation_enabled open_registration stories_enabled
                   enforce_email_verification autospam_enabled)
 
+  # Users and instances lists page by this many rows; a full page means
+  # there may be another.
+  @page_size 10
+
   ## Stats
 
   @doc "Single-row summary for `GET /admin/stats`."
@@ -297,15 +301,17 @@ defmodule Angler.Admin.Pixelfed do
     base = filter_users_by_max_id(base, opts["max_id"])
 
     rows = Repo.all(base)
-    next = if length(rows) == 10, do: List.last(rows).id, else: nil
-    %{users: rows, next_max_id: next}
+    %{users: rows, next_max_id: next_max_id(rows)}
   end
+
+  defp next_max_id(rows) when length(rows) == @page_size, do: List.last(rows).id
+  defp next_max_id(_rows), do: nil
 
   defp base_users_query(sort) do
     from(u in User,
       where: is_nil(u.status),
       order_by: [{^sort, u.id}],
-      limit: 10,
+      limit: @page_size,
       preload: :profile
     )
   end
@@ -442,14 +448,13 @@ defmodule Angler.Admin.Pixelfed do
     sort = if opts["sort"] == "asc", do: :asc, else: :desc
     sort_by = sort_by_key(opts["sort_by"])
 
-    base = from(i in Instance, order_by: [{^sort, field(i, ^sort_by)}], limit: 10)
+    base = from(i in Instance, order_by: [{^sort, field(i, ^sort_by)}], limit: @page_size)
     base = filter_instances_by_query(base, opts["q"])
     base = filter_instances_by_flag(base, opts["filter"])
     base = filter_instances_by_max_id(base, opts["max_id"])
 
     rows = Repo.all(base)
-    next = if length(rows) == 10, do: List.last(rows).id, else: nil
-    %{instances: rows, next_max_id: next}
+    %{instances: rows, next_max_id: next_max_id(rows)}
   end
 
   defp filter_instances_by_query(base, q) when is_binary(q) and q != "" do

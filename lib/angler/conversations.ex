@@ -62,7 +62,7 @@ defmodule Angler.Conversations do
   def record(%Status{visibility: :direct, id: status_id, profile_id: author_id} = status) do
     members = [author_id | mentioned_profile_ids(status_id)] |> Enum.uniq()
 
-    if length(members) >= 2 and length(members) <= @max_participants do
+    if match?([_, _ | _], members) and length(members) <= @max_participants do
       conversation = find_or_create!(members, author_id)
 
       {_, _} =
@@ -143,7 +143,7 @@ defmodule Angler.Conversations do
             [
               %{
                 participants_hash: hash,
-                type: if(length(Enum.uniq(member_ids)) > 2, do: "group", else: "dm"),
+                type: if(match?([_, _, _ | _], Enum.uniq(member_ids)), do: "group", else: "dm"),
                 created_by_profile_id: creator_id,
                 inserted_at: now,
                 updated_at: now

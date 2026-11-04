@@ -260,9 +260,9 @@ defmodule Angler.Statuses.Federation do
 
   defp type_from_attachments(atts) when is_list(atts) and atts != [] do
     cond do
-      Enum.all?(atts, &(media_kind(&1) == :image)) and length(atts) == 1 -> "photo"
+      Enum.all?(atts, &(media_kind(&1) == :image)) and match?([_], atts) -> "photo"
       Enum.all?(atts, &(media_kind(&1) == :image)) -> "photo:album"
-      Enum.all?(atts, &(media_kind(&1) == :video)) and length(atts) == 1 -> "video"
+      Enum.all?(atts, &(media_kind(&1) == :video)) and match?([_], atts) -> "video"
       Enum.all?(atts, &(media_kind(&1) == :video)) -> "video:album"
       Enum.all?(atts, &(media_kind(&1) in [:image, :video])) -> "photo:video:album"
       true -> "text"

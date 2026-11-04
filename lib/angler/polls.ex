@@ -127,7 +127,7 @@ defmodule Angler.Polls do
       option_indices == [] ->
         {:error, :no_choices}
 
-      not poll.multiple and length(option_indices) > 1 ->
+      not poll.multiple and match?([_, _ | _], option_indices) ->
         {:error, :too_many_choices}
 
       true ->

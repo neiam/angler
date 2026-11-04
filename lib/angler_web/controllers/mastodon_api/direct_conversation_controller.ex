@@ -242,7 +242,7 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationController do
   end
 
   defp check_groups(members) do
-    if length(Enum.uniq(members)) > 2 and not groups_enabled?(),
+    if match?([_, _, _ | _], Enum.uniq(members)) and not groups_enabled?(),
       do: {:error, 422, "Group conversations are not enabled."},
       else: :ok
   end
