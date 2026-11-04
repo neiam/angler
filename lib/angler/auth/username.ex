@@ -51,6 +51,8 @@ defmodule Angler.Auth.Username do
   def validate(_), do: {:error, "Username is required."}
 
   defp special_count(name) do
+    # Counts the special characters, not the length.
+    # credo:disable-for-lines:2 ExSlop.Check.Refactor.GraphemesLength
     String.graphemes(name)
     |> Enum.count(&(&1 in ["-", "_", "."]))
   end

@@ -286,6 +286,10 @@ defmodule Angler.Federation.HTTPSignature do
         try do
           {:ok, :public_key.pem_entry_decode(entry)}
         rescue
+          # Remote-supplied PEM. What a malformed key raises from deep in
+          # :public_key (garbage DER: MatchError) isn't a stable contract; an
+          # error tuple is ours, and a crash here would fail the inbox request.
+          # credo:disable-for-next-line ExSlop.Check.Warning.BlanketRescue
           _ -> {:error, :bad_public_key}
         end
 
@@ -300,6 +304,9 @@ defmodule Angler.Federation.HTTPSignature do
         try do
           {:ok, :public_key.pem_entry_decode(entry)}
         rescue
+          # Same decode as above; which exception a bad key raises isn't a
+          # stable :public_key contract, and callers expect an error tuple.
+          # credo:disable-for-next-line ExSlop.Check.Warning.BlanketRescue
           _ -> {:error, :bad_private_key}
         end
 
