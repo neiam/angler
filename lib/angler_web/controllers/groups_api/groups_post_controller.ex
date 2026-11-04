@@ -181,20 +181,24 @@ defmodule AnglerWeb.GroupsAPI.GroupsPostController do
           forbidden(conn)
 
         true ->
-          attrs = %{
-            "status" => to_string(params["caption"] || params["status"] || ""),
-            "in_reply_to_id" => Integer.to_string(parent_id),
-            "visibility" => "public",
-            "group_id" => Integer.to_string(group.id)
-          }
-
-          case Statuses.create_local(actor, attrs) do
-            {:ok, status} -> json(conn, StatusJSON.render(status, actor.id))
-            {:error, %Ecto.Changeset{} = cs} -> validation_error(conn, traverse(cs))
-            {:error, reason} -> validation_error(conn, %{"error" => [to_string(reason)]})
-          end
+          create_comment(conn, actor, group, parent_id, params)
       end
     end)
+  end
+
+  defp create_comment(conn, actor, group, parent_id, params) do
+    attrs = %{
+      "status" => to_string(params["caption"] || params["status"] || ""),
+      "in_reply_to_id" => Integer.to_string(parent_id),
+      "visibility" => "public",
+      "group_id" => Integer.to_string(group.id)
+    }
+
+    case Statuses.create_local(actor, attrs) do
+      {:ok, status} -> json(conn, StatusJSON.render(status, actor.id))
+      {:error, %Ecto.Changeset{} = cs} -> validation_error(conn, traverse(cs))
+      {:error, reason} -> validation_error(conn, %{"error" => [to_string(reason)]})
+    end
   end
 
   def store_comment_photo(conn, params) do

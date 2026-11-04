@@ -68,44 +68,13 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
         limit: ^limit,
         select: %{token: t, client: c}
 
-    query =
-      case params["filter"] do
-        "active" ->
-          from [t, _] in query,
-            where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^now)
+    rows =
+      query
+      |> filter_tokens(params["filter"], now)
+      |> tokens_before(parse_int(params["max_id"], nil))
+      |> Repo.all()
 
-        "revoked" ->
-          from [t, _] in query, where: not is_nil(t.revoked_at)
-
-        _ ->
-          query
-      end
-
-    query =
-      case parse_int(params["max_id"], nil) do
-        nil -> query
-        max_id -> from [t, _] in query, where: t.id < ^max_id
-      end
-
-    rows = Repo.all(query)
-
-    body =
-      Enum.map(rows, fn %{token: t, client: c} ->
-        %{
-          "id" => Integer.to_string(t.id),
-          "current_session" => t.id == current.id,
-          "name" => c.name,
-          "scopes" => t.scopes,
-          "revoked" => not is_nil(t.revoked_at),
-          "status" => token_status(t, now),
-          "created_at" => DateTime.to_iso8601(t.inserted_at),
-          "expires_at" =>
-            case t.expires_at do
-              %DateTime{} = dt -> DateTime.to_iso8601(dt)
-              _ -> nil
-            end
-        }
-      end)
+    body = Enum.map(rows, &render_app_token(&1, current, now))
 
     conn =
       case List.last(rows) do
@@ -127,6 +96,36 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
       end
 
     json(conn, body)
+  end
+
+  defp filter_tokens(query, "active", now) do
+    from [t, _] in query,
+      where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^now)
+  end
+
+  defp filter_tokens(query, "revoked", _now),
+    do: from([t, _] in query, where: not is_nil(t.revoked_at))
+
+  defp filter_tokens(query, _filter, _now), do: query
+
+  defp tokens_before(query, nil), do: query
+  defp tokens_before(query, max_id), do: from([t, _] in query, where: t.id < ^max_id)
+
+  defp render_app_token(%{token: t, client: c}, current, now) do
+    %{
+      "id" => Integer.to_string(t.id),
+      "current_session" => t.id == current.id,
+      "name" => c.name,
+      "scopes" => t.scopes,
+      "revoked" => not is_nil(t.revoked_at),
+      "status" => token_status(t, now),
+      "created_at" => DateTime.to_iso8601(t.inserted_at),
+      "expires_at" =>
+        case t.expires_at do
+          %DateTime{} = dt -> DateTime.to_iso8601(dt)
+          _ -> nil
+        end
+    }
   end
 
   defp token_status(%Token{revoked_at: %DateTime{}}, _now), do: "revoked"
@@ -503,31 +502,26 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
       {:ok, _report} ->
         json(conn, %{"msg" => "Successfully sent report", "code" => 200})
 
-      {:error, :duplicate} ->
-        report_error(conn, "Duplicate report", "ERROR_REPORT_DUPLICATE")
-
-      {:error, :self_report} ->
-        report_error(conn, "Cannot self report", "ERROR_NO_SELF_REPORTS")
-
-      {:error, :invalid_type} ->
-        report_error(conn, "Invalid report type", "ERROR_TYPE_INVALID")
-
-      {:error, :invalid_object_type} ->
-        report_error(conn, "Invalid object type", "ERROR_REPORT_OBJECT_TYPE_INVALID")
-
-      {:error, :invalid_object_id} ->
-        report_error(conn, "Invalid object id", "ERROR_INVALID_OBJECT_ID")
-
-      {:error, :missing_object_id} ->
-        report_error(conn, "Invalid or missing parameters", "ERROR_INVALID_PARAMS")
-
-      {:error, :message_too_long} ->
-        report_error(conn, "Message is too long", "ERROR_MESSAGE_TOO_LONG")
-
-      {:error, _} ->
-        report_error(conn, "Invalid report", "ERROR_REPORT_INVALID")
+      {:error, reason} ->
+        {msg, code} = report_failure(reason)
+        report_error(conn, msg, code)
     end
   end
+
+  defp report_failure(:duplicate), do: {"Duplicate report", "ERROR_REPORT_DUPLICATE"}
+  defp report_failure(:self_report), do: {"Cannot self report", "ERROR_NO_SELF_REPORTS"}
+  defp report_failure(:invalid_type), do: {"Invalid report type", "ERROR_TYPE_INVALID"}
+
+  defp report_failure(:invalid_object_type),
+    do: {"Invalid object type", "ERROR_REPORT_OBJECT_TYPE_INVALID"}
+
+  defp report_failure(:invalid_object_id), do: {"Invalid object id", "ERROR_INVALID_OBJECT_ID"}
+
+  defp report_failure(:missing_object_id),
+    do: {"Invalid or missing parameters", "ERROR_INVALID_PARAMS"}
+
+  defp report_failure(:message_too_long), do: {"Message is too long", "ERROR_MESSAGE_TOO_LONG"}
+  defp report_failure(_), do: {"Invalid report", "ERROR_REPORT_INVALID"}
 
   ## Internals
 

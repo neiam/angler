@@ -63,25 +63,25 @@ defmodule AnglerWeb.StreamingController do
   end
 
   defp initial_topics(token, conn, params) do
-    base =
-      case params["stream"] do
-        "user" -> ["user:#{token.profile_id}"]
-        "public" -> ["public"]
-        "public:local" -> ["public:local"]
-        "direct" -> ["user:#{token.profile_id}"]
-        "hashtag" -> if(is_binary(params["tag"]), do: ["hashtag:#{params["tag"]}"], else: [])
-        _ -> []
-      end
+    base = stream_topics(params["stream"], token.profile_id, params["tag"])
 
+    # A stream named in the path (no hashtags there) comes first.
     case path_stream(conn) do
-      nil -> base
-      "user" -> ["user:#{token.profile_id}" | base] |> Enum.uniq()
-      "public" -> ["public" | base] |> Enum.uniq()
-      "public:local" -> ["public:local" | base] |> Enum.uniq()
-      "direct" -> ["user:#{token.profile_id}" | base] |> Enum.uniq()
-      _ -> base
+      stream when stream in ["user", "public", "public:local", "direct"] ->
+        Enum.uniq(stream_topics(stream, token.profile_id, nil) ++ base)
+
+      _ ->
+        base
     end
   end
+
+  defp stream_topics(stream, profile_id, _tag) when stream in ["user", "direct"],
+    do: ["user:#{profile_id}"]
+
+  defp stream_topics("public", _profile_id, _tag), do: ["public"]
+  defp stream_topics("public:local", _profile_id, _tag), do: ["public:local"]
+  defp stream_topics("hashtag", _profile_id, tag) when is_binary(tag), do: ["hashtag:#{tag}"]
+  defp stream_topics(_stream, _profile_id, _tag), do: []
 
   defp path_stream(conn) do
     case conn.path_info do

@@ -316,37 +316,42 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
     %{user: user, profile: profile} = BearerAuth.current_scope(conn)
 
     case get_req_header(conn, "idempotency-key") do
-      [key | _] when key != "" ->
-        case Idempotency.claim(user.id, key) do
-          :claimed ->
-            conn = create.(conn)
+      [key | _] when key != "" -> idempotent_create(conn, user, profile, key, create)
+      _ -> create.(conn)
+    end
+  end
 
-            if conn.status == 200 and is_integer(conn.assigns[:created_status_id]) do
-              Idempotency.complete(user.id, key, conn.assigns.created_status_id)
-            else
-              Idempotency.release(user.id, key)
-            end
+  defp idempotent_create(conn, user, profile, key, create) do
+    case Idempotency.claim(user.id, key) do
+      :claimed ->
+        create_claimed(conn, user, key, create)
 
-            conn
+      {:existing, status_id} ->
+        case Statuses.get(status_id) do
+          %Status{deleted_at: nil} = status ->
+            json(conn, StatusJSON.render(status, profile.id))
 
-          {:existing, status_id} ->
-            case Statuses.get(status_id) do
-              %Status{deleted_at: nil} = status ->
-                json(conn, StatusJSON.render(status, profile.id))
-
-              _ ->
-                # The original was deleted since; post anew.
-                Idempotency.release(user.id, key)
-                create.(conn)
-            end
-
-          :in_flight ->
-            conn |> put_status(:conflict) |> json(%{"error" => "Request already in progress."})
+          _ ->
+            # The original was deleted since; post anew.
+            Idempotency.release(user.id, key)
+            create.(conn)
         end
 
-      _ ->
-        create.(conn)
+      :in_flight ->
+        conn |> put_status(:conflict) |> json(%{"error" => "Request already in progress."})
     end
+  end
+
+  defp create_claimed(conn, user, key, create) do
+    conn = create.(conn)
+
+    if conn.status == 200 and is_integer(conn.assigns[:created_status_id]) do
+      Idempotency.complete(user.id, key, conn.assigns.created_status_id)
+    else
+      Idempotency.release(user.id, key)
+    end
+
+    conn
   end
 
   defp do_create(conn, profile, params) do
@@ -360,27 +365,6 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
         |> put_status(:ok)
         |> json(StatusJSON.render(status, profile.id))
 
-      {:error, :empty_status} ->
-        validation_error(conn, "Status is required")
-
-      {:error, :bad_caption} ->
-        validation_error(conn, "Status must be a string")
-
-      {:error, :bad_visibility} ->
-        validation_error(conn, "Visibility must be one of: public, unlisted, private, direct")
-
-      {:error, :bad_quote_policy} ->
-        validation_error(conn, @bad_quote_policy)
-
-      {:error, :reply_parent_not_found} ->
-        validation_error(conn, "Reply target not found")
-
-      {:error, :reply_parent_not_visible} ->
-        validation_error(conn, "Reply target not visible")
-
-      {:error, :bad_reply_parent_id} ->
-        validation_error(conn, "Reply target id is invalid")
-
       {:error, :not_local_profile} ->
         conn |> put_status(:forbidden) |> json(%{"error" => "Not a local account"})
 
@@ -388,8 +372,22 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{"error" => "Validation failed", "errors" => format_changeset(cs)})
+
+      {:error, reason} ->
+        validation_error(conn, create_error(reason))
     end
   end
+
+  defp create_error(:empty_status), do: "Status is required"
+  defp create_error(:bad_caption), do: "Status must be a string"
+
+  defp create_error(:bad_visibility),
+    do: "Visibility must be one of: public, unlisted, private, direct"
+
+  defp create_error(:bad_quote_policy), do: @bad_quote_policy
+  defp create_error(:reply_parent_not_found), do: "Reply target not found"
+  defp create_error(:reply_parent_not_visible), do: "Reply target not visible"
+  defp create_error(:bad_reply_parent_id), do: "Reply target id is invalid"
 
   ## Interactions
   #

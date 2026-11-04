@@ -33,20 +33,7 @@ defmodule AnglerWeb.MastodonAPI.ReportController do
 
     case Reports.submit(user, pixelfed_attrs) do
       {:ok, report} ->
-        target = Angler.Profiles.get_profile(report.reported_profile_id)
-
-        json(conn, %{
-          "id" => Integer.to_string(report.id),
-          "action_taken" => false,
-          "action_taken_at" => nil,
-          "category" => params["category"] || "other",
-          "comment" => params["comment"] || "",
-          "forwarded" => false,
-          "created_at" => DateTime.to_iso8601(report.inserted_at),
-          "status_ids" => List.wrap(params["status_ids"] || []),
-          "rule_ids" => List.wrap(params["rule_ids"] || []),
-          "target_account" => target && Account.render(target)
-        })
+        json(conn, render_report(report, params))
 
       {:error, :duplicate} ->
         validation_error(conn, "already reported")
@@ -60,6 +47,23 @@ defmodule AnglerWeb.MastodonAPI.ReportController do
       {:error, reason} ->
         validation_error(conn, to_string(reason))
     end
+  end
+
+  defp render_report(report, params) do
+    target = Angler.Profiles.get_profile(report.reported_profile_id)
+
+    %{
+      "id" => Integer.to_string(report.id),
+      "action_taken" => false,
+      "action_taken_at" => nil,
+      "category" => params["category"] || "other",
+      "comment" => params["comment"] || "",
+      "forwarded" => false,
+      "created_at" => DateTime.to_iso8601(report.inserted_at),
+      "status_ids" => List.wrap(params["status_ids"] || []),
+      "rule_ids" => List.wrap(params["rule_ids"] || []),
+      "target_account" => target && Account.render(target)
+    }
   end
 
   defp map_category("spam", _), do: "spam"

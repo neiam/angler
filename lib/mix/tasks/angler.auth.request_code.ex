@@ -45,21 +45,23 @@ defmodule Mix.Tasks.Angler.Auth.RequestCode do
           Mix.shell().info("ANGLER_CODE=#{code}")
         end
 
-        if Keyword.get(opts, :send, true) do
-          case Angler.Auth.Workers.SendAppCodeEmail.enqueue(email, code) do
-            {:ok, %Oban.Job{id: id}} ->
-              Mix.shell().info("Enqueued send (Oban job ##{id}). Drain workers to deliver.")
-
-            {:error, reason} ->
-              Mix.shell().error("Failed to enqueue send: #{inspect(reason)}")
-          end
-        end
+        if Keyword.get(opts, :send, true), do: enqueue_send(email, code)
 
       {:error, :too_many_attempts} ->
         Mix.raise("Too many attempts for #{email}. Wait or clear the row manually.")
 
       {:error, %Ecto.Changeset{} = cs} ->
         Mix.raise("Could not issue code: #{inspect(cs.errors)}")
+    end
+  end
+
+  defp enqueue_send(email, code) do
+    case Angler.Auth.Workers.SendAppCodeEmail.enqueue(email, code) do
+      {:ok, %Oban.Job{id: id}} ->
+        Mix.shell().info("Enqueued send (Oban job ##{id}). Drain workers to deliver.")
+
+      {:error, reason} ->
+        Mix.shell().error("Failed to enqueue send: #{inspect(reason)}")
     end
   end
 end

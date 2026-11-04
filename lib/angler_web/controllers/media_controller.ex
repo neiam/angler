@@ -12,6 +12,17 @@ defmodule AnglerWeb.MediaController do
 
   alias Angler.Media.Storage.Local
 
+  @content_types %{
+    ".jpg" => "image/jpeg",
+    ".jpeg" => "image/jpeg",
+    ".png" => "image/png",
+    ".webp" => "image/webp",
+    ".gif" => "image/gif",
+    ".mp4" => "video/mp4",
+    ".webm" => "video/webm",
+    ".mov" => "video/quicktime"
+  }
+
   ## GET /storage/m/_v2/:pid/:mhash/:uhash/:f
   ##
   ## Legacy Pixelfed media URL format (`storage/m/_v2/...`). Older clients
@@ -49,17 +60,6 @@ defmodule AnglerWeb.MediaController do
     end
   end
 
-  defp guess_type(path) do
-    case Path.extname(path) do
-      ".jpg" -> "image/jpeg"
-      ".jpeg" -> "image/jpeg"
-      ".png" -> "image/png"
-      ".webp" -> "image/webp"
-      ".gif" -> "image/gif"
-      ".mp4" -> "video/mp4"
-      ".webm" -> "video/webm"
-      ".mov" -> "video/quicktime"
-      _ -> "application/octet-stream"
-    end
-  end
+  defp guess_type(path),
+    do: Map.get(@content_types, Path.extname(path), "application/octet-stream")
 end

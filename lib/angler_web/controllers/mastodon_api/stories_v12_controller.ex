@@ -49,36 +49,39 @@ defmodule AnglerWeb.MastodonAPI.StoriesV12Controller do
           {:ok, _story} ->
             json(conn, %{"code" => 200, "msg" => "Successfully added"})
 
-          {:error, :limit_reached} ->
-            conn
-            |> put_status(418)
-            |> json(%{
-              "code" => 418,
-              "error" => "You've reached your daily limit of new Stories."
-            })
-
-          {:error, :too_many_overlays} ->
-            validation_error(conn, %{"overlays" => ["maximum 4 overlays per story"]})
-
-          {:error, :unsupported_type} ->
-            validation_error(conn, %{"image" => ["unsupported media type"]})
-
-          {:error, :no_file} ->
-            validation_error(conn, %{"image" => ["is required"]})
-
-          {:error, {:invalid_overlay, idx, reason}} ->
-            validation_error(conn, %{
-              "overlays.#{idx}.content" => [overlay_error_message(reason)]
-            })
-
-          {:error, %Ecto.Changeset{} = cs} ->
-            validation_error(conn, traverse(cs))
-
           {:error, reason} ->
-            validation_error(conn, %{"error" => [to_string(reason)]})
+            publish_error(conn, reason)
         end
     end
   end
+
+  defp publish_error(conn, :limit_reached) do
+    conn
+    |> put_status(418)
+    |> json(%{
+      "code" => 418,
+      "error" => "You've reached your daily limit of new Stories."
+    })
+  end
+
+  defp publish_error(conn, :too_many_overlays),
+    do: validation_error(conn, %{"overlays" => ["maximum 4 overlays per story"]})
+
+  defp publish_error(conn, :unsupported_type),
+    do: validation_error(conn, %{"image" => ["unsupported media type"]})
+
+  defp publish_error(conn, :no_file), do: validation_error(conn, %{"image" => ["is required"]})
+
+  defp publish_error(conn, {:invalid_overlay, idx, reason}) do
+    validation_error(conn, %{
+      "overlays.#{idx}.content" => [overlay_error_message(reason)]
+    })
+  end
+
+  defp publish_error(conn, %Ecto.Changeset{} = cs), do: validation_error(conn, traverse(cs))
+
+  defp publish_error(conn, reason),
+    do: validation_error(conn, %{"error" => [to_string(reason)]})
 
   ## GET /mention-autocomplete
 

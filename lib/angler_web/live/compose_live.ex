@@ -94,26 +94,30 @@ defmodule AnglerWeb.ComposeLive do
         {:noreply, put_flash(socket, :error, "Add a photo or write something.")}
 
       true ->
-        attrs = %{
-          "status" => caption,
-          "media_ids" => media_ids,
-          "visibility" => params["visibility"] || "public",
-          "sensitive" => params["sensitive"] == "true"
-        }
+        create_post(socket, profile, caption, media_ids, params)
+    end
+  end
 
-        case Statuses.create_local(profile, attrs) do
-          {:ok, status} ->
-            FeedInsert.enqueue(status.id)
-            StatusDeliver.enqueue_for(status)
+  defp create_post(socket, profile, caption, media_ids, params) do
+    attrs = %{
+      "status" => caption,
+      "media_ids" => media_ids,
+      "visibility" => params["visibility"] || "public",
+      "sensitive" => params["sensitive"] == "true"
+    }
 
-            {:noreply,
-             socket
-             |> put_flash(:info, "Posted!")
-             |> push_navigate(to: ~p"/p/#{profile.username}/#{status.id}")}
+    case Statuses.create_local(profile, attrs) do
+      {:ok, status} ->
+        FeedInsert.enqueue(status.id)
+        StatusDeliver.enqueue_for(status)
 
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "Couldn't post (#{inspect(reason)}).")}
-        end
+        {:noreply,
+         socket
+         |> put_flash(:info, "Posted!")
+         |> push_navigate(to: ~p"/p/#{profile.username}/#{status.id}")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Couldn't post (#{inspect(reason)}).")}
     end
   end
 

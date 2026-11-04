@@ -226,27 +226,28 @@ defmodule AnglerWeb.MastodonAPI.StoriesController do
 
       true ->
         case parse_id(params["sid"]) do
-          {:ok, sid} ->
-            case Stories.comment(profile, sid, params["caption"]) do
-              {:ok, status} ->
-                json(conn, %{
-                  "code" => 200,
-                  "msg" => "Successfully sent",
-                  "id" => Integer.to_string(status.id)
-                })
-
-              {:error, :replies_disabled} ->
-                conn
-                |> put_status(:unprocessable_entity)
-                |> json(%{"error" => "Replies are disabled for this story."})
-
-              {:error, _} ->
-                not_found(conn)
-            end
-
-          _ ->
-            validation_error(conn, "sid is required")
+          {:ok, sid} -> send_comment(conn, profile, sid, params["caption"])
+          _ -> validation_error(conn, "sid is required")
         end
+    end
+  end
+
+  defp send_comment(conn, profile, sid, caption) do
+    case Stories.comment(profile, sid, caption) do
+      {:ok, status} ->
+        json(conn, %{
+          "code" => 200,
+          "msg" => "Successfully sent",
+          "id" => Integer.to_string(status.id)
+        })
+
+      {:error, :replies_disabled} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{"error" => "Replies are disabled for this story."})
+
+      {:error, _} ->
+        not_found(conn)
     end
   end
 

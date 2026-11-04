@@ -30,17 +30,7 @@ defmodule AnglerWeb.MastodonAPI.DirectoryController do
   end
 
   defp do_index(conn, params) do
-    limit =
-      case params["limit"] do
-        s when is_binary(s) ->
-          case Integer.parse(s) do
-            {n, ""} -> n |> max(1) |> min(40)
-            _ -> 20
-          end
-
-        _ ->
-          20
-      end
+    limit = parse_limit(params["limit"], 20)
 
     profiles =
       Repo.all(
@@ -52,43 +42,42 @@ defmodule AnglerWeb.MastodonAPI.DirectoryController do
           limit: ^limit
       )
 
-    body =
-      Enum.map(profiles, fn p ->
-        %{
-          "id" => Integer.to_string(p.id),
-          "username" => p.username,
-          "display_name" => p.name || "",
-          "avatar" => p.avatar_path || "",
-          "header" => p.header_path || "",
-          "url" => Profiles.url(p),
-          "followers_count" => p.followers_count,
-          "statuses_count" => p.statuses_count,
-          "last_status_at" =>
-            case p.last_status_at do
-              %DateTime{} = dt -> DateTime.to_iso8601(dt)
-              _ -> nil
-            end
-        }
-      end)
-
-    json(conn, body)
+    json(conn, Enum.map(profiles, &render_profile/1))
   end
+
+  defp render_profile(p) do
+    %{
+      "id" => Integer.to_string(p.id),
+      "username" => p.username,
+      "display_name" => p.name || "",
+      "avatar" => p.avatar_path || "",
+      "header" => p.header_path || "",
+      "url" => Profiles.url(p),
+      "followers_count" => p.followers_count,
+      "statuses_count" => p.statuses_count,
+      "last_status_at" =>
+        case p.last_status_at do
+          %DateTime{} = dt -> DateTime.to_iso8601(dt)
+          _ -> nil
+        end
+    }
+  end
+
+  # `limit` param clamped to 1..40; `default` when absent or not an integer.
+  defp parse_limit(s, default) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n |> max(1) |> min(40)
+      _ -> default
+    end
+  end
+
+  defp parse_limit(_, default), do: default
 
   ## GET /landing/v1/explore — recent public photo/video posts grid.
 
   def explore(conn, params) do
     if explore_enabled?() do
-      limit =
-        case params["limit"] do
-          s when is_binary(s) ->
-            case Integer.parse(s) do
-              {n, ""} -> n |> max(1) |> min(40)
-              _ -> 24
-            end
-
-          _ ->
-            24
-        end
+      limit = parse_limit(params["limit"], 24)
 
       statuses =
         Repo.all(
