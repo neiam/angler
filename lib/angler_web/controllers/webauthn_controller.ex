@@ -88,9 +88,8 @@ defmodule AnglerWeb.WebauthnController do
   defp unstash(nil), do: nil
 
   defp unstash(b64) do
-    with {:ok, bin} <- Base.decode64(b64) do
-      :erlang.binary_to_term(bin, [:safe])
-    else
+    case Base.decode64(b64) do
+      {:ok, bin} -> :erlang.binary_to_term(bin, [:safe])
       _ -> nil
     end
   end

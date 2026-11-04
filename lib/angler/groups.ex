@@ -75,19 +75,17 @@ defmodule Angler.Groups do
   def create(%Profile{} = owner, attrs) when is_map(attrs) do
     name = attrs["name"] || attrs[:name]
 
-    cond do
-      not is_binary(name) or String.trim(name) == "" ->
-        {:error, :name_required}
+    if not is_binary(name) or String.trim(name) == "" do
+      {:error, :name_required}
+    else
+      slug = derive_unique_slug(name)
+      normalized = normalize_attrs(attrs, owner, slug)
 
-      true ->
-        slug = derive_unique_slug(name)
-        normalized = normalize_attrs(attrs, owner, slug)
-
-        Repo.transaction(fn ->
-          {:ok, group} = %Group{} |> Group.changeset(normalized) |> Repo.insert()
-          {:ok, _} = add_owner_membership(group, owner)
-          group
-        end)
+      Repo.transaction(fn ->
+        {:ok, group} = %Group{} |> Group.changeset(normalized) |> Repo.insert()
+        {:ok, _} = add_owner_membership(group, owner)
+        group
+      end)
     end
   end
 
@@ -279,31 +277,29 @@ defmodule Angler.Groups do
   @spec accept_request(Profile.t(), Group.t(), integer()) ::
           {:ok, Member.t()} | {:error, atom()}
   def accept_request(%Profile{} = actor, %Group{} = group, target_profile_id) do
-    cond do
-      not can_admin?(actor, group) ->
-        {:error, :forbidden}
+    if can_admin?(actor, group) do
+      case Repo.get_by(Member, group_id: group.id, profile_id: target_profile_id) do
+        nil ->
+          {:error, :not_found}
 
-      true ->
-        case Repo.get_by(Member, group_id: group.id, profile_id: target_profile_id) do
-          nil ->
-            {:error, :not_found}
+        %Member{accepted_at: %DateTime{}} = m ->
+          {:ok, m}
 
-          %Member{accepted_at: %DateTime{}} = m ->
-            {:ok, m}
+        %Member{} = m ->
+          Repo.transaction(fn ->
+            updated =
+              m
+              |> Ecto.Changeset.change(accepted_at: DateTime.utc_now())
+              |> Repo.update!()
 
-          %Member{} = m ->
-            Repo.transaction(fn ->
-              updated =
-                m
-                |> Ecto.Changeset.change(accepted_at: DateTime.utc_now())
-                |> Repo.update!()
+            from(g in Group, where: g.id == ^group.id)
+            |> Repo.update_all(inc: [member_count: 1])
 
-              from(g in Group, where: g.id == ^group.id)
-              |> Repo.update_all(inc: [member_count: 1])
-
-              updated
-            end)
-        end
+            updated
+          end)
+      end
+    else
+      {:error, :forbidden}
     end
   end
 
@@ -378,27 +374,25 @@ defmodule Angler.Groups do
 
   @spec invite(Profile.t(), Group.t(), integer()) :: {:ok, Invite.t()} | {:error, atom()}
   def invite(%Profile{} = actor, %Group{} = group, target_profile_id) do
-    cond do
-      not can_admin?(actor, group) ->
-        {:error, :forbidden}
+    if can_admin?(actor, group) do
+      case %{
+             group_id: group.id,
+             profile_id: target_profile_id,
+             inviter_profile_id: actor.id
+           }
+           |> Invite.changeset()
+           |> Repo.insert(on_conflict: :nothing) do
+        {:ok, %Invite{id: nil}} ->
+          {:ok, Repo.get_by!(Invite, group_id: group.id, profile_id: target_profile_id)}
 
-      true ->
-        case %{
-               group_id: group.id,
-               profile_id: target_profile_id,
-               inviter_profile_id: actor.id
-             }
-             |> Invite.changeset()
-             |> Repo.insert(on_conflict: :nothing) do
-          {:ok, %Invite{id: nil}} ->
-            {:ok, Repo.get_by!(Invite, group_id: group.id, profile_id: target_profile_id)}
+        {:ok, inv} ->
+          {:ok, inv}
 
-          {:ok, inv} ->
-            {:ok, inv}
-
-          err ->
-            err
-        end
+        err ->
+          err
+      end
+    else
+      {:error, :forbidden}
     end
   end
 

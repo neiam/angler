@@ -112,12 +112,14 @@ defmodule AnglerWeb.CuratedRegisterLive do
   end
 
   defp age_from(birthdate) do
-    with {:ok, dob} <- Date.from_iso8601(to_string(birthdate)) do
-      today = Date.utc_today()
-      had_birthday? = {today.month, today.day} >= {dob.month, dob.day}
-      {:ok, today.year - dob.year - if(had_birthday?, do: 0, else: 1)}
-    else
-      _ -> :error
+    case Date.from_iso8601(to_string(birthdate)) do
+      {:ok, dob} ->
+        today = Date.utc_today()
+        had_birthday? = {today.month, today.day} >= {dob.month, dob.day}
+        {:ok, today.year - dob.year - if(had_birthday?, do: 0, else: 1)}
+
+      _ ->
+        :error
     end
   end
 

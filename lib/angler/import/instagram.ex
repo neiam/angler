@@ -118,23 +118,25 @@ defmodule Angler.Import.Instagram do
   end
 
   defp import_one(profile, root_dir, post, opts, dry_run?, acc) do
-    with {:ok, ms} <- post_timestamp_ms(post) do
-      {seq, seen_ms} = next_seq(acc.seen_ms, ms)
-      id = Snowflake.from_timestamp(ms, seq)
-      acc = %{acc | seen_ms: seen_ms}
+    case post_timestamp_ms(post) do
+      {:ok, ms} ->
+        {seq, seen_ms} = next_seq(acc.seen_ms, ms)
+        id = Snowflake.from_timestamp(ms, seq)
+        acc = %{acc | seen_ms: seen_ms}
 
-      cond do
-        status_exists?(id) ->
-          %{acc | skipped: acc.skipped + 1}
+        cond do
+          status_exists?(id) ->
+            %{acc | skipped: acc.skipped + 1}
 
-        dry_run? ->
-          %{acc | imported: acc.imported + 1}
+          dry_run? ->
+            %{acc | imported: acc.imported + 1}
 
-        true ->
-          do_import(profile, root_dir, post, id, ms, opts, acc)
-      end
-    else
-      :error -> fail(acc, "post missing creation_timestamp")
+          true ->
+            do_import(profile, root_dir, post, id, ms, opts, acc)
+        end
+
+      :error ->
+        fail(acc, "post missing creation_timestamp")
     end
   end
 
@@ -142,29 +144,27 @@ defmodule Angler.Import.Instagram do
     media = Map.get(post, "media", []) |> List.wrap()
     {asset_ids, errors} = upload_media(profile, root_dir, media)
 
-    cond do
-      asset_ids == [] ->
-        fail(acc, "no usable media for post @ #{ms}; #{Enum.join(errors, "; ")}")
+    if asset_ids == [] do
+      fail(acc, "no usable media for post @ #{ms}; #{Enum.join(errors, "; ")}")
+    else
+      attrs = %{
+        "status" => caption_for(post, media),
+        "media_ids" => asset_ids,
+        "visibility" => Keyword.get(opts, :visibility, "public"),
+        "language" => Keyword.get(opts, :language, "en")
+      }
 
-      true ->
-        attrs = %{
-          "status" => caption_for(post, media),
-          "media_ids" => asset_ids,
-          "visibility" => Keyword.get(opts, :visibility, "public"),
-          "language" => Keyword.get(opts, :language, "en")
-        }
+      # :utc_datetime_usec columns require microsecond precision.
+      created_at = DateTime.from_unix!(ms * 1000, :microsecond)
+      post_opts = [id: id, created_at: created_at, broadcast: false]
 
-        # :utc_datetime_usec columns require microsecond precision.
-        created_at = DateTime.from_unix!(ms * 1000, :microsecond)
-        post_opts = [id: id, created_at: created_at, broadcast: false]
+      case Statuses.create_local(profile, attrs, post_opts) do
+        {:ok, _status} ->
+          %{acc | imported: acc.imported + 1, errors: errors ++ acc.errors}
 
-        case Statuses.create_local(profile, attrs, post_opts) do
-          {:ok, _status} ->
-            %{acc | imported: acc.imported + 1, errors: errors ++ acc.errors}
-
-          {:error, reason} ->
-            fail(acc, "create_local failed @ #{ms}: #{inspect(reason)}")
-        end
+        {:error, reason} ->
+          fail(acc, "create_local failed @ #{ms}: #{inspect(reason)}")
+      end
     end
   end
 
@@ -301,15 +301,13 @@ defmodule Angler.Import.Instagram do
   defp resolve_media_path(root_dir, uri) do
     direct = Path.join(root_dir, uri)
 
-    cond do
-      File.regular?(direct) ->
-        {:ok, direct}
-
-      true ->
-        case Path.wildcard(Path.join([root_dir, "**", Path.basename(uri)])) do
-          [hit | _] -> {:ok, hit}
-          [] -> :error
-        end
+    if File.regular?(direct) do
+      {:ok, direct}
+    else
+      case Path.wildcard(Path.join([root_dir, "**", Path.basename(uri)])) do
+        [hit | _] -> {:ok, hit}
+        [] -> :error
+      end
     end
   end
 

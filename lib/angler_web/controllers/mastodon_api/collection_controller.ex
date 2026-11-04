@@ -25,13 +25,15 @@ defmodule AnglerWeb.MastodonAPI.CollectionController do
   def for_account(conn, %{"id" => id}) do
     viewer_id = viewer_id(conn)
 
-    with {:ok, int_id} <- parse_id(id) do
-      json(
-        conn,
-        Collections.for_profile(int_id, viewer_id) |> Enum.map(&render_one/1)
-      )
-    else
-      _ -> not_found(conn)
+    case parse_id(id) do
+      {:ok, int_id} ->
+        json(
+          conn,
+          Collections.for_profile(int_id, viewer_id) |> Enum.map(&render_one/1)
+        )
+
+      _ ->
+        not_found(conn)
     end
   end
 

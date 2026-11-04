@@ -181,21 +181,19 @@ defmodule AnglerWeb.AdminSettingsLive do
   end
 
   def handle_event("demote", %{"username" => username}, socket) do
-    cond do
-      username == socket.assigns.current_profile.username ->
-        {:noreply, put_flash(socket, :error, "You can't remove your own admin access.")}
+    if username == socket.assigns.current_profile.username do
+      {:noreply, put_flash(socket, :error, "You can't remove your own admin access.")}
+    else
+      case Accounts.lookup_by_handle(username) do
+        %{} = user ->
+          {:ok, _} = Accounts.set_admin(user, false)
 
-      true ->
-        case Accounts.lookup_by_handle(username) do
-          %{} = user ->
-            {:ok, _} = Accounts.set_admin(user, false)
+          {:noreply,
+           socket |> put_flash(:info, "Removed admin from @#{username}.") |> assign_admins()}
 
-            {:noreply,
-             socket |> put_flash(:info, "Removed admin from @#{username}.") |> assign_admins()}
-
-          _ ->
-            {:noreply, assign_admins(socket)}
-        end
+        _ ->
+          {:noreply, assign_admins(socket)}
+      end
     end
   end
 

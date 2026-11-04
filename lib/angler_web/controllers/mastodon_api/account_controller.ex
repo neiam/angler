@@ -526,26 +526,24 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
     %{user: user, profile: profile} = BearerAuth.current_scope(conn)
     upload = params["header"] || params["file"]
 
-    cond do
-      is_nil(upload) ->
-        conn |> put_status(:unprocessable_entity) |> json(%{"error" => "header is required"})
+    if is_nil(upload) do
+      conn |> put_status(:unprocessable_entity) |> json(%{"error" => "header is required"})
+    else
+      case Profiles.update_credentials(profile, %{"header" => upload}) do
+        {:ok, updated} ->
+          json(conn, Account.render(updated) |> Map.put("source", source_block(user, updated)))
 
-      true ->
-        case Profiles.update_credentials(profile, %{"header" => upload}) do
-          {:ok, updated} ->
-            json(conn, Account.render(updated) |> Map.put("source", source_block(user, updated)))
+        {:error, %Ecto.Changeset{} = cs} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{"error" => "Validation failed", "errors" => translate_errors(cs)})
 
-          {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{"error" => "Validation failed", "errors" => translate_errors(cs)})
+        {:error, :not_local_profile} ->
+          conn |> put_status(:forbidden) |> json(%{"error" => "Not a local profile"})
 
-          {:error, :not_local_profile} ->
-            conn |> put_status(:forbidden) |> json(%{"error" => "Not a local profile"})
-
-          {:error, reason} ->
-            conn |> put_status(:unprocessable_entity) |> json(%{"error" => to_string(reason)})
-        end
+        {:error, reason} ->
+          conn |> put_status(:unprocessable_entity) |> json(%{"error" => to_string(reason)})
+      end
     end
   end
 
@@ -553,30 +551,28 @@ defmodule AnglerWeb.MastodonAPI.AccountController do
     %{user: user, profile: profile} = BearerAuth.current_scope(conn)
     upload = params["avatar"] || params["file"]
 
-    cond do
-      is_nil(upload) ->
-        conn |> put_status(:unprocessable_entity) |> json(%{"error" => "avatar is required"})
+    if is_nil(upload) do
+      conn |> put_status(:unprocessable_entity) |> json(%{"error" => "avatar is required"})
+    else
+      case Profiles.update_credentials(profile, %{"avatar" => upload}) do
+        {:ok, updated} ->
+          body =
+            Account.render(updated)
+            |> Map.put("source", source_block(user, updated))
 
-      true ->
-        case Profiles.update_credentials(profile, %{"avatar" => upload}) do
-          {:ok, updated} ->
-            body =
-              Account.render(updated)
-              |> Map.put("source", source_block(user, updated))
+          json(conn, body)
 
-            json(conn, body)
+        {:error, %Ecto.Changeset{} = cs} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{"error" => "Validation failed", "errors" => translate_errors(cs)})
 
-          {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{"error" => "Validation failed", "errors" => translate_errors(cs)})
+        {:error, :not_local_profile} ->
+          conn |> put_status(:forbidden) |> json(%{"error" => "Not a local profile"})
 
-          {:error, :not_local_profile} ->
-            conn |> put_status(:forbidden) |> json(%{"error" => "Not a local profile"})
-
-          {:error, reason} ->
-            conn |> put_status(:unprocessable_entity) |> json(%{"error" => to_string(reason)})
-        end
+        {:error, reason} ->
+          conn |> put_status(:unprocessable_entity) |> json(%{"error" => to_string(reason)})
+      end
     end
   end
 

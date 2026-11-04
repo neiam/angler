@@ -141,15 +141,17 @@ defmodule AnglerWeb.MastodonAPI.DirectThreadController do
   def read(conn, params) do
     %{profile: viewer} = BearerAuth.current_scope(conn)
 
-    with {:ok, pid} <- parse_id(params["pid"]) do
-      with %{id: cid} <- Conversations.between(viewer.id, pid),
-           %{} = row <- Conversations.get(viewer.id, cid) do
-        Conversations.mark_read(row)
-      end
+    case parse_id(params["pid"]) do
+      {:ok, pid} ->
+        with %{id: cid} <- Conversations.between(viewer.id, pid),
+             %{} = row <- Conversations.get(viewer.id, cid) do
+          Conversations.mark_read(row)
+        end
 
-      json(conn, [200])
-    else
-      _ -> not_found(conn)
+        json(conn, [200])
+
+      _ ->
+        not_found(conn)
     end
   end
 

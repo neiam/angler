@@ -167,9 +167,7 @@ defmodule Angler.Admin do
           {:ok, Profile.t()} | {:error, atom()}
   def act_on_account(%Profile{} = target, %Profile{} = moderator, action, opts \\ [])
       when is_binary(action) do
-    if action not in AccountAction.actions() do
-      {:error, :invalid_action}
-    else
+    if action in AccountAction.actions() do
       Repo.transaction(fn ->
         apply_action!(target, action)
         log_action!(target, moderator, action, opts)
@@ -179,6 +177,8 @@ defmodule Angler.Admin do
         {:ok, profile} -> {:ok, profile}
         {:error, _} = err -> err
       end
+    else
+      {:error, :invalid_action}
     end
   end
 

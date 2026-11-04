@@ -174,19 +174,17 @@ defmodule Angler.Notifications do
       since_id: parse_id(params["since_id"])
     }
 
-    cond do
-      cursor.min_id ->
-        from n in q,
-          where: n.id > ^cursor.min_id,
-          order_by: [asc: n.id],
-          limit: ^limit
-
-      true ->
-        q
-        |> maybe_max(cursor.max_id)
-        |> maybe_since(cursor.since_id)
-        |> order_by([n], desc: n.id)
-        |> limit(^limit)
+    if cursor.min_id do
+      from n in q,
+        where: n.id > ^cursor.min_id,
+        order_by: [asc: n.id],
+        limit: ^limit
+    else
+      q
+      |> maybe_max(cursor.max_id)
+      |> maybe_since(cursor.since_id)
+      |> order_by([n], desc: n.id)
+      |> limit(^limit)
     end
   end
 

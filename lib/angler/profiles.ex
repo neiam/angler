@@ -45,14 +45,12 @@ defmodule Angler.Profiles do
     domain = attrs[:domain] || attrs["domain"]
     has_pub = attrs[:public_key_pem] || attrs["public_key_pem"]
 
-    cond do
-      # Local profile being created from scratch — mint a keypair.
-      is_nil(domain) and is_nil(has_pub) ->
-        {pub, priv} = Angler.Profiles.Keypair.generate()
-        attrs |> Map.put(:public_key_pem, pub) |> Map.put(:private_key_pem, priv)
-
-      true ->
-        attrs
+    # Local profile being created from scratch — mint a keypair.
+    if is_nil(domain) and is_nil(has_pub) do
+      {pub, priv} = Angler.Profiles.Keypair.generate()
+      attrs |> Map.put(:public_key_pem, pub) |> Map.put(:private_key_pem, priv)
+    else
+      attrs
     end
   end
 

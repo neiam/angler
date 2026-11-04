@@ -331,41 +331,43 @@ defmodule Angler.Statuses.Federation do
     |> Enum.filter(&(&1["type"] == "Mention" and is_binary(&1["href"])))
     |> Enum.map(& &1["href"])
     |> Enum.uniq()
-    |> Enum.each(fn href ->
-      cond do
-        String.starts_with?(href, base_users) ->
-          username = String.trim_leading(href, base_users)
-
-          case Profiles.get_local_by_username(username) do
-            %Profile{id: pid} ->
-              insert_mention(status.id, pid)
-
-              # A DM's recipients are notified by `Conversations.record/1`.
-              if status.visibility != :direct do
-                Notifications.notify(%{
-                  recipient_id: pid,
-                  account_id: status.profile_id,
-                  type: "mention",
-                  status_id: status.id
-                })
-              end
-
-            _ ->
-              :ok
-          end
-
-        true ->
-          # Remote mention — store iff we already have the actor cached.
-          # We deliberately don't fetch here to avoid amplification.
-          case Repo.get_by(Profile, remote_url: href) do
-            %Profile{id: pid} -> insert_mention(status.id, pid)
-            _ -> :ok
-          end
-      end
-    end)
+    |> Enum.each(&attach_mention(status, &1, base_users))
   end
 
   defp attach_mentions(_, _), do: :ok
+
+  defp attach_mention(%Status{} = status, href, base_users) do
+    if String.starts_with?(href, base_users) do
+      attach_local_mention(status, String.trim_leading(href, base_users))
+    else
+      # Remote mention — store iff we already have the actor cached.
+      # We deliberately don't fetch here to avoid amplification.
+      case Repo.get_by(Profile, remote_url: href) do
+        %Profile{id: pid} -> insert_mention(status.id, pid)
+        _ -> :ok
+      end
+    end
+  end
+
+  defp attach_local_mention(%Status{} = status, username) do
+    case Profiles.get_local_by_username(username) do
+      %Profile{id: pid} ->
+        insert_mention(status.id, pid)
+
+        # A DM's recipients are notified by `Conversations.record/1`.
+        if status.visibility != :direct do
+          Notifications.notify(%{
+            recipient_id: pid,
+            account_id: status.profile_id,
+            type: "mention",
+            status_id: status.id
+          })
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   defp insert_mention(status_id, profile_id) do
     %{status_id: status_id, profile_id: profile_id}

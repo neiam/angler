@@ -294,13 +294,11 @@ defmodule Angler.Follows do
       followee = Repo.get!(Profile, followee_id)
       follower = Repo.get!(Profile, follower_id)
 
-      cond do
-        followee.is_private ->
-          insert_request(followee, follower)
-          |> with_request_remote_url(remote_url, followee_id, follower_id)
-
-        true ->
-          insert_accepted(followee, follower, remote_url)
+      if followee.is_private do
+        insert_request(followee, follower)
+        |> with_request_remote_url(remote_url, followee_id, follower_id)
+      else
+        insert_accepted(followee, follower, remote_url)
       end
     end
   end

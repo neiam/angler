@@ -147,27 +147,25 @@ defmodule AnglerWeb.MastodonAPI.StoriesController do
   def self_expire(conn, %{"id" => id}) do
     %{profile: profile} = BearerAuth.current_scope(conn)
 
-    cond do
-      not Stories.enabled?() ->
-        json(conn, %{})
+    if Stories.enabled?() do
+      case parse_id(id) do
+        {:ok, sid} ->
+          case Stories.delete(profile, sid) do
+            :ok ->
+              json(conn, %{"code" => 200})
 
-      true ->
-        case parse_id(id) do
-          {:ok, sid} ->
-            case Stories.delete(profile, sid) do
-              :ok ->
-                json(conn, %{"code" => 200})
+            {:error, :forbidden} ->
+              conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
 
-              {:error, :forbidden} ->
-                conn |> put_status(:forbidden) |> json(%{"error" => "Forbidden"})
+            {:error, _} ->
+              not_found(conn)
+          end
 
-              {:error, _} ->
-                not_found(conn)
-            end
-
-          _ ->
-            not_found(conn)
-        end
+        _ ->
+          not_found(conn)
+      end
+    else
+      json(conn, %{})
     end
   end
 

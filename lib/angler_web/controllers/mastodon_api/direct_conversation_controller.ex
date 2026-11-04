@@ -213,23 +213,21 @@ defmodule AnglerWeb.MastodonAPI.DirectConversationController do
   defp recipient_ids(ids, me) when is_list(ids) do
     parsed = Enum.map(ids, &parse_id/1)
 
-    cond do
-      Enum.any?(parsed, &(&1 == :error)) ->
-        {:error, 422, "recipient_ids must be ids."}
+    if Enum.any?(parsed, &(&1 == :error)) do
+      {:error, 422, "recipient_ids must be ids."}
+    else
+      ids = parsed |> Enum.map(fn {:ok, n} -> n end) |> Enum.uniq() |> Enum.reject(&(&1 == me))
 
-      true ->
-        ids = parsed |> Enum.map(fn {:ok, n} -> n end) |> Enum.uniq() |> Enum.reject(&(&1 == me))
+      cond do
+        ids == [] ->
+          {:error, 422, "A conversation needs at least two participants."}
 
-        cond do
-          ids == [] ->
-            {:error, 422, "A conversation needs at least two participants."}
+        length(ids) > Conversations.max_participants() - 1 ->
+          {:error, 422, "Too many participants."}
 
-          length(ids) > Conversations.max_participants() - 1 ->
-            {:error, 422, "Too many participants."}
-
-          true ->
-            {:ok, ids}
-        end
+        true ->
+          {:ok, ids}
+      end
     end
   end
 

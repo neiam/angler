@@ -34,37 +34,35 @@ defmodule AnglerWeb.OAuth.AuthorizeController do
   def authorize(conn, %{"approve" => "true"} = params) do
     user = conn.assigns[:current_user]
 
-    cond do
-      is_nil(user) ->
-        redirect(conn, to: ~p"/session/login?next=#{request_with_query(conn)}")
+    if is_nil(user) do
+      redirect(conn, to: ~p"/session/login?next=#{request_with_query(conn)}")
+    else
+      case authorize_params(params) do
+        {:ok, ctx} ->
+          {:ok, %{code: code}} =
+            OAuth.create_authorization_code(user, ctx.client, ctx.scopes,
+              redirect_uri: ctx.redirect_uri,
+              code_challenge: params["code_challenge"],
+              code_challenge_method: params["code_challenge_method"]
+            )
 
-      true ->
-        case authorize_params(params) do
-          {:ok, ctx} ->
-            {:ok, %{code: code}} =
-              OAuth.create_authorization_code(user, ctx.client, ctx.scopes,
-                redirect_uri: ctx.redirect_uri,
-                code_challenge: params["code_challenge"],
-                code_challenge_method: params["code_challenge_method"]
+          if ctx.redirect_uri == @oob do
+            render(conn, :oob, code: code)
+          else
+            qs =
+              URI.encode_query(
+                Enum.reject(
+                  [{"code", code}, {"state", params["state"]}],
+                  fn {_, v} -> v in [nil, ""] end
+                )
               )
 
-            if ctx.redirect_uri == @oob do
-              render(conn, :oob, code: code)
-            else
-              qs =
-                URI.encode_query(
-                  Enum.reject(
-                    [{"code", code}, {"state", params["state"]}],
-                    fn {_, v} -> v in [nil, ""] end
-                  )
-                )
+            redirect(conn, external: append_query(ctx.redirect_uri, qs))
+          end
 
-              redirect(conn, external: append_query(ctx.redirect_uri, qs))
-            end
-
-          {:error, msg} ->
-            conn |> put_status(400) |> render(:error, message: msg)
-        end
+        {:error, msg} ->
+          conn |> put_status(400) |> render(:error, message: msg)
+      end
     end
   end
 

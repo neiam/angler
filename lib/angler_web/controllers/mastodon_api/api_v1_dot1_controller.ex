@@ -433,21 +433,19 @@ defmodule AnglerWeb.MastodonAPI.ApiV1Dot1Controller do
     %{profile: profile} = BearerAuth.current_scope(conn)
     upload = params["file"]
 
-    cond do
-      is_nil(upload) ->
-        validation_error(conn, %{"file" => ["is required"]})
+    if is_nil(upload) do
+      validation_error(conn, %{"file" => ["is required"]})
+    else
+      case Angler.Media.upload(profile, upload, %{}) do
+        {:ok, asset} ->
+          create_local_with_media(conn, profile, params, asset.id)
 
-      true ->
-        case Angler.Media.upload(profile, upload, %{}) do
-          {:ok, asset} ->
-            create_local_with_media(conn, profile, params, asset.id)
+        {:error, :account_size_limit} ->
+          conn |> put_status(403) |> json(%{"error" => "Account size limit reached."})
 
-          {:error, :account_size_limit} ->
-            conn |> put_status(403) |> json(%{"error" => "Account size limit reached."})
-
-          {:error, reason} ->
-            validation_error(conn, %{"file" => [to_string(reason)]})
-        end
+        {:error, reason} ->
+          validation_error(conn, %{"file" => [to_string(reason)]})
+      end
     end
   end
 

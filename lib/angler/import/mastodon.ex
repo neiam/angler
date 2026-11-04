@@ -82,18 +82,20 @@ defmodule Angler.Import.Mastodon do
   end
 
   defp import_one(profile, root_dir, note, opts, dry_run?, acc) do
-    with {:ok, ms} <- published_ms(note) do
-      {seq, seen_ms} = next_seq(acc.seen_ms, ms)
-      id = Snowflake.from_timestamp(ms, seq)
-      acc = %{acc | seen_ms: seen_ms}
+    case published_ms(note) do
+      {:ok, ms} ->
+        {seq, seen_ms} = next_seq(acc.seen_ms, ms)
+        id = Snowflake.from_timestamp(ms, seq)
+        acc = %{acc | seen_ms: seen_ms}
 
-      cond do
-        status_exists?(id) -> %{acc | skipped: acc.skipped + 1}
-        dry_run? -> %{acc | imported: acc.imported + 1}
-        true -> do_import(profile, root_dir, note, id, ms, opts, acc)
-      end
-    else
-      :error -> fail(acc, "note missing published timestamp")
+        cond do
+          status_exists?(id) -> %{acc | skipped: acc.skipped + 1}
+          dry_run? -> %{acc | imported: acc.imported + 1}
+          true -> do_import(profile, root_dir, note, id, ms, opts, acc)
+        end
+
+      :error ->
+        fail(acc, "note missing published timestamp")
     end
   end
 

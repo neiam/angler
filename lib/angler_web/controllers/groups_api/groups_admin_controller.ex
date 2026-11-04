@@ -66,13 +66,15 @@ defmodule AnglerWeb.GroupsAPI.GroupsAdminController do
     with_group(conn, id, fn group ->
       %{profile: actor} = BearerAuth.current_scope(conn)
 
-      with {:ok, target} <- require_int(params, "pid") do
-        case Groups.unblock(actor, group, target) do
-          :ok -> json(conn, %{"code" => 200})
-          {:error, :forbidden} -> forbidden(conn)
-        end
-      else
-        {:error, :missing} -> validation_error(conn, %{"pid" => ["is required"]})
+      case require_int(params, "pid") do
+        {:ok, target} ->
+          case Groups.unblock(actor, group, target) do
+            :ok -> json(conn, %{"code" => 200})
+            {:error, :forbidden} -> forbidden(conn)
+          end
+
+        {:error, :missing} ->
+          validation_error(conn, %{"pid" => ["is required"]})
       end
     end)
   end

@@ -122,21 +122,23 @@ defmodule Angler.Stories.Outbound do
   @spec interacted(Story.t(), Status.t(), :reaction | :reply) :: :ok
   def interacted(%Story{local: false, remote_url: object_id} = story, %Status{} = status, kind)
       when is_binary(object_id) do
-    with %Profile{domain: nil} = sender <- Repo.get(Profile, status.profile_id) do
-      with_author(story, fn author ->
-        to_author(sender, author, %{
-          "@context" => @as,
-          "id" => status.uri,
-          "type" => if(kind == :reply, do: "Story:Reply", else: "Story:Reaction"),
-          "to" => Profiles.actor_url(author),
-          "actor" => Profiles.actor_url(sender),
-          "content" => status.caption,
-          "inReplyTo" => object_id,
-          "published" => DateTime.to_iso8601(status.inserted_at)
-        })
-      end)
-    else
-      _ -> :ok
+    case Repo.get(Profile, status.profile_id) do
+      %Profile{domain: nil} = sender ->
+        with_author(story, fn author ->
+          to_author(sender, author, %{
+            "@context" => @as,
+            "id" => status.uri,
+            "type" => if(kind == :reply, do: "Story:Reply", else: "Story:Reaction"),
+            "to" => Profiles.actor_url(author),
+            "actor" => Profiles.actor_url(sender),
+            "content" => status.caption,
+            "inReplyTo" => object_id,
+            "published" => DateTime.to_iso8601(status.inserted_at)
+          })
+        end)
+
+      _ ->
+        :ok
     end
   end
 

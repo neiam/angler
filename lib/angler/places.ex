@@ -38,20 +38,18 @@ defmodule Angler.Places do
   """
   @spec search(String.t(), pos_integer()) :: [Place.t()]
   def search(q, limit \\ 30) when is_binary(q) do
-    cond do
-      String.trim(q) == "" ->
-        []
+    if String.trim(q) == "" do
+      []
+    else
+      bounded = limit |> max(1) |> min(60)
+      pattern = "%" <> escape_like(q) <> "%"
 
-      true ->
-        bounded = limit |> max(1) |> min(60)
-        pattern = "%" <> escape_like(q) <> "%"
-
-        Repo.all(
-          from p in Place,
-            where: ilike(p.name, ^pattern),
-            order_by: [asc: p.name],
-            limit: ^bounded
-        )
+      Repo.all(
+        from p in Place,
+          where: ilike(p.name, ^pattern),
+          order_by: [asc: p.name],
+          limit: ^bounded
+      )
     end
   end
 

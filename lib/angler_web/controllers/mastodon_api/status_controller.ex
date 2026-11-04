@@ -302,15 +302,13 @@ defmodule AnglerWeb.MastodonAPI.StatusController do
   def create(conn, params) do
     %{profile: profile} = BearerAuth.current_scope(conn)
 
-    cond do
-      Scheduling.scheduled?(params) ->
-        case Scheduling.schedule(profile, params) do
-          {:ok, %Scheduled{} = row} -> json(conn, ScheduledStatusJSON.render(row))
-          {:error, reason} -> validation_error(conn, to_string(reason))
-        end
-
-      true ->
-        with_idempotency(conn, &do_create(&1, profile, params))
+    if Scheduling.scheduled?(params) do
+      case Scheduling.schedule(profile, params) do
+        {:ok, %Scheduled{} = row} -> json(conn, ScheduledStatusJSON.render(row))
+        {:error, reason} -> validation_error(conn, to_string(reason))
+      end
+    else
+      with_idempotency(conn, &do_create(&1, profile, params))
     end
   end
 

@@ -227,7 +227,7 @@ defmodule Angler.Federation.HTTPSignature do
 
     case Enum.find(lines, &match?({:error, _}, &1)) do
       nil ->
-        {:ok, lines |> Enum.map(fn {:ok, l} -> l end) |> Enum.join("\n")}
+        {:ok, Enum.map_join(lines, "\n", fn {:ok, l} -> l end)}
 
       {:error, reason} ->
         {:error, reason}

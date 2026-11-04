@@ -60,9 +60,8 @@ defmodule Angler.Federation.HTTP do
     allowed = Keyword.get(opts, :content_types, @ap_content_types)
 
     with {:ok, resp} <- get(url, Keyword.put_new(opts, :accept, "application/activity+json")),
-         :ok <- check_content_type(resp.headers, allowed),
-         {:ok, json} <- Jason.decode(resp.body) do
-      {:ok, json}
+         :ok <- check_content_type(resp.headers, allowed) do
+      Jason.decode(resp.body)
     end
   end
 

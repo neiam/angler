@@ -77,41 +77,39 @@ defmodule AnglerWeb.MastodonAPI.DirectoryController do
   ## GET /landing/v1/explore — recent public photo/video posts grid.
 
   def explore(conn, params) do
-    cond do
-      not explore_enabled?() ->
-        not_found(conn)
+    if explore_enabled?() do
+      limit =
+        case params["limit"] do
+          s when is_binary(s) ->
+            case Integer.parse(s) do
+              {n, ""} -> n |> max(1) |> min(40)
+              _ -> 24
+            end
 
-      true ->
-        limit =
-          case params["limit"] do
-            s when is_binary(s) ->
-              case Integer.parse(s) do
-                {n, ""} -> n |> max(1) |> min(40)
-                _ -> 24
-              end
+          _ ->
+            24
+        end
 
-            _ ->
-              24
-          end
+      statuses =
+        Repo.all(
+          from s in Status,
+            where:
+              s.visibility == :public and is_nil(s.deleted_at) and
+                s.is_nsfw == false and
+                s.type in ["photo", "photo:album", "video", "video:album"],
+            order_by: [desc: s.id],
+            limit: ^limit
+        )
+        |> Repo.preload([
+          :profile,
+          mentions: :profile,
+          status_hashtags: :hashtag,
+          media_attachments: []
+        ])
 
-        statuses =
-          Repo.all(
-            from s in Status,
-              where:
-                s.visibility == :public and is_nil(s.deleted_at) and
-                  s.is_nsfw == false and
-                  s.type in ["photo", "photo:album", "video", "video:album"],
-              order_by: [desc: s.id],
-              limit: ^limit
-          )
-          |> Repo.preload([
-            :profile,
-            mentions: :profile,
-            status_hashtags: :hashtag,
-            media_attachments: []
-          ])
-
-        json(conn, StatusJSON.render_many(statuses, nil))
+      json(conn, StatusJSON.render_many(statuses, nil))
+    else
+      not_found(conn)
     end
   end
 

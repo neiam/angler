@@ -29,21 +29,19 @@ defmodule AnglerWeb.ResetPasswordLive do
 
   @impl true
   def handle_event("reset", %{"password" => pw, "password_confirmation" => confirm}, socket) do
-    cond do
-      pw != confirm ->
-        {:noreply, assign(socket, error: "Passwords don't match.")}
+    if pw != confirm do
+      {:noreply, assign(socket, error: "Passwords don't match.")}
+    else
+      case Accounts.reset_password(socket.assigns.user, %{password: pw}) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Your password was updated — please log in.")
+           |> push_navigate(to: ~p"/login")}
 
-      true ->
-        case Accounts.reset_password(socket.assigns.user, %{password: pw}) do
-          {:ok, _user} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Your password was updated — please log in.")
-             |> push_navigate(to: ~p"/login")}
-
-          {:error, changeset} ->
-            {:noreply, assign(socket, error: changeset_error(changeset))}
-        end
+        {:error, changeset} ->
+          {:noreply, assign(socket, error: changeset_error(changeset))}
+      end
     end
   end
 

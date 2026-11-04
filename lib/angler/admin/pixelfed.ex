@@ -820,12 +820,10 @@ defmodule Angler.Admin.Pixelfed do
   def moderate_post(%User{} = actor, id, action) do
     with {:ok, sid} <- parse_id(id),
          %Status{} = status <- Repo.get(Status, sid) |> Repo.preload(:profile) do
-      cond do
-        admin_target?(status.profile) ->
-          {:error, :cannot_moderate_admin}
-
-        true ->
-          do_moderate_post(actor, status, action)
+      if admin_target?(status.profile) do
+        {:error, :cannot_moderate_admin}
+      else
+        do_moderate_post(actor, status, action)
       end
     else
       _ -> {:error, :not_found}
