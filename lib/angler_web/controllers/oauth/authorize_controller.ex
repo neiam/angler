@@ -46,19 +46,7 @@ defmodule AnglerWeb.OAuth.AuthorizeController do
               code_challenge_method: params["code_challenge_method"]
             )
 
-          if ctx.redirect_uri == @oob do
-            render(conn, :oob, code: code)
-          else
-            qs =
-              URI.encode_query(
-                Enum.reject(
-                  [{"code", code}, {"state", params["state"]}],
-                  fn {_, v} -> v in [nil, ""] end
-                )
-              )
-
-            redirect(conn, external: append_query(ctx.redirect_uri, qs))
-          end
+          send_code(conn, ctx, code, params["state"])
 
         {:error, msg} ->
           conn |> put_status(400) |> render(:error, message: msg)
@@ -89,6 +77,20 @@ defmodule AnglerWeb.OAuth.AuthorizeController do
   end
 
   ## Internals
+
+  defp send_code(conn, %{redirect_uri: @oob}, code, _state), do: render(conn, :oob, code: code)
+
+  defp send_code(conn, ctx, code, state) do
+    qs =
+      URI.encode_query(
+        Enum.reject(
+          [{"code", code}, {"state", state}],
+          fn {_, v} -> v in [nil, ""] end
+        )
+      )
+
+    redirect(conn, external: append_query(ctx.redirect_uri, qs))
+  end
 
   defp authorize_params(params) do
     with {:ok, client} <- fetch_client(params["client_id"]),

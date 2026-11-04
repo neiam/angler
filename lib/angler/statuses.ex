@@ -887,62 +887,62 @@ defmodule Angler.Statuses do
   def create_local(%Profile{domain: nil} = profile, attrs, opts) when is_map(attrs) do
     attrs = stringify(attrs)
     media_ids = parse_media_ids(attrs["media_ids"])
-    id = Keyword.get(opts, :id)
-    created_at = Keyword.get(opts, :created_at)
     broadcast? = Keyword.get(opts, :broadcast, true)
 
     with {:ok, caption} <- fetch_caption(attrs, media_ids),
          {:ok, visibility} <- parse_visibility(attrs["visibility"]),
          {:ok, quote_policy} <- parse_quote_policy(attrs),
          {:ok, parent} <- resolve_reply_parent(attrs["in_reply_to_id"], profile.id) do
-      lex = Lexer.render(caption)
-      sensitive? = truthy?(attrs["sensitive"])
-      attrs = Map.put(attrs, "quote_policy", quote_policy)
+      draft = %{
+        caption: caption,
+        lex: Lexer.render(caption),
+        visibility: visibility,
+        sensitive?: truthy?(attrs["sensitive"]),
+        attrs: Map.put(attrs, "quote_policy", quote_policy),
+        parent: parent,
+        media_ids: media_ids,
+        id: Keyword.get(opts, :id),
+        created_at: Keyword.get(opts, :created_at)
+      }
 
       Repo.transaction(fn ->
-        case insert_status(
-               profile,
-               caption,
-               lex,
-               visibility,
-               sensitive?,
-               attrs,
-               parent,
-               media_ids,
-               id,
-               created_at
-             ) do
-          {:ok, status} ->
-            case Media.attach_to_status(media_ids, status.id, profile.id) do
-              {:ok, _} -> :ok
-              {:error, reason} -> Repo.rollback(reason)
-            end
-
-            insert_mentions(status, lex.mention_profile_ids)
-            insert_hashtags(status, lex.hashtag_names, visibility)
-
-            case attach_poll(status, attrs["poll"]) do
-              :ok -> :ok
-              {:error, reason} -> Repo.rollback(reason)
-            end
-
-            bump_author!(profile.id)
-            if parent, do: inc_counter(parent.id, :reply_count)
-
-            loaded = preload_local(status)
-            if visibility == :direct, do: Conversations.record(loaded)
-            if broadcast?, do: Angler.Streaming.broadcast_status_update(loaded)
-
-            loaded
-
-          {:error, %Ecto.Changeset{} = cs} ->
-            Repo.rollback(cs)
+        case insert_status(profile, draft) do
+          {:ok, status} -> finish_local_create!(profile, status, draft, broadcast?)
+          {:error, %Ecto.Changeset{} = cs} -> Repo.rollback(cs)
         end
       end)
     end
   end
 
   def create_local(%Profile{}, _, _), do: {:error, :not_local_profile}
+
+  # Inside create_local's transaction, once the status row is in: media,
+  # mentions, hashtags, poll and counters. Returns the preloaded status.
+  defp finish_local_create!(profile, status, draft, broadcast?) do
+    %{lex: lex, visibility: visibility, parent: parent} = draft
+
+    case Media.attach_to_status(draft.media_ids, status.id, profile.id) do
+      {:ok, _} -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+
+    insert_mentions(status, lex.mention_profile_ids)
+    insert_hashtags(status, lex.hashtag_names, visibility)
+
+    case attach_poll(status, draft.attrs["poll"]) do
+      :ok -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+
+    bump_author!(profile.id)
+    if parent, do: inc_counter(parent.id, :reply_count)
+
+    loaded = preload_local(status)
+    if visibility == :direct, do: Conversations.record(loaded)
+    if broadcast?, do: Angler.Streaming.broadcast_status_update(loaded)
+
+    loaded
+  end
 
   defp attach_poll(_status, nil), do: :ok
 
@@ -1024,18 +1024,19 @@ defmodule Angler.Statuses do
     end
   end
 
-  defp insert_status(
-         profile,
-         caption,
-         lex,
-         visibility,
-         sensitive?,
-         attrs,
-         parent,
-         media_ids,
-         id,
-         created_at
-       ) do
+  defp insert_status(profile, draft) do
+    %{
+      caption: caption,
+      lex: lex,
+      visibility: visibility,
+      sensitive?: sensitive?,
+      attrs: attrs,
+      parent: parent,
+      media_ids: media_ids,
+      id: id,
+      created_at: created_at
+    } = draft
+
     snowflake = id || Angler.Snowflake.next()
     base = AnglerWeb.Endpoint.url()
     canonical = base <> "/p/" <> profile.username <> "/" <> Integer.to_string(snowflake)

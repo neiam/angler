@@ -433,22 +433,27 @@ defmodule Angler.CuratedRegistrations do
             )
             |> Repo.update!()
 
-          unless Repo.exists?(from u in User, where: u.email == ^r.email) do
-            attrs = %{
-              email: r.email,
-              username: r.username,
-              register_ip: r.ip_address,
-              register_source: "cur_onboarding"
-            }
-
-            case Accounts.register_prehashed(attrs, r.password_hash) do
-              {:ok, _} -> SendEmail.enqueue(r.email, CuratedRegisterEmail.accepted(r))
-              {:error, changeset} -> Repo.rollback(changeset)
-            end
-          end
-
+          register_accepted!(r)
           closed
         end)
+    end
+  end
+
+  # Inside approve's transaction: create the applicant's account (unless one
+  # already exists for the email) and send the acceptance email.
+  defp register_accepted!(%CuratedRegister{} = r) do
+    unless Repo.exists?(from u in User, where: u.email == ^r.email) do
+      attrs = %{
+        email: r.email,
+        username: r.username,
+        register_ip: r.ip_address,
+        register_source: "cur_onboarding"
+      }
+
+      case Accounts.register_prehashed(attrs, r.password_hash) do
+        {:ok, _} -> SendEmail.enqueue(r.email, CuratedRegisterEmail.accepted(r))
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
     end
   end
 

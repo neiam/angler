@@ -34,28 +34,29 @@ defmodule Angler.Reports do
       true ->
         with {:ok, message} <- clean_message(attrs["message"]),
              {:ok, object_id} <- parse_id(object_id_str),
-             {:ok, reported_pid} <- resolve_target(object_type, object_id, reporter_pid) do
-          if duplicate?(user.id, object_type, object_id) do
-            {:error, :duplicate}
-          else
-            %{
-              profile_id: reporter_pid,
-              user_id: user.id,
-              object_id: object_id,
-              object_type: object_type,
-              reported_profile_id: reported_pid,
-              type: type,
-              message: message
-            }
-            |> Report.changeset()
-            |> Repo.insert()
-            |> case do
-              {:ok, report} -> {:ok, report}
-              {:error, _} -> {:error, :invalid}
-            end
+             {:ok, reported_pid} <- resolve_target(object_type, object_id, reporter_pid),
+             :ok <- check_not_duplicate(user.id, object_type, object_id) do
+          %{
+            profile_id: reporter_pid,
+            user_id: user.id,
+            object_id: object_id,
+            object_type: object_type,
+            reported_profile_id: reported_pid,
+            type: type,
+            message: message
+          }
+          |> Report.changeset()
+          |> Repo.insert()
+          |> case do
+            {:ok, report} -> {:ok, report}
+            {:error, _} -> {:error, :invalid}
           end
         end
     end
+  end
+
+  defp check_not_duplicate(user_id, object_type, object_id) do
+    if duplicate?(user_id, object_type, object_id), do: {:error, :duplicate}, else: :ok
   end
 
   defp duplicate?(user_id, object_type, object_id) do

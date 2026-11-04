@@ -167,19 +167,7 @@ defmodule Angler.Polls do
           end)
 
         if inserted_count > 0 do
-          inserted_option_ids =
-            indices
-            |> Enum.map(&Map.fetch!(by_position, &1).id)
-            |> Enum.reject(fn oid -> MapSet.member?(already, oid) end)
-
-          if inserted_option_ids != [] do
-            from(o in Option, where: o.id in ^inserted_option_ids)
-            |> Repo.update_all(inc: [votes_count: 1])
-          end
-
-          if first_vote? do
-            from(p in Poll, where: p.id == ^poll.id) |> Repo.update_all(inc: [voters_count: 1])
-          end
+          bump_counts(poll, by_position, indices, already, first_vote?)
         end
 
         get(poll.id)
@@ -188,6 +176,22 @@ defmodule Angler.Polls do
         {:ok, poll} -> {:ok, poll}
         err -> err
       end
+    end
+  end
+
+  defp bump_counts(%Poll{} = poll, by_position, indices, already, first_vote?) do
+    inserted_option_ids =
+      indices
+      |> Enum.map(&Map.fetch!(by_position, &1).id)
+      |> Enum.reject(fn oid -> MapSet.member?(already, oid) end)
+
+    if inserted_option_ids != [] do
+      from(o in Option, where: o.id in ^inserted_option_ids)
+      |> Repo.update_all(inc: [votes_count: 1])
+    end
+
+    if first_vote? do
+      from(p in Poll, where: p.id == ^poll.id) |> Repo.update_all(inc: [voters_count: 1])
     end
   end
 

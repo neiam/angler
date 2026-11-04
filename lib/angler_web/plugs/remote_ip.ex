@@ -66,14 +66,17 @@ defmodule AnglerWeb.Plugs.RemoteIp do
       forwarded_for
       |> Enum.flat_map(&String.split(&1, ","))
       |> Enum.reverse()
-      |> Enum.find_value(peer_ip, fn entry ->
-        case parse(entry) do
-          {:ok, ip} -> if trusted?(ip, trusted), do: nil, else: ip
-          :error -> nil
-        end
-      end)
+      |> Enum.find_value(peer_ip, &untrusted_ip(&1, trusted))
     else
       peer_ip
+    end
+  end
+
+  # The entry's address unless it's one of our trusted proxies (or unparsable).
+  defp untrusted_ip(entry, trusted) do
+    case parse(entry) do
+      {:ok, ip} -> if trusted?(ip, trusted), do: nil, else: ip
+      :error -> nil
     end
   end
 

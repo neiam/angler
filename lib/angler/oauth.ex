@@ -335,42 +335,40 @@ defmodule Angler.OAuth do
           | {:error, atom()}
   def redeem_authorization_code(raw_code, %Client{} = client, redirect_uri, code_verifier) do
     Repo.transaction(fn ->
-      case lock_code(raw_code) do
-        nil ->
-          Repo.rollback(:invalid_grant)
-
-        %AuthorizationCode{redeemed_at: %DateTime{}} ->
-          Repo.rollback(:invalid_grant)
-
-        %AuthorizationCode{client_id: cid} when cid != client.id ->
-          Repo.rollback(:invalid_grant)
-
-        %AuthorizationCode{} = row ->
-          cond do
-            DateTime.compare(DateTime.utc_now(), row.expires_at) == :gt ->
-              Repo.rollback(:invalid_grant)
-
-            row.redirect_uri != redirect_uri ->
-              Repo.rollback(:invalid_grant)
-
-            not pkce_ok?(row, code_verifier) ->
-              Repo.rollback(:invalid_grant)
-
-            true ->
-              {:ok, _} =
-                row
-                |> Ecto.Changeset.change(redeemed_at: DateTime.utc_now())
-                |> Repo.update()
-
-              user = Repo.get!(User, row.user_id)
-
-              case issue_token(user, client, scopes: row.scopes) do
-                {:ok, issued} -> issued
-                {:error, _} -> Repo.rollback(:server_error)
-              end
-          end
+      with %AuthorizationCode{} = row <- lock_code(raw_code),
+           true <- redeemable?(row, client, redirect_uri, code_verifier) do
+        redeem!(row, client)
+      else
+        _ -> Repo.rollback(:invalid_grant)
       end
     end)
+  end
+
+  defp redeemable?(%AuthorizationCode{redeemed_at: %DateTime{}}, _client, _uri, _verifier),
+    do: false
+
+  defp redeemable?(%AuthorizationCode{client_id: cid}, %Client{id: id}, _uri, _verifier)
+       when cid != id,
+       do: false
+
+  defp redeemable?(%AuthorizationCode{} = row, _client, redirect_uri, code_verifier) do
+    DateTime.compare(DateTime.utc_now(), row.expires_at) != :gt and
+      row.redirect_uri == redirect_uri and
+      pkce_ok?(row, code_verifier)
+  end
+
+  defp redeem!(%AuthorizationCode{} = row, %Client{} = client) do
+    {:ok, _} =
+      row
+      |> Ecto.Changeset.change(redeemed_at: DateTime.utc_now())
+      |> Repo.update()
+
+    user = Repo.get!(User, row.user_id)
+
+    case issue_token(user, client, scopes: row.scopes) do
+      {:ok, issued} -> issued
+      {:error, _} -> Repo.rollback(:server_error)
+    end
   end
 
   defp lock_code(raw_code) do
