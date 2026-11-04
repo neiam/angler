@@ -298,7 +298,7 @@ defmodule Angler.Admin.Pixelfed do
 
     base = base_users_query(sort)
     base = filter_users_by_query(base, opts["q"])
-    base = filter_users_by_max_id(base, opts["max_id"])
+    base = filter_users_by_max_id(base, opts["max_id"], sort)
 
     rows = Repo.all(base)
     %{users: rows, next_max_id: next_max_id(rows)}
@@ -323,16 +323,14 @@ defmodule Angler.Admin.Pixelfed do
 
   defp filter_users_by_query(base, _), do: base
 
-  defp filter_users_by_max_id(base, v) when is_integer(v), do: from(u in base, where: u.id < ^v)
-
-  defp filter_users_by_max_id(base, v) when is_binary(v) do
-    case Integer.parse(v) do
-      {n, ""} -> from(u in base, where: u.id < ^n)
-      _ -> base
+  # `max_id` is the last row of the previous page: the next page is the
+  # rows past it in the sort direction.
+  defp filter_users_by_max_id(base, v, sort) do
+    case parse_id(v) do
+      {:ok, id} -> where(base, ^beyond(sort, dynamic([u], u.id), id))
+      :error -> base
     end
   end
-
-  defp filter_users_by_max_id(base, _), do: base
 
   @spec get_user(integer() | String.t()) :: User.t() | nil
   def get_user(id) when is_integer(id),
@@ -448,10 +446,15 @@ defmodule Angler.Admin.Pixelfed do
     sort = if opts["sort"] == "asc", do: :asc, else: :desc
     sort_by = sort_by_key(opts["sort_by"])
 
-    base = from(i in Instance, order_by: [{^sort, field(i, ^sort_by)}], limit: @page_size)
+    base =
+      from(i in Instance,
+        order_by: ^[{sort, instance_sort_expr(sort_by)}, {sort, dynamic([i], i.id)}],
+        limit: @page_size
+      )
+
     base = filter_instances_by_query(base, opts["q"])
     base = filter_instances_by_flag(base, opts["filter"])
-    base = filter_instances_by_max_id(base, opts["max_id"])
+    base = filter_instances_by_max_id(base, opts["max_id"], sort_by, sort)
 
     rows = Repo.all(base)
     %{instances: rows, next_max_id: next_max_id(rows)}
@@ -471,17 +474,41 @@ defmodule Angler.Admin.Pixelfed do
 
   defp filter_instances_by_flag(base, _), do: base
 
-  defp filter_instances_by_max_id(base, v) when is_integer(v),
-    do: from(i in base, where: i.id < ^v)
+  # Counts may be unknown; they sort (and compare) as 0.
+  defp instance_sort_expr(:id), do: dynamic([i], i.id)
+  defp instance_sort_expr(:domain), do: dynamic([i], i.domain)
+  defp instance_sort_expr(col), do: dynamic([i], coalesce(field(i, ^col), 0))
 
-  defp filter_instances_by_max_id(base, v) when is_binary(v) do
-    case Integer.parse(v) do
-      {n, ""} -> from(i in base, where: i.id < ^n)
-      _ -> base
+  # `max_id` stays a bare id, as Pixelfed clients send it back, so the
+  # keyset (sort value, id) is rebuilt from the row it names.
+  defp filter_instances_by_max_id(base, v, sort_by, sort) do
+    case parse_id(v) do
+      {:ok, id} -> where(base, ^instance_keyset(id, sort_by, sort))
+      :error -> base
     end
   end
 
-  defp filter_instances_by_max_id(base, _), do: base
+  defp instance_keyset(id, :id, sort), do: beyond(sort, dynamic([i], i.id), id)
+
+  defp instance_keyset(id, sort_by, sort) do
+    case Repo.get(Instance, id) do
+      # The cursor row is gone; id order is the best remaining guess.
+      nil ->
+        beyond(sort, dynamic([i], i.id), id)
+
+      %Instance{} = row ->
+        value = Map.fetch!(row, sort_by) || 0
+        col = instance_sort_expr(sort_by)
+
+        dynamic(
+          ^beyond(sort, col, value) or
+            (^col == ^value and ^beyond(sort, dynamic([i], i.id), id))
+        )
+    end
+  end
+
+  defp beyond(:asc, expr, value), do: dynamic(^expr > ^value)
+  defp beyond(:desc, expr, value), do: dynamic(^expr < ^value)
 
   @spec get_instance(integer() | String.t()) :: Instance.t() | nil
   def get_instance(id) when is_integer(id), do: Repo.get(Instance, id)

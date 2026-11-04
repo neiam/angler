@@ -6,6 +6,8 @@ defmodule AnglerWeb.PixelfedAdmin.AdminControllerTest do
 
   use AnglerWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias Angler.Accounts
   alias Angler.Admin.ModLog
   alias Angler.Federation.Instance
@@ -55,6 +57,18 @@ defmodule AnglerWeb.PixelfedAdmin.AdminControllerTest do
   end
 
   defp auth(conn, t), do: put_req_header(conn, "authorization", "Bearer " <> t)
+
+  # Follows next_max_id until it runs out; returns every row's id in order.
+  defp page_through(ctx, path, max_id \\ nil) do
+    url = if max_id, do: "#{path}&max_id=#{max_id}", else: path
+    body = build_conn() |> auth(ctx.bearer) |> get(url) |> json_response(200)
+    ids = Enum.map(body["data"], &String.to_integer(&1["id"]))
+
+    case body["next_max_id"] do
+      nil -> ids
+      next -> ids ++ page_through(ctx, path, next)
+    end
+  end
 
   setup do
     Map.merge(register_admin!(), %{})
@@ -264,6 +278,17 @@ defmodule AnglerWeb.PixelfedAdmin.AdminControllerTest do
       assert length(body["data"]) >= 2
     end
 
+    test "list pages through every user exactly once, in either direction", ctx do
+      for _ <- 1..14, do: register_user!()
+
+      ids =
+        Repo.all(from(u in Angler.Accounts.User, where: is_nil(u.status), select: u.id))
+        |> Enum.sort()
+
+      assert page_through(ctx, "/api/admin/users/list?sort=asc") == ids
+      assert page_through(ctx, "/api/admin/users/list?sort=desc") == Enum.reverse(ids)
+    end
+
     test "get returns user with meta", ctx do
       %{user: target} = register_user!(%{username: "carol"})
 
@@ -359,6 +384,36 @@ defmodule AnglerWeb.PixelfedAdmin.AdminControllerTest do
 
       domains = Enum.map(body["data"], & &1["domain"])
       assert "remote.test" in domains
+    end
+
+    test "list pages through every instance exactly once, for every sort", ctx do
+      # Domains out of id order, and counts with ties and nils, so each sort
+      # differs from id order and needs the id tie-break.
+      for {letter, i} <- Enum.with_index(Enum.shuffle(?a..?w)) do
+        Instance.upsert_changeset(%{
+          domain: "#{<<letter>>}host.test",
+          user_count: if(rem(i, 5) == 0, do: nil, else: rem(i, 4)),
+          status_count: if(rem(i, 7) == 0, do: nil, else: rem(i, 3))
+        })
+        |> Repo.insert!()
+      end
+
+      rows = Repo.all(Instance)
+
+      for sort_by <- ~w(id domain status_count user_count), sort <- ~w(asc desc) do
+        key = fn
+          i when sort_by == "id" -> i.id
+          i when sort_by == "domain" -> {i.domain, i.id}
+          i -> {Map.fetch!(i, String.to_existing_atom(sort_by)) || 0, i.id}
+        end
+
+        expected = rows |> Enum.sort_by(key) |> Enum.map(& &1.id)
+        expected = if sort == "desc", do: Enum.reverse(expected), else: expected
+
+        assert page_through(ctx, "/api/admin/instances/list?sort=#{sort}&sort_by=#{sort_by}") ==
+                 expected,
+               "sort_by=#{sort_by} sort=#{sort}"
+      end
     end
 
     test "list filters by banned flag", ctx do
