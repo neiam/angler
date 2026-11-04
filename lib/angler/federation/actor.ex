@@ -191,18 +191,9 @@ defmodule Angler.Federation.Actor do
           Repo.rollback(changeset)
       end
     end)
-    |> case do
-      {:ok, profile} -> {:ok, profile}
-      {:error, changeset} -> {:error, changeset}
-    end
   end
 
-  defp insert_profile(profile_attrs, _no_key) do
-    case Profiles.create_profile(profile_attrs) do
-      {:ok, p} -> {:ok, p}
-      err -> err
-    end
-  end
+  defp insert_profile(profile_attrs, _no_key), do: Profiles.create_profile(profile_attrs)
 
   defp update_profile(existing, profile_attrs, attrs) do
     case existing

@@ -67,14 +67,18 @@ defmodule Angler.Filters.Matching do
   defp active_filters(viewer_id, context) do
     now = DateTime.utc_now()
 
-    Repo.all(
-      from f in Filter,
-        where: f.profile_id == ^viewer_id,
-        where: is_nil(f.expires_at) or f.expires_at > ^now,
-        preload: [:keywords]
+    from(f in Filter,
+      where: f.profile_id == ^viewer_id,
+      where: is_nil(f.expires_at) or f.expires_at > ^now,
+      preload: [:keywords]
     )
-    |> Enum.filter(fn f -> is_nil(context) or context in (f.contexts || []) end)
+    |> in_context(context)
+    |> Repo.all()
   end
+
+  # No context means every filter applies.
+  defp in_context(query, nil), do: query
+  defp in_context(query, context), do: where(query, [f], ^context in f.contexts)
 
   # Only load tags when there is at least one muted tag to match against.
   defp hashtags_by_status(_ids, mutes) when map_size(mutes) == 0, do: %{}
