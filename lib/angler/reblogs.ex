@@ -18,10 +18,13 @@ defmodule Angler.Reblogs do
 
   defp get_existing!(attrs) do
     Repo.get_by!(Reblog,
-      profile_id: attrs[:profile_id] || attrs["profile_id"],
-      status_id: attrs[:status_id] || attrs["status_id"]
+      profile_id: attr(attrs, :profile_id),
+      status_id: attr(attrs, :status_id)
     )
   end
+
+  # Callers pass atom- or string-keyed attrs; the atom key wins.
+  defp attr(attrs, key), do: attrs[key] || attrs[Atom.to_string(key)]
 
   @doc "The boost whose wrapper status has this id, with booster and post loaded."
   @spec get_by_wrapper_id(integer()) :: Reblog.t() | nil

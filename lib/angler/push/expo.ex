@@ -64,7 +64,7 @@ defmodule Angler.Push.Expo do
   @spec update(User.t(), map()) ::
           {:ok, User.t()} | {:error, :token_in_use | Ecto.Changeset.t()}
   def update(%User{} = user, attrs) when is_map(attrs) do
-    token = attrs["token"] || attrs[:token]
+    token = attr(attrs, :token)
 
     cond do
       not is_binary(token) or not valid_token?(token) ->
@@ -86,6 +86,9 @@ defmodule Angler.Push.Expo do
         |> Repo.update()
     end
   end
+
+  # Callers pass string- or atom-keyed attrs; the string key wins.
+  defp attr(attrs, key), do: attrs[Atom.to_string(key)] || attrs[key]
 
   @doc "Clear the user's Expo subscription. Idempotent."
   @spec disable(User.t()) :: {:ok, User.t()}

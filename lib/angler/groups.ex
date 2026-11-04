@@ -73,7 +73,7 @@ defmodule Angler.Groups do
 
   @spec create(Profile.t(), map()) :: {:ok, Group.t()} | {:error, term()}
   def create(%Profile{} = owner, attrs) when is_map(attrs) do
-    name = attrs["name"] || attrs[:name]
+    name = attr(attrs, :name)
 
     if not is_binary(name) or String.trim(name) == "" do
       {:error, :name_required}
@@ -104,14 +104,14 @@ defmodule Angler.Groups do
 
   defp normalize_attrs(attrs, owner, slug) do
     %{
-      "name" => attrs["name"] || attrs[:name],
+      "name" => attr(attrs, :name),
       "slug" => slug,
-      "description" => attrs["description"] || attrs[:description],
+      "description" => attr(attrs, :description),
       "owner_profile_id" => owner.id,
-      "category_id" => parse_id_or_nil(attrs["category_id"] || attrs[:category_id]),
-      "privacy" => coerce_privacy(attrs["privacy"] || attrs[:privacy]),
-      "post_policy" => coerce_policy(attrs["post_policy"] || attrs[:post_policy]),
-      "comment_policy" => coerce_policy(attrs["comment_policy"] || attrs[:comment_policy])
+      "category_id" => parse_id_or_nil(attr(attrs, :category_id)),
+      "privacy" => coerce_privacy(attr(attrs, :privacy)),
+      "post_policy" => coerce_policy(attr(attrs, :post_policy)),
+      "comment_policy" => coerce_policy(attr(attrs, :comment_policy))
     }
     |> Enum.reject(fn {_, v} -> is_nil(v) end)
     |> Map.new()
@@ -645,10 +645,10 @@ defmodule Angler.Groups do
     %{
       group_id: group.id,
       reporter_profile_id: reporter.id,
-      object_type: attrs["object_type"] || attrs[:object_type],
-      object_id: parse_id_or_nil(attrs["object_id"] || attrs[:object_id]),
-      report_type: attrs["report_type"] || attrs[:report_type],
-      message: attrs["message"] || attrs[:message]
+      object_type: attr(attrs, :object_type),
+      object_id: parse_id_or_nil(attr(attrs, :object_id)),
+      report_type: attr(attrs, :report_type),
+      message: attr(attrs, :message)
     }
     |> Report.changeset()
     |> Repo.insert()
@@ -700,6 +700,9 @@ defmodule Angler.Groups do
     |> String.replace(~r/[^a-z0-9]+/, "-")
     |> String.trim("-")
   end
+
+  # Callers pass string- or atom-keyed attrs; the string key wins.
+  defp attr(attrs, key), do: attrs[Atom.to_string(key)] || attrs[key]
 
   defp parse_id_or_nil(nil), do: nil
   defp parse_id_or_nil(n) when is_integer(n), do: n

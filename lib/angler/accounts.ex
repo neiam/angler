@@ -391,7 +391,7 @@ defmodule Angler.Accounts do
           {:ok, %{user: User.t(), profile: Profile.t()}}
           | {:error, atom() | Ecto.Changeset.t()}
   def register(attrs, opts \\ []) do
-    email = attrs[:email] || attrs["email"]
+    email = attr(attrs, :email)
 
     if is_binary(email) and Angler.Admin.email_blocked?(email) do
       {:error, :email_domain_blocked}
@@ -433,8 +433,8 @@ defmodule Angler.Accounts do
   defp do_register(attrs, approved?) do
     Repo.transaction(fn ->
       profile_attrs = %{
-        username: attrs[:username] || attrs["username"],
-        name: attrs[:name] || attrs["name"]
+        username: attr(attrs, :username),
+        name: attr(attrs, :name)
       }
 
       case Profiles.create_profile(profile_attrs) do
@@ -466,6 +466,9 @@ defmodule Angler.Accounts do
       end
     end)
   end
+
+  # Callers pass atom- or string-keyed attrs; the atom key wins.
+  defp attr(attrs, key), do: attrs[key] || attrs[Atom.to_string(key)]
 
   defp normalize(attrs) do
     Map.new(attrs, fn

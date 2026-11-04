@@ -409,8 +409,8 @@ defmodule Angler.Stories do
   @overlay_numeric_keys ~w(absoluteScale absoluteX absoluteY fontSize rotation scale x y)
 
   defp validate_overlay(author, %{} = ov) do
-    type = Map.get(ov, "type") || Map.get(ov, :type)
-    content = Map.get(ov, "content") || Map.get(ov, :content)
+    type = overlay_field(ov, :type)
+    content = overlay_field(ov, :content)
 
     with :ok <- check_overlay_type(type),
          {:ok, normalized_content} <- check_overlay_content(author, type, content) do
@@ -419,6 +419,9 @@ defmodule Angler.Stories do
   end
 
   defp validate_overlay(_, _), do: {:error, :not_a_map}
+
+  # Overlays may be string- or atom-keyed; the string key wins.
+  defp overlay_field(ov, key), do: Map.get(ov, Atom.to_string(key)) || Map.get(ov, key)
 
   defp sanitize_overlay(ov) do
     ov

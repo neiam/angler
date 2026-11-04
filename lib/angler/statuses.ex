@@ -556,7 +556,7 @@ defmodule Angler.Statuses do
   """
   @spec create_remote(map()) :: {:ok, Status.t()} | {:error, term()}
   def create_remote(attrs) when is_map(attrs) do
-    uri = attrs[:uri] || attrs["uri"]
+    uri = attr(attrs, :uri)
 
     # Caller (Statuses.Federation.handle_create/2) checks `get_by_uri` before
     # calling. If a race produces a duplicate insert, the unique constraint
@@ -573,6 +573,9 @@ defmodule Angler.Statuses do
         end
     end
   end
+
+  # Callers pass atom- or string-keyed attrs; the atom key wins.
+  defp attr(attrs, key), do: attrs[key] || attrs[Atom.to_string(key)]
 
   @doc """
   Whether a remote `profile` may `:like` or `:announce` `status` (upstream

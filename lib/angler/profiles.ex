@@ -42,8 +42,8 @@ defmodule Angler.Profiles do
   end
 
   defp maybe_assign_keypair(attrs) do
-    domain = attrs[:domain] || attrs["domain"]
-    has_pub = attrs[:public_key_pem] || attrs["public_key_pem"]
+    domain = attr(attrs, :domain)
+    has_pub = attr(attrs, :public_key_pem)
 
     # Local profile being created from scratch — mint a keypair.
     if is_nil(domain) and is_nil(has_pub) do
@@ -53,6 +53,9 @@ defmodule Angler.Profiles do
       attrs
     end
   end
+
+  # Callers pass atom- or string-keyed attrs; the atom key wins.
+  defp attr(attrs, key), do: attrs[key] || attrs[Atom.to_string(key)]
 
   @doc """
   Get an active profile by id (local or remote).
