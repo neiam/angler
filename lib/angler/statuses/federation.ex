@@ -259,17 +259,20 @@ defmodule Angler.Statuses.Federation do
   defp followers_collection?(_, _), do: false
 
   defp type_from_attachments(atts) when is_list(atts) and atts != [] do
-    cond do
-      Enum.all?(atts, &(media_kind(&1) == :image)) and match?([_], atts) -> "photo"
-      Enum.all?(atts, &(media_kind(&1) == :image)) -> "photo:album"
-      Enum.all?(atts, &(media_kind(&1) == :video)) and match?([_], atts) -> "video"
-      Enum.all?(atts, &(media_kind(&1) == :video)) -> "video:album"
-      Enum.all?(atts, &(media_kind(&1) in [:image, :video])) -> "photo:video:album"
-      true -> "text"
-    end
+    atts |> Enum.map(&media_kind/1) |> Enum.uniq() |> attachments_type(match?([_], atts))
   end
 
   defp type_from_attachments(_), do: "text"
+
+  # The distinct kinds among a post's attachments, and whether it has just one.
+  defp attachments_type([:image], true), do: "photo"
+  defp attachments_type([:image], false), do: "photo:album"
+  defp attachments_type([:video], true), do: "video"
+  defp attachments_type([:video], false), do: "video:album"
+
+  defp attachments_type(kinds, _single?) do
+    if Enum.all?(kinds, &(&1 in [:image, :video])), do: "photo:video:album", else: "text"
+  end
 
   defp media_kind(%{"mediaType" => mt}) when is_binary(mt) do
     cond do
