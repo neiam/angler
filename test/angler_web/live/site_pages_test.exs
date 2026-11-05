@@ -27,6 +27,19 @@ defmodule AnglerWeb.SitePagesTest do
     end
   end
 
+  test "/site and /site/kb land on an index of every page", %{conn: conn} do
+    for path <- ~w(/site /site/kb) do
+      {:ok, view, _} = live(conn, path)
+
+      for %{key: key, path: page_path} <- SitePages.list() do
+        assert has_element?(view, ~s(#site-link-#{key}[href="#{page_path}"])), key
+      end
+    end
+
+    {:ok, view, _} = live(conn, ~p"/site/terms")
+    assert has_element?(view, ~s(#site-index-link[href="/site"]))
+  end
+
   test "admins write Markdown; it renders without raw HTML; reset restores the default" do
     conn = admin_conn()
     {:ok, view, _} = live(conn, ~p"/admin/pages?page=privacy")

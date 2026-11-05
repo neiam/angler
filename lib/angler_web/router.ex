@@ -84,6 +84,8 @@ defmodule AnglerWeb.Router do
       live "/network", IndexLive, :network
       live "/trending", IndexLive, :trending
       live "/about", AboutLive
+      live "/site", SitePageLive, :index
+      live "/site/kb", SitePageLive, :index
       live "/site/terms", SitePageLive, :terms
       live "/site/privacy", SitePageLive, :privacy
       live "/site/help", SitePageLive, :help
