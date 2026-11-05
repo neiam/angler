@@ -386,6 +386,13 @@
 .site-page table { width: 100%; border-collapse: collapse; }
 .site-page th, .site-page td { border: 1px solid var(--color-base-300); padding: 0.4em 0.6em; text-align: left; }
 
+/* Masonry wall for the tag page: CSS columns, so cards must not split
+   across a column break and need their own vertical rhythm. */
+.masonry-feed > * {
+  break-inside: avoid;
+  margin-bottom: 0.75rem;
+}
+
 /* Photo viewer (assets/js/lightbox.js) */
 html.lightbox-open { overflow: hidden; }
 .lightbox {

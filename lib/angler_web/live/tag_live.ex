@@ -4,6 +4,9 @@ defmodule AnglerWeb.TagLive do
   `:name`, seeded from `Timelines.hashtag/3` and kept current by subscribing to
   the `"hashtag:<name>"` streaming topic. This is the destination for hashtag
   results in `AnglerWeb.SearchLive` and the navbar type-ahead.
+
+  `?layout=masonry` swaps the single column for a wide, multi-column masonry
+  wall; the toggle patches the URL so the choice is deep-linkable.
   """
   use AnglerWeb, :live_view
 
@@ -44,6 +47,11 @@ defmodule AnglerWeb.TagLive do
      |> assign(:following?, following?(profile, name))
      |> assign(:post_count, length(rendered))
      |> stream(:posts, rendered, dom_id: &dom_id/1)}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, assign(socket, :masonry?, params["layout"] == "masonry")}
   end
 
   @impl true
@@ -117,9 +125,17 @@ defmodule AnglerWeb.TagLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_user={@current_user} current_profile={@current_profile}>
-      <section class="space-y-5">
-        <div class="flex items-center gap-3">
+    <Layouts.app
+      flash={@flash}
+      current_user={@current_user}
+      current_profile={@current_profile}
+      wide={@masonry?}
+    >
+      <section class={[
+        "space-y-5",
+        @masonry? && "mx-auto max-w-[110rem] px-4 py-10 sm:px-6 lg:px-8"
+      ]}>
+        <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-3xl font-bold tracking-tight">#{@tag_name}</h1>
           <button
             :if={@current_profile}
@@ -139,9 +155,50 @@ defmodule AnglerWeb.TagLive do
           >
             <.icon name="hero-magnifying-glass-micro" class="size-4" /> Search
           </.link>
+
+          <div
+            id="layout-toggle"
+            role="group"
+            aria-label="Layout"
+            class="ml-auto inline-flex rounded-field border border-base-300 bg-base-200 p-0.5"
+          >
+            <.link
+              id="layout-list"
+              patch={~p"/tags/#{@tag_name}"}
+              replace
+              title="List"
+              aria-label="List layout"
+              aria-pressed={to_string(not @masonry?)}
+              class={layout_button_class(not @masonry?)}
+            >
+              <.icon name="hero-bars-3-bottom-left-micro" class="size-4" />
+            </.link>
+            <.link
+              id="layout-masonry"
+              patch={~p"/tags/#{@tag_name}?#{%{layout: "masonry"}}"}
+              replace
+              title="Masonry"
+              aria-label="Masonry layout"
+              aria-pressed={to_string(@masonry?)}
+              class={layout_button_class(@masonry?)}
+            >
+              <.icon name="hero-squares-2x2-micro" class="size-4" />
+            </.link>
+          </div>
         </div>
 
-        <div id="feed" phx-update="stream" class="space-y-3">
+        <%!-- Masonry is CSS columns: cards keep their natural height and flow
+             top-to-bottom, so stream inserts and deletes need no JS. --%>
+        <div
+          id="feed"
+          phx-update="stream"
+          class={
+            if(@masonry?,
+              do: "masonry-feed gap-3 sm:columns-2 lg:columns-3 2xl:columns-4",
+              else: "space-y-3"
+            )
+          }
+        >
           <.post_card
             :for={{dom_id, status} <- @streams.posts}
             id={dom_id}
@@ -156,5 +213,15 @@ defmodule AnglerWeb.TagLive do
       </section>
     </Layouts.app>
     """
+  end
+
+  defp layout_button_class(active?) do
+    [
+      "inline-flex items-center justify-center rounded-[calc(var(--radius-field)-2px)] px-2 py-1 transition-colors",
+      if(active?,
+        do: "bg-base-100 text-base-content shadow-sm",
+        else: "text-base-content/60 hover:text-base-content"
+      )
+    ]
   end
 end

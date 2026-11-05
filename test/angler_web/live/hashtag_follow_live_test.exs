@@ -76,4 +76,25 @@ defmodule AnglerWeb.HashtagFollowLiveTest do
       assert html =~ "following any hashtags yet"
     end
   end
+
+  describe "TagLive layout toggle" do
+    test "switches between list and masonry and is deep-linkable" do
+      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography")
+      assert has_element?(lv, "#feed.space-y-3")
+      refute has_element?(lv, "#feed.masonry-feed")
+      assert has_element?(lv, ~s(#layout-list[aria-pressed="true"]))
+
+      lv |> element("#layout-masonry") |> render_click()
+      assert_patch(lv, ~p"/tags/photography?layout=masonry")
+      assert has_element?(lv, "#feed.masonry-feed")
+      assert has_element?(lv, ~s(#layout-masonry[aria-pressed="true"]))
+
+      lv |> element("#layout-list") |> render_click()
+      assert_patch(lv, ~p"/tags/photography")
+      assert has_element?(lv, "#feed.space-y-3")
+
+      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography?layout=masonry")
+      assert has_element?(lv, "#feed.masonry-feed")
+    end
+  end
 end
