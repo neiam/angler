@@ -162,6 +162,9 @@ defmodule AnglerWeb.TagLive do
           >
             <.icon name="hero-magnifying-glass-micro" class="size-4" /> Search
           </.link>
+          <.link id="all-tags-link" navigate={~p"/tags"} class="btn btn-ghost btn-xs">
+            <.icon name="hero-hashtag-micro" class="size-4" /> Popular tags
+          </.link>
 
           <div
             id="layout-toggle"

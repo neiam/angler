@@ -116,9 +116,12 @@ defmodule AnglerWeb.Router do
       live "/settings/import/instagram", InstagramImportLive
       live "/login/two-factor", TwoFactorChallengeLive
       live "/search", SearchLive
+      live "/tags", TagsLive, :index
       live "/tags/:name", TagLive, :list
       live "/tags/:name/mason", TagLive, :mason
       live "/tags/:name/mason/clean", TagLive, :clean
+      # After the mason routes, so a tag named "top" still gets its masonry.
+      live "/tags/top/:period", TagsLive, :index
       live "/@:username", ProfileLive
       live "/@:username/followers", ProfileFollowsLive, :followers
       live "/@:username/following", ProfileFollowsLive, :following
