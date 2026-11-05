@@ -114,7 +114,9 @@ defmodule AnglerWeb.Router do
       live "/settings/import/instagram", InstagramImportLive
       live "/login/two-factor", TwoFactorChallengeLive
       live "/search", SearchLive
-      live "/tags/:name", TagLive
+      live "/tags/:name", TagLive, :list
+      live "/tags/:name/mason", TagLive, :mason
+      live "/tags/:name/mason/clean", TagLive, :clean
       live "/@:username", ProfileLive
       live "/@:username/followers", ProfileFollowsLive, :followers
       live "/@:username/following", ProfileFollowsLive, :following

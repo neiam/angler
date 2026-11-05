@@ -5,9 +5,10 @@ defmodule AnglerWeb.TagLive do
   the `"hashtag:<name>"` streaming topic. This is the destination for hashtag
   results in `AnglerWeb.SearchLive` and the navbar type-ahead.
 
-  `?layout=masonry` swaps the single column for a wide, multi-column masonry
-  wall, and in masonry `&captions=off` hides caption text to leave just the
-  photos. Both toggles patch the URL so the view is deep-linkable.
+  `/tags/:name/mason` swaps the single column for a wide, multi-column masonry
+  wall, and `/tags/:name/mason/clean` also hides caption text to leave just
+  the photos. The toggles patch between these routes, so each view is
+  deep-linkable.
   """
   use AnglerWeb, :live_view
 
@@ -51,11 +52,13 @@ defmodule AnglerWeb.TagLive do
   end
 
   @impl true
-  def handle_params(params, _uri, socket) do
+  def handle_params(_params, _uri, socket) do
+    action = socket.assigns.live_action
+
     {:noreply,
      socket
-     |> assign(:masonry?, params["layout"] == "masonry")
-     |> assign(:captions?, params["captions"] != "off")}
+     |> assign(:masonry?, action in [:mason, :clean])
+     |> assign(:captions?, action != :clean)}
   end
 
   @impl true
@@ -168,7 +171,7 @@ defmodule AnglerWeb.TagLive do
           >
             <.link
               id="layout-list"
-              patch={tag_path(@tag_name, false, @captions?)}
+              patch={~p"/tags/#{@tag_name}"}
               replace
               title="List"
               aria-label="List layout"
@@ -179,7 +182,11 @@ defmodule AnglerWeb.TagLive do
             </.link>
             <.link
               id="layout-masonry"
-              patch={tag_path(@tag_name, true, @captions?)}
+              patch={
+                if @captions?,
+                  do: ~p"/tags/#{@tag_name}/mason",
+                  else: ~p"/tags/#{@tag_name}/mason/clean"
+              }
               replace
               title="Masonry"
               aria-label="Masonry layout"
@@ -193,7 +200,11 @@ defmodule AnglerWeb.TagLive do
           <.link
             :if={@masonry?}
             id="captions-toggle"
-            patch={tag_path(@tag_name, true, not @captions?)}
+            patch={
+              if @captions?,
+                do: ~p"/tags/#{@tag_name}/mason/clean",
+                else: ~p"/tags/#{@tag_name}/mason"
+            }
             replace
             title={if @captions?, do: "Hide captions", else: "Show captions"}
             aria-pressed={to_string(@captions?)}
@@ -243,17 +254,6 @@ defmodule AnglerWeb.TagLive do
       </section>
     </Layouts.app>
     """
-  end
-
-  # `captions=off` rides along in list view (where it has no effect) so a
-  # round trip back to masonry keeps it.
-  defp tag_path(name, masonry?, captions?) do
-    query =
-      Enum.reject([layout: masonry? && "masonry", captions: !captions? && "off"], fn {_, v} ->
-        v == false
-      end)
-
-    if query == [], do: ~p"/tags/#{name}", else: ~p"/tags/#{name}?#{query}"
   end
 
   defp layout_button_class(active?) do

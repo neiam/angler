@@ -85,7 +85,7 @@ defmodule AnglerWeb.HashtagFollowLiveTest do
       assert has_element?(lv, ~s(#layout-list[aria-pressed="true"]))
 
       lv |> element("#layout-masonry") |> render_click()
-      assert_patch(lv, ~p"/tags/photography?layout=masonry")
+      assert_patch(lv, ~p"/tags/photography/mason")
       assert has_element?(lv, "#feed.masonry-feed")
       assert has_element?(lv, ~s(#layout-masonry[aria-pressed="true"]))
 
@@ -93,34 +93,28 @@ defmodule AnglerWeb.HashtagFollowLiveTest do
       assert_patch(lv, ~p"/tags/photography")
       assert has_element?(lv, "#feed.space-y-3")
 
-      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography?layout=masonry")
+      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography/mason")
       assert has_element?(lv, "#feed.masonry-feed")
     end
 
-    test "masonry can hide captions, keeping the choice when switching layouts" do
+    test "masonry can hide captions via the clean route" do
       {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography")
       refute has_element?(lv, "#captions-toggle")
 
-      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography?layout=masonry")
+      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography/mason")
       refute has_element?(lv, "#feed.hide-captions")
 
       lv |> element("#captions-toggle") |> render_click()
-      assert_patch(lv, ~p"/tags/photography?captions=off&layout=masonry")
-      assert has_element?(lv, "#feed.hide-captions")
-      assert has_element?(lv, ~s(#layout-masonry[href*="captions=off"]))
-
-      lv |> element("#layout-list") |> render_click()
-      assert_patch(lv, ~p"/tags/photography?captions=off")
-      refute has_element?(lv, "#feed.hide-captions")
-      refute has_element?(lv, "#captions-toggle")
-
-      lv |> element("#layout-masonry") |> render_click()
-      assert_patch(lv, ~p"/tags/photography?captions=off&layout=masonry")
-      assert has_element?(lv, "#feed.hide-captions")
+      assert_patch(lv, ~p"/tags/photography/mason/clean")
+      assert has_element?(lv, "#feed.masonry-feed.hide-captions")
+      assert has_element?(lv, ~s(#layout-masonry[href="/tags/photography/mason/clean"]))
 
       lv |> element("#captions-toggle") |> render_click()
-      assert_patch(lv, ~p"/tags/photography?layout=masonry")
+      assert_patch(lv, ~p"/tags/photography/mason")
       refute has_element?(lv, "#feed.hide-captions")
+
+      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography/mason/clean")
+      assert has_element?(lv, "#feed.hide-captions")
     end
   end
 end
