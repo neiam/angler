@@ -96,5 +96,31 @@ defmodule AnglerWeb.HashtagFollowLiveTest do
       {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography?layout=masonry")
       assert has_element?(lv, "#feed.masonry-feed")
     end
+
+    test "masonry can hide captions, keeping the choice when switching layouts" do
+      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography")
+      refute has_element?(lv, "#captions-toggle")
+
+      {:ok, lv, _html} = live(build_conn(), ~p"/tags/photography?layout=masonry")
+      refute has_element?(lv, "#feed.hide-captions")
+
+      lv |> element("#captions-toggle") |> render_click()
+      assert_patch(lv, ~p"/tags/photography?captions=off&layout=masonry")
+      assert has_element?(lv, "#feed.hide-captions")
+      assert has_element?(lv, ~s(#layout-masonry[href*="captions=off"]))
+
+      lv |> element("#layout-list") |> render_click()
+      assert_patch(lv, ~p"/tags/photography?captions=off")
+      refute has_element?(lv, "#feed.hide-captions")
+      refute has_element?(lv, "#captions-toggle")
+
+      lv |> element("#layout-masonry") |> render_click()
+      assert_patch(lv, ~p"/tags/photography?captions=off&layout=masonry")
+      assert has_element?(lv, "#feed.hide-captions")
+
+      lv |> element("#captions-toggle") |> render_click()
+      assert_patch(lv, ~p"/tags/photography?layout=masonry")
+      refute has_element?(lv, "#feed.hide-captions")
+    end
   end
 end

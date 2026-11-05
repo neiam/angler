@@ -6,7 +6,8 @@ defmodule AnglerWeb.TagLive do
   results in `AnglerWeb.SearchLive` and the navbar type-ahead.
 
   `?layout=masonry` swaps the single column for a wide, multi-column masonry
-  wall; the toggle patches the URL so the choice is deep-linkable.
+  wall, and in masonry `&captions=off` hides caption text to leave just the
+  photos. Both toggles patch the URL so the view is deep-linkable.
   """
   use AnglerWeb, :live_view
 
@@ -51,7 +52,10 @@ defmodule AnglerWeb.TagLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, assign(socket, :masonry?, params["layout"] == "masonry")}
+    {:noreply,
+     socket
+     |> assign(:masonry?, params["layout"] == "masonry")
+     |> assign(:captions?, params["captions"] != "off")}
   end
 
   @impl true
@@ -164,7 +168,7 @@ defmodule AnglerWeb.TagLive do
           >
             <.link
               id="layout-list"
-              patch={~p"/tags/#{@tag_name}"}
+              patch={tag_path(@tag_name, false, @captions?)}
               replace
               title="List"
               aria-label="List layout"
@@ -175,7 +179,7 @@ defmodule AnglerWeb.TagLive do
             </.link>
             <.link
               id="layout-masonry"
-              patch={~p"/tags/#{@tag_name}?#{%{layout: "masonry"}}"}
+              patch={tag_path(@tag_name, true, @captions?)}
               replace
               title="Masonry"
               aria-label="Masonry layout"
@@ -185,19 +189,45 @@ defmodule AnglerWeb.TagLive do
               <.icon name="hero-squares-2x2-micro" class="size-4" />
             </.link>
           </div>
+
+          <.link
+            :if={@masonry?}
+            id="captions-toggle"
+            patch={tag_path(@tag_name, true, not @captions?)}
+            replace
+            title={if @captions?, do: "Hide captions", else: "Show captions"}
+            aria-pressed={to_string(@captions?)}
+            class={[
+              "btn btn-sm gap-1.5",
+              if(@captions?, do: "btn-ghost", else: "btn-outline")
+            ]}
+          >
+            <.icon
+              name={
+                if @captions?,
+                  do: "hero-chat-bubble-bottom-center-text-micro",
+                  else: "hero-photo-micro"
+              }
+              class="size-4"
+            />
+            {if @captions?, do: "Captions", else: "Photos only"}
+          </.link>
         </div>
 
         <%!-- Masonry is CSS columns: cards keep their natural height and flow
-             top-to-bottom, so stream inserts and deletes need no JS. --%>
+             top-to-bottom, so stream inserts and deletes need no JS. Captions
+             are hidden by a class here too, since streamed cards aren't
+             re-rendered when an assign changes. --%>
         <div
           id="feed"
           phx-update="stream"
-          class={
+          class={[
             if(@masonry?,
               do: "masonry-feed gap-3 sm:columns-2 lg:columns-3 2xl:columns-4",
               else: "space-y-3"
-            )
-          }
+            ),
+            (@masonry? and not @captions?) && "hide-captions"
+          ]}
         >
           <.post_card
             :for={{dom_id, status} <- @streams.posts}
@@ -213,6 +243,17 @@ defmodule AnglerWeb.TagLive do
       </section>
     </Layouts.app>
     """
+  end
+
+  # `captions=off` rides along in list view (where it has no effect) so a
+  # round trip back to masonry keeps it.
+  defp tag_path(name, masonry?, captions?) do
+    query =
+      Enum.reject([layout: masonry? && "masonry", captions: !captions? && "off"], fn {_, v} ->
+        v == false
+      end)
+
+    if query == [], do: ~p"/tags/#{name}", else: ~p"/tags/#{name}?#{query}"
   end
 
   defp layout_button_class(active?) do

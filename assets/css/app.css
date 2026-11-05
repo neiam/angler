@@ -392,6 +392,7 @@
   break-inside: avoid;
   margin-bottom: 0.75rem;
 }
+.hide-captions .post-caption { display: none; }
 
 /* Photo viewer (assets/js/lightbox.js) */
 html.lightbox-open { overflow: hidden; }

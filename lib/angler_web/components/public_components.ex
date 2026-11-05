@@ -125,7 +125,10 @@ defmodule AnglerWeb.PublicComponents do
       {@status["spoiler_text"]}
     </div>
 
-    <div :if={@status["content"] not in [nil, ""]} class="prose prose-sm max-w-none break-words">
+    <div
+      :if={@status["content"] not in [nil, ""]}
+      class="post-caption prose prose-sm max-w-none break-words"
+    >
       {raw(@status["content"])}
     </div>
 
