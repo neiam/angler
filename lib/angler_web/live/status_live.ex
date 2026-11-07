@@ -15,6 +15,7 @@ defmodule AnglerWeb.StatusLive do
   alias Angler.Timelines.Workers.FeedInsert
   alias AnglerWeb.MastodonAPI.Account, as: AccountJSON
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
+  alias AnglerWeb.MetaTags
 
   @impl true
   def mount(%{"username" => username, "id" => id}, _session, socket) do
@@ -34,6 +35,7 @@ defmodule AnglerWeb.StatusLive do
       {:ok,
        socket
        |> assign(:page_title, "Post by @#{username}")
+       |> assign(:meta, MetaTags.status(rendered, "/p/#{username}/#{id}"))
        |> assign(:status, rendered)
        |> assign(:comments, comments)
        |> assign(:reply_form, reply_form())

@@ -20,6 +20,7 @@ defmodule AnglerWeb.TagLive do
   alias Angler.Streaming
   alias Angler.Timelines
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
+  alias AnglerWeb.MetaTags
 
   @feed_limit 30
 
@@ -44,6 +45,7 @@ defmodule AnglerWeb.TagLive do
     {:ok,
      socket
      |> assign(:page_title, "##{name}")
+     |> assign(:meta, MetaTags.tag(name, rendered))
      |> assign(:tag_name, name)
      |> assign(:topic, topic)
      |> assign(:following?, following?(profile, name))

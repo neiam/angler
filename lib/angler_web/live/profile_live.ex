@@ -19,6 +19,7 @@ defmodule AnglerWeb.ProfileLive do
   alias Angler.Statuses
   alias AnglerWeb.MastodonAPI.Account
   alias AnglerWeb.MastodonAPI.Status, as: StatusJSON
+  alias AnglerWeb.MetaTags
 
   @page_size 30
 
@@ -31,11 +32,14 @@ defmodule AnglerWeb.ProfileLive do
         owner? = is_integer(viewer_id) and viewer_id == profile.id and is_nil(profile.domain)
         filter = :all
 
+        account = Account.render(profile)
+
         socket =
           socket
           |> assign(:page_title, "@#{profile.username}")
           |> assign(:profile, profile)
-          |> assign(:account, Account.render(profile))
+          |> assign(:account, account)
+          |> assign(:meta, MetaTags.profile(account, "/@#{acct}"))
           |> assign(:remote?, not is_nil(profile.domain))
           |> assign(:owner?, owner?)
           |> assign(:filter, filter)

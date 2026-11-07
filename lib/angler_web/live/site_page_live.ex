@@ -7,6 +7,7 @@ defmodule AnglerWeb.SitePageLive do
   use AnglerWeb, :live_view
 
   alias Angler.SitePages
+  alias AnglerWeb.MetaTags
 
   # One-line blurbs for the landing, by page key, in two groups.
   @groups [
@@ -37,6 +38,7 @@ defmodule AnglerWeb.SitePageLive do
     {:ok,
      socket
      |> assign(:page_title, "Policies & help")
+     |> assign(:meta, MetaTags.page("Policies & help", nil, "/site"))
      |> assign(:groups, groups)}
   end
 
@@ -46,6 +48,7 @@ defmodule AnglerWeb.SitePageLive do
     {:ok,
      socket
      |> assign(:page_title, page.title)
+     |> assign(:meta, MetaTags.page(page.title, SitePages.render(page.content), page.path))
      |> assign(:page, page)
      |> assign(:html, SitePages.render(page.content))}
   end

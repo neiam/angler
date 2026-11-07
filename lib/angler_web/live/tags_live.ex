@@ -20,7 +20,17 @@ defmodule AnglerWeb.TagsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :page_title, "Popular tags")}
+    {:ok,
+     socket
+     |> assign(:page_title, "Popular tags")
+     |> assign(
+       :meta,
+       AnglerWeb.MetaTags.page(
+         "Popular tags",
+         "The most used tags on #{Angler.Instance.title()}",
+         "/tags"
+       )
+     )}
   end
 
   @impl true
