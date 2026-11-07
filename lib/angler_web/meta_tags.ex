@@ -25,25 +25,12 @@ defmodule AnglerWeb.MetaTags do
   @spec status(map(), String.t()) :: map()
   def status(%{"account" => account} = status, path) do
     shareable? = status["visibility"] in ["public", "unlisted"]
-    sensitive? = status["sensitive"] == true
-    media = List.first(status["media_attachments"] || [])
-
-    description =
-      cond do
-        not shareable? -> nil
-        sensitive? and present(status["spoiler_text"]) -> "CW: " <> status["spoiler_text"]
-        sensitive? -> "Sensitive content"
-        true -> plain(status["content"])
-      end
-
-    image =
-      if shareable? and not sensitive? and media,
-        do: %{url: media["preview_url"] || media["url"], alt: media["description"]}
+    image = if shareable?, do: photo(status)
 
     %{
       type: "article",
       title: "#{author(account)} on #{Instance.title()}",
-      description: description,
+      description: if(shareable?, do: status_description(status)),
       url: AnglerWeb.Endpoint.url() <> path,
       image: image,
       card: if(image, do: "summary_large_image", else: "summary"),
@@ -79,15 +66,7 @@ defmodule AnglerWeb.MetaTags do
   """
   @spec tag(String.t(), [map()]) :: map()
   def tag(name, statuses) do
-    image =
-      Enum.find_value(statuses, fn s ->
-        with false <- s["sensitive"] == true,
-             [m | _] <- s["media_attachments"] || [] do
-          %{url: m["preview_url"] || m["url"], alt: m["description"]}
-        else
-          _ -> nil
-        end
-      end)
+    image = Enum.find_value(statuses, &photo/1)
 
     %{
       type: "website",
@@ -146,6 +125,25 @@ defmodule AnglerWeb.MetaTags do
     <meta :if={@m[:description]} name="twitter:description" content={@m.description} />
     """
   end
+
+  # A post's first photo (or video still), unless the post is sensitive.
+  defp photo(%{"sensitive" => true}), do: nil
+
+  defp photo(status) do
+    case status["media_attachments"] do
+      [m | _] -> %{url: m["preview_url"] || m["url"], alt: m["description"]}
+      _ -> nil
+    end
+  end
+
+  defp status_description(%{"sensitive" => true} = status) do
+    case present(status["spoiler_text"]) do
+      nil -> "Sensitive content"
+      cw -> "CW: " <> cw
+    end
+  end
+
+  defp status_description(status), do: plain(status["content"])
 
   defp author(account) do
     name = present(account["display_name"]) || account["username"]
