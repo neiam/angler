@@ -105,6 +105,11 @@ defmodule AnglerWeb.Layouts do
                     </.link>
                   </li>
                   <li :if={@current_user.is_admin}>
+                    <.link navigate={~p"/admin/instances"}>
+                      <.icon name="hero-server-stack-micro" class="size-4" /> Known servers
+                    </.link>
+                  </li>
+                  <li :if={@current_user.is_admin}>
                     <.link navigate={~p"/admin/curated-onboarding"}>
                       <.icon name="hero-user-plus-micro" class="size-4" /> Curated onboarding
                     </.link>

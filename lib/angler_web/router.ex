@@ -132,6 +132,7 @@ defmodule AnglerWeb.Router do
       live "/admin", AdminSettingsLive
       live "/admin/pages", AdminPagesLive
       live "/admin/relays", AdminRelaysLive
+      live "/admin/instances", AdminInstancesLive
       live "/admin/curated-onboarding", AdminCuratedRegistersLive
       live "/admin/curated-onboarding/templates", AdminCuratedTemplatesLive
       live "/admin/curated-onboarding/:id", AdminCuratedRegisterLive
