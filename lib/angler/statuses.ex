@@ -552,10 +552,11 @@ defmodule Angler.Statuses do
   Create a remote status row from an inbound `Create Note` activity.
 
   Returns `{:ok, status}` or `{:error, reason}`. Idempotent on the AS2 `id`
-  (uri unique constraint).
+  (uri unique constraint). `opts[:created_at]` backdates `inserted_at` (a
+  backfilled old post).
   """
-  @spec create_remote(map()) :: {:ok, Status.t()} | {:error, term()}
-  def create_remote(attrs) when is_map(attrs) do
+  @spec create_remote(map(), keyword()) :: {:ok, Status.t()} | {:error, term()}
+  def create_remote(attrs, opts \\ []) when is_map(attrs) do
     uri = attr(attrs, :uri)
 
     # Caller (Statuses.Federation.handle_create/2) checks `get_by_uri` before
@@ -564,7 +565,7 @@ defmodule Angler.Statuses do
     # `uri` index is partial — `WHERE uri IS NOT NULL` — and PG's ON CONFLICT
     # requires either a non-partial index or a matching predicate clause).
     try do
-      Status.changeset(attrs) |> Repo.insert()
+      Status.changeset(attrs) |> put_timestamps(opts[:created_at]) |> Repo.insert()
     rescue
       Ecto.ConstraintError ->
         case uri && Repo.get_by(Status, uri: uri) do

@@ -8,12 +8,14 @@ defmodule AnglerWeb.ProfileLive do
   while the profile owner gets All / Public / Unlisted filter tabs (so a silent
   import of unlisted posts is reachable) plus per-post controls to change a
   post's visibility. Remote accounts (`username@domain`) render from our cached
-  copy with a "view original" link.
+  copy with a "view original" link; admins also get "Fetch older posts", which
+  backfills the account's history from its outbox (`Angler.Federation.Backfill`).
   """
   use AnglerWeb, :live_view
 
   import AnglerWeb.PublicComponents
 
+  alias Angler.Federation.Workers.Backfill, as: BackfillWorker
   alias Angler.Profiles
   alias Angler.Profiles.Profile
   alias Angler.Statuses
@@ -43,7 +45,12 @@ defmodule AnglerWeb.ProfileLive do
           |> assign(:remote?, not is_nil(profile.domain))
           |> assign(:owner?, owner?)
           |> assign(:filter, filter)
+          |> assign(:backfill?, backfill_allowed?(socket, profile))
+          |> assign(:backfilling?, false)
           |> load_first_page()
+
+        if socket.assigns.backfill? and connected?(socket),
+          do: Phoenix.PubSub.subscribe(Angler.PubSub, BackfillWorker.topic(profile.id))
 
         {:ok, socket}
 
@@ -111,6 +118,62 @@ defmodule AnglerWeb.ProfileLive do
   end
 
   def handle_event("set_visibility", _params, socket), do: {:noreply, socket}
+
+  # Admin-only: pull the remote account's older posts from its outbox.
+  def handle_event("backfill", _params, %{assigns: %{backfill?: true}} = socket) do
+    case BackfillWorker.enqueue(socket.assigns.profile.id) do
+      {:ok, _job} ->
+        {:noreply,
+         socket
+         |> assign(:backfilling?, true)
+         |> put_flash(:info, "Fetching older posts from #{socket.assigns.profile.domain}…")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Couldn't queue the fetch.")}
+    end
+  end
+
+  def handle_event("backfill", _params, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_info({:backfill_done, result}, socket) do
+    socket = assign(socket, :backfilling?, false)
+
+    socket =
+      case result do
+        {:ok, %{imported: n} = r} ->
+          profile = Profiles.get_profile(socket.assigns.profile.id) || socket.assigns.profile
+
+          socket
+          |> assign(:profile, profile)
+          |> load_first_page()
+          |> put_flash(:info, backfill_summary(n, r))
+
+        {:error, reason} ->
+          put_flash(socket, :error, "Couldn't read their outbox (#{backfill_reason(reason)}).")
+      end
+
+    {:noreply, socket}
+  end
+
+  defp backfill_allowed?(socket, %Profile{domain: domain}) do
+    match?(%{is_admin: true}, socket.assigns.current_user) and not is_nil(domain)
+  end
+
+  defp backfill_summary(0, %{existing: e}),
+    do: "No older posts found (#{e} already here)."
+
+  defp backfill_summary(n, %{existing: e, failed: f}) do
+    "Imported #{n} older #{if n == 1, do: "post", else: "posts"}" <>
+      if(e > 0, do: ", #{e} already here", else: "") <>
+      if(f > 0, do: ", #{f} failed", else: "") <> "."
+  end
+
+  defp backfill_reason({:unavailable, status}), do: "server answered #{status}"
+  defp backfill_reason(:bad_status), do: "server refused"
+  defp backfill_reason(:no_outbox), do: "no outbox published"
+  defp backfill_reason(reason) when is_atom(reason), do: Phoenix.Naming.humanize(reason)
+  defp backfill_reason(_), do: "unreachable"
 
   ## Internals
 
@@ -237,6 +300,21 @@ defmodule AnglerWeb.ProfileLive do
               <.icon name="hero-arrow-top-right-on-square-micro" class="size-4" />
               View original on {@profile.domain}
             </a>
+            <button
+              :if={@backfill?}
+              id="backfill-posts"
+              type="button"
+              phx-click="backfill"
+              disabled={@backfilling?}
+              title="Admin: pull this account's older public posts from its outbox"
+              class="btn btn-ghost btn-xs ml-2 gap-1"
+            >
+              <.icon
+                name={if @backfilling?, do: "hero-arrow-path-micro", else: "hero-clock-micro"}
+                class={["size-4", @backfilling? && "animate-spin"]}
+              />
+              {if @backfilling?, do: "Fetching older posts…", else: "Fetch older posts"}
+            </button>
           </div>
         </div>
       </header>

@@ -104,6 +104,31 @@ defmodule Angler.Statuses.Federation do
   @spec fetch_and_ingest(String.t()) :: :ok | {:error, term()}
   def fetch_and_ingest(url) when is_binary(url), do: ingest_announced(%{"object" => url})
 
+  @doc """
+  Mirror an old public post found in an author's outbox
+  (`Angler.Federation.Backfill`).
+
+  `object` is the inline Note of an outbox `Create`, fetched from the
+  author's own server; `actor_url` is the outbox owner. The same authorship
+  rule as `handle_create/2` applies. Unlike a live `Create` the post is
+  backdated to its `published` time (id and `inserted_at`), so it sorts into
+  the past; it is not fanned into home timelines and mentions don't notify.
+  Only public and unlisted posts are taken.
+
+  Returns `:ok`, `{:error, :exists}` when already mirrored, or another error.
+  """
+  @spec backfill(map(), String.t()) :: :ok | {:error, term()}
+  def backfill(%{"type" => type, "id" => object_id} = object, actor_url)
+      when type in ["Note", "Question"] and is_binary(object_id) do
+    cond do
+      not authored_by?(object, actor_url) -> {:error, :not_authored_by_actor}
+      Statuses.get_by_uri(object_id) -> {:error, :exists}
+      true -> do_create(object, actor_url, backfill: true)
+    end
+  end
+
+  def backfill(_, _), do: {:error, :unsupported_object_type}
+
   # A relay's inline copy is unauthenticated — the relay didn't write it — so
   # we always fetch the object from its origin.
   defp announced_object_url(%{"id" => url}) when is_binary(url), do: {:ok, url}
@@ -115,21 +140,26 @@ defmodule Angler.Statuses.Federation do
     HTTP.fetch(url, signed_with: {actor.key_id, actor.private_key_pem})
   end
 
-  defp do_create(object, actor_url) do
+  defp do_create(object, actor_url, opts \\ []) do
+    backfill? = Keyword.get(opts, :backfill, false)
+
     with {:ok, %Profile{} = author} <- Actor.resolve(actor_url),
          attrs = build_attrs(object, author),
-         {:ok, status} <- Statuses.create_remote(attrs) do
+         {:ok, attrs, create_opts} <- creation(attrs, object, backfill?),
+         {:ok, status} <- Statuses.create_remote(attrs, create_opts) do
       attach_media(status, object)
-      attach_mentions(status, object)
+      attach_mentions(status, object, notify: not backfill?)
       attach_hashtags(status, object)
-      bump_author_count(status.profile_id)
+      bump_author_count(status.profile_id, not backfill?)
       maybe_increment_reply_count(status)
       adopt_replies(status)
 
-      if status.visibility == :direct, do: Conversations.record(status)
+      if not backfill? do
+        if status.visibility == :direct, do: Conversations.record(status)
 
-      # Fan into local followers' home timelines. Skips :direct visibility.
-      Angler.Timelines.Workers.FeedInsert.enqueue(status.id)
+        # Fan into local followers' home timelines. Skips :direct visibility.
+        Angler.Timelines.Workers.FeedInsert.enqueue(status.id)
+      end
 
       :ok
     else
@@ -206,6 +236,48 @@ defmodule Angler.Statuses.Federation do
   defp remote_owned_by?(_, _), do: false
 
   ## Internals
+
+  defp creation(attrs, _object, false), do: {:ok, attrs, []}
+
+  # A backfilled post takes a snowflake minted from its `published` time, so
+  # it sorts among the author's other posts by when it was written.
+  defp creation(%{visibility: v} = attrs, object, true) when v in [:public, :unlisted] do
+    with {:ok, published} <- published_at(object) do
+      ms = DateTime.to_unix(published, :millisecond)
+      id = free_id(ms, :erlang.phash2(attrs.uri, 4096), 0)
+      {:ok, Map.put(attrs, :id, id), [created_at: published]}
+    end
+  end
+
+  defp creation(_attrs, _object, true), do: {:error, :not_public}
+
+  defp published_at(%{"published" => ts}) when is_binary(ts) do
+    case DateTime.from_iso8601(ts) do
+      {:ok, dt, _} ->
+        if DateTime.after?(dt, DateTime.utc_now()),
+          do: {:error, :bad_published},
+          else: {:ok, usec(dt)}
+
+      _ ->
+        {:error, :bad_published}
+    end
+  end
+
+  defp published_at(_), do: {:error, :bad_published}
+
+  defp usec(%DateTime{microsecond: {us, _}} = dt), do: %{dt | microsecond: {us, 6}}
+
+  # Two posts published in the same millisecond would mint the same id; step
+  # the sequence bits until one is free.
+  defp free_id(_ms, _seq, 4096), do: Angler.Snowflake.next()
+
+  defp free_id(ms, seq, tries) do
+    id = Angler.Snowflake.from_timestamp(ms, rem(seq + tries, 4096))
+
+    if Repo.exists?(from(s in Status, where: s.id == ^id)),
+      do: free_id(ms, seq, tries + 1),
+      else: id
+  end
 
   defp build_attrs(object, %Profile{} = author) do
     visibility = visibility_from_audience(object, author.followers_url)
@@ -327,21 +399,22 @@ defmodule Angler.Statuses.Federation do
     :ok
   end
 
-  defp attach_mentions(%Status{} = status, %{"tag" => tags}) when is_list(tags) do
+  defp attach_mentions(%Status{} = status, %{"tag" => tags}, opts) when is_list(tags) do
     base_users = AnglerWeb.Endpoint.url() <> "/users/"
+    notify? = Keyword.get(opts, :notify, true)
 
     tags
     |> Enum.filter(&(&1["type"] == "Mention" and is_binary(&1["href"])))
     |> Enum.map(& &1["href"])
     |> Enum.uniq()
-    |> Enum.each(&attach_mention(status, &1, base_users))
+    |> Enum.each(&attach_mention(status, &1, base_users, notify?))
   end
 
-  defp attach_mentions(_, _), do: :ok
+  defp attach_mentions(_, _, _), do: :ok
 
-  defp attach_mention(%Status{} = status, href, base_users) do
+  defp attach_mention(%Status{} = status, href, base_users, notify?) do
     if String.starts_with?(href, base_users) do
-      attach_local_mention(status, String.trim_leading(href, base_users))
+      attach_local_mention(status, String.trim_leading(href, base_users), notify?)
     else
       # Remote mention — store iff we already have the actor cached.
       # We deliberately don't fetch here to avoid amplification.
@@ -352,13 +425,13 @@ defmodule Angler.Statuses.Federation do
     end
   end
 
-  defp attach_local_mention(%Status{} = status, username) do
+  defp attach_local_mention(%Status{} = status, username, notify?) do
     case Profiles.get_local_by_username(username) do
       %Profile{id: pid} ->
         insert_mention(status.id, pid)
 
         # A DM's recipients are notified by `Conversations.record/1`.
-        if status.visibility != :direct do
+        if notify? and status.visibility != :direct do
           Notifications.notify(%{
             recipient_id: pid,
             account_id: status.profile_id,
@@ -406,11 +479,14 @@ defmodule Angler.Statuses.Federation do
 
   ## Counter housekeeping
 
-  defp bump_author_count(profile_id) do
+  # A backfilled post counts, but isn't the author's latest activity.
+  defp bump_author_count(profile_id, latest?) do
+    set = if latest?, do: [last_status_at: DateTime.utc_now()], else: []
+
     Repo.update_all(
       from(p in Profile, where: p.id == ^profile_id),
       inc: [statuses_count: 1],
-      set: [last_status_at: DateTime.utc_now()]
+      set: set
     )
 
     :ok
