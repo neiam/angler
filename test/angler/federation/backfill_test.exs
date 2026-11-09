@@ -138,6 +138,51 @@ defmodule Angler.Federation.BackfillTest do
     assert Repo.aggregate(Status, :count) == 2
   end
 
+  describe "after_follow" do
+    alias Angler.Federation.Workers.Backfill, as: BackfillWorker
+
+    defp local!(name) do
+      {:ok, %{user: user}} =
+        Accounts.register(%{
+          username: name,
+          email: "#{name}@example.com",
+          password: "verysecret123"
+        })
+
+      Profiles.get_profile(user.profile_id)
+    end
+
+    test "the first local follow queues a backfill, later ones don't", %{alice: alice, local: bob} do
+      {:ok, :pending_remote, _} =
+        Angler.Follows.follow(Profiles.get_profile(bob.profile_id), alice)
+
+      assert_enqueued(worker: BackfillWorker, args: %{"profile_id" => alice.id, "limit" => 160})
+
+      Repo.delete_all(Oban.Job)
+      {:ok, :pending_remote, _} = Angler.Follows.follow(local!("carol"), alice)
+      refute_enqueued(worker: BackfillWorker)
+    end
+
+    test "can be switched off", %{alice: alice, local: bob} do
+      Application.put_env(:angler, Backfill, on_follow: false)
+      on_exit(fn -> Application.delete_env(:angler, Backfill) end)
+
+      {:ok, :pending_remote, _} =
+        Angler.Follows.follow(Profiles.get_profile(bob.profile_id), alice)
+
+      refute_enqueued(worker: BackfillWorker)
+    end
+
+    test "skips private accounts", %{alice: alice, local: bob} do
+      alice = alice |> Ecto.Changeset.change(is_private: true) |> Repo.update!()
+
+      {:ok, :pending_remote, _} =
+        Angler.Follows.follow(Profiles.get_profile(bob.profile_id), alice)
+
+      refute_enqueued(worker: BackfillWorker)
+    end
+  end
+
   test "ignores an outbox on another host", %{alice: alice} do
     alice = %{alice | outbox_url: "http://evil.test/outbox"}
     assert {:error, :foreign_outbox} = Backfill.run(alice)

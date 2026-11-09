@@ -306,6 +306,13 @@ if config_env() != :test do
     max_pages: int.("AP_BLOCK_SYNC_MAX_PAGES", 10),
     reconcile_limit: int.("AP_BLOCK_SYNC_RECONCILE_LIMIT", 1000)
 
+  # AP_BACKFILL_ON_FOLLOW: when someone here first follows a remote account,
+  # pull up to AP_BACKFILL_ON_FOLLOW_LIMIT of its older public posts from its
+  # outbox (Angler.Federation.Backfill). Admins can always trigger it by hand.
+  config :angler, Angler.Federation.Backfill,
+    on_follow: bool.("AP_BACKFILL_ON_FOLLOW", true),
+    on_follow_limit: int.("AP_BACKFILL_ON_FOLLOW_LIMIT", 160)
+
   # REMOTE_AVATARS: keep local copies of remote avatars and headers
   # (upstream federation.avatars.store_local); off hotlinks the origin's.
   config :angler, :remote_avatars, bool.("REMOTE_AVATARS", true)

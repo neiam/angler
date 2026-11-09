@@ -17,7 +17,12 @@ defmodule Angler.Federation.Backfill do
   dereference must live on the author's own host. Boosts (`Announce`) are
   skipped. Not every server publishes an outbox (some return an empty or
   totals-only collection); that just yields nothing.
+
+  Besides the admin button, `after_follow/2` runs a backfill automatically
+  the first time a local account follows a remote one (see `on_follow?/0`).
   """
+
+  import Ecto.Query, only: [from: 2]
 
   require Logger
 
@@ -25,9 +30,9 @@ defmodule Angler.Federation.Backfill do
   alias Angler.Profiles.Profile
   alias Angler.Statuses.Federation, as: StatusFederation
 
-  @default_limit 40
-  @max_limit 200
-  @max_pages 20
+  @default_limit 160
+  @max_limit 500
+  @max_pages 30
 
   @type result :: %{
           imported: non_neg_integer(),
@@ -38,6 +43,48 @@ defmodule Angler.Federation.Backfill do
 
   def default_limit, do: @default_limit
   def max_limit, do: @max_limit
+
+  @doc """
+  Whether a remote account's history is fetched automatically the first time
+  someone here follows it. On by default:
+
+      config :angler, Angler.Federation.Backfill,
+        on_follow: true,
+        on_follow_limit: 160
+  """
+  @spec on_follow?() :: boolean()
+  def on_follow?, do: config(:on_follow, true) == true
+
+  @doc """
+  Queue a backfill of `target` after `follower_id` (local) started following
+  it, if `on_follow?/0` and nobody else here already follows it — their
+  follow would have triggered one, and live delivery has kept it current
+  since. Private accounts are skipped: their outbox holds nothing public.
+  """
+  @spec after_follow(Profile.t(), integer()) :: :ok
+  def after_follow(%Profile{domain: domain, is_private: false} = target, follower_id)
+      when is_binary(domain) do
+    if on_follow?() and not other_local_followers?(target.id, follower_id) do
+      limit = config(:on_follow_limit, @default_limit)
+      {:ok, _} = Angler.Federation.Workers.Backfill.enqueue(target.id, limit)
+    end
+
+    :ok
+  end
+
+  def after_follow(_target, _follower_id), do: :ok
+
+  defp other_local_followers?(target_id, follower_id) do
+    Angler.Repo.exists?(
+      from f in Angler.Follows.Follower,
+        join: p in Profile,
+        on: p.id == f.following_id and is_nil(p.domain),
+        where: f.profile_id == ^target_id and f.following_id != ^follower_id
+    )
+  end
+
+  defp config(key, default),
+    do: :angler |> Application.get_env(__MODULE__, []) |> Keyword.get(key, default)
 
   @doc """
   Walk `profile`'s outbox until `limit` posts (default #{@default_limit},

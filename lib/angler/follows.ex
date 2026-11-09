@@ -226,6 +226,7 @@ defmodule Angler.Follows do
               target_actor_url: target.remote_url
             })
 
+            Angler.Federation.Backfill.after_follow(target, actor.id)
             {:ok, :pending_remote, follower}
 
           err ->
