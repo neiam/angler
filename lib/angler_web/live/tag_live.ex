@@ -168,66 +168,40 @@ defmodule AnglerWeb.TagLive do
             <.icon name="hero-hashtag-micro" class="size-4" /> Popular tags
           </.link>
 
-          <div
-            id="layout-toggle"
-            role="group"
-            aria-label="Layout"
-            class="ml-auto inline-flex rounded-field border border-base-300 bg-base-200 p-0.5"
-          >
-            <.link
-              id="layout-list"
-              patch={~p"/tags/#{@tag_name}"}
-              replace
-              title="List"
-              aria-label="List layout"
-              aria-pressed={to_string(not @masonry?)}
-              class={layout_button_class(not @masonry?)}
-            >
-              <.icon name="hero-bars-3-bottom-left-micro" class="size-4" />
-            </.link>
-            <.link
-              id="layout-masonry"
-              patch={
+          <div class="ml-auto flex items-center gap-2">
+            <.captions_toggle
+              :if={@masonry?}
+              path={
                 if @captions?,
-                  do: ~p"/tags/#{@tag_name}/mason",
-                  else: ~p"/tags/#{@tag_name}/mason/clean"
+                  do: ~p"/tags/#{@tag_name}/mason/clean",
+                  else: ~p"/tags/#{@tag_name}/mason"
               }
-              replace
-              title="Masonry"
-              aria-label="Masonry layout"
-              aria-pressed={to_string(@masonry?)}
-              class={layout_button_class(@masonry?)}
-            >
-              <.icon name="hero-squares-2x2-micro" class="size-4" />
-            </.link>
-          </div>
-
-          <.link
-            :if={@masonry?}
-            id="captions-toggle"
-            patch={
-              if @captions?,
-                do: ~p"/tags/#{@tag_name}/mason/clean",
-                else: ~p"/tags/#{@tag_name}/mason"
-            }
-            replace
-            title={if @captions?, do: "Hide captions", else: "Show captions"}
-            aria-pressed={to_string(@captions?)}
-            class={[
-              "btn btn-sm gap-1.5",
-              if(@captions?, do: "btn-ghost", else: "btn-outline")
-            ]}
-          >
-            <.icon
-              name={
-                if @captions?,
-                  do: "hero-chat-bubble-bottom-center-text-micro",
-                  else: "hero-photo-micro"
-              }
-              class="size-4"
+              captions?={@captions?}
             />
-            {if @captions?, do: "Captions", else: "Photos only"}
-          </.link>
+            <.layout_toggle
+              id="layout-toggle"
+              options={[
+                %{
+                  id: "layout-list",
+                  path: ~p"/tags/#{@tag_name}",
+                  label: "List",
+                  icon: "hero-bars-3-bottom-left-micro",
+                  active?: not @masonry?
+                },
+                %{
+                  id: "layout-masonry",
+                  path:
+                    if(@captions?,
+                      do: ~p"/tags/#{@tag_name}/mason",
+                      else: ~p"/tags/#{@tag_name}/mason/clean"
+                    ),
+                  label: "Masonry",
+                  icon: "hero-view-columns-micro",
+                  active?: @masonry?
+                }
+              ]}
+            />
+          </div>
         </div>
 
         <%!-- Masonry is CSS columns: cards keep their natural height and flow
@@ -259,15 +233,5 @@ defmodule AnglerWeb.TagLive do
       </section>
     </Layouts.app>
     """
-  end
-
-  defp layout_button_class(active?) do
-    [
-      "inline-flex items-center justify-center rounded-[calc(var(--radius-field)-2px)] px-2 py-1 transition-colors",
-      if(active?,
-        do: "bg-base-100 text-base-content shadow-sm",
-        else: "text-base-content/60 hover:text-base-content"
-      )
-    ]
   end
 end

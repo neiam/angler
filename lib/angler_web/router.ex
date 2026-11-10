@@ -81,6 +81,7 @@ defmodule AnglerWeb.Router do
 
     live_session :public, on_mount: {AnglerWeb.LiveAuth, :mount_current_user} do
       live "/", IndexLive, :local
+      live "/mine", IndexLive, :mine
       live "/network", IndexLive, :network
       live "/trending", IndexLive, :trending
       live "/about", AboutLive

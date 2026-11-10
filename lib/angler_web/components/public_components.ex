@@ -19,6 +19,26 @@ defmodule AnglerWeb.PublicComponents do
     default: nil,
     doc: "when set, the reblog/favourite footer becomes interactive (phx-click)"
 
+  attr :boost_id, :string,
+    default: nil,
+    doc: "set internally when `status` is a boost wrapper: the wrapper's id"
+
+  attr :boosted_by, :map,
+    default: nil,
+    doc: "set internally when `status` is a boost wrapper: the booster's account"
+
+  # A boost (Mastodon wrapper status, `"reblog"` set) renders the boosted post
+  # under a "boosted" line. The footer buttons act on the boosted post and
+  # carry the wrapper's id as `phx-value-boost`, so the LiveView can re-insert
+  # the stream item under the wrapper's DOM id.
+  def post_card(%{status: %{"reblog" => %{} = inner} = wrapper} = assigns) do
+    assigns
+    |> assign(:status, inner)
+    |> assign(:boost_id, wrapper["id"])
+    |> assign(:boosted_by, wrapper["account"] || %{})
+    |> post_card()
+  end
+
   def post_card(assigns) do
     assigns =
       assigns
@@ -29,6 +49,16 @@ defmodule AnglerWeb.PublicComponents do
     ~H"""
     <article id={@id} class="card bg-base-200 border border-base-300">
       <div class="card-body gap-3 p-4">
+        <div
+          :if={@boosted_by}
+          class="-mb-1 flex items-center gap-1.5 text-xs text-base-content/60"
+        >
+          <.icon name="hero-arrow-path-rounded-square-micro" class="size-4 text-success" />
+          <.account_link account={@boosted_by} class="font-medium hover:underline">
+            {display_name(@boosted_by)}
+          </.account_link>
+          boosted
+        </div>
         <header class="flex items-center gap-3">
           <.account_link account={@account} class="shrink-0">
             <.avatar account={@account} />
@@ -79,6 +109,7 @@ defmodule AnglerWeb.PublicComponents do
               type="button"
               phx-click="reblog"
               phx-value-id={@status["id"]}
+              phx-value-boost={@boost_id}
               class={[
                 "flex items-center gap-1 transition-colors hover:text-success",
                 @status["reblogged"] && "text-success font-medium"
@@ -91,6 +122,7 @@ defmodule AnglerWeb.PublicComponents do
               type="button"
               phx-click="favourite"
               phx-value-id={@status["id"]}
+              phx-value-boost={@boost_id}
               class={[
                 "flex items-center gap-1 transition-colors hover:text-error",
                 @status["favourited"] && "text-error font-medium"
@@ -224,6 +256,78 @@ defmodule AnglerWeb.PublicComponents do
 
   defp alt_suffix(desc) when is_binary(desc) and desc != "", do: ": " <> desc
   defp alt_suffix(_), do: ""
+
+  @doc """
+  Segmented control switching between layouts of the same page. Each option
+  is a `patch` link (so every layout is its own URL) replacing the history
+  entry, so toggling doesn't pile up back-button steps.
+  """
+  attr :id, :string, required: true
+
+  attr :options, :list,
+    required: true,
+    doc: "maps with `:id`, `:path`, `:label`, `:icon` and `:active?`"
+
+  def layout_toggle(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      role="group"
+      aria-label="Layout"
+      class="inline-flex rounded-field border border-base-300 bg-base-200 p-0.5"
+    >
+      <.link
+        :for={opt <- @options}
+        id={opt.id}
+        patch={opt.path}
+        replace
+        title={opt.label}
+        aria-label={opt.label <> " layout"}
+        aria-pressed={to_string(opt.active?)}
+        class={[
+          "inline-flex items-center justify-center rounded-[calc(var(--radius-field)-2px)] px-2 py-1 transition-colors",
+          if(opt.active?,
+            do: "bg-base-100 text-base-content shadow-sm",
+            else: "text-base-content/60 hover:text-base-content"
+          )
+        ]}
+      >
+        <.icon name={opt.icon} class="size-4" />
+      </.link>
+    </div>
+    """
+  end
+
+  @doc """
+  Masonry-only toggle between showing captions and photos only. `path` is
+  where the link goes (the other caption state).
+  """
+  attr :id, :string, default: "captions-toggle"
+  attr :path, :string, required: true
+  attr :captions?, :boolean, required: true
+
+  def captions_toggle(assigns) do
+    ~H"""
+    <.link
+      id={@id}
+      patch={@path}
+      replace
+      title={if @captions?, do: "Hide captions", else: "Show captions"}
+      aria-pressed={to_string(@captions?)}
+      class={["btn btn-sm gap-1.5", if(@captions?, do: "btn-ghost", else: "btn-outline")]}
+    >
+      <.icon
+        name={
+          if @captions?,
+            do: "hero-chat-bubble-bottom-center-text-micro",
+            else: "hero-photo-micro"
+        }
+        class="size-4"
+      />
+      {if @captions?, do: "Captions", else: "Photos only"}
+    </.link>
+    """
+  end
 
   @doc """
   Wraps its content in an in-app link to the account's profile. Uses the
