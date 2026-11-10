@@ -23,11 +23,12 @@ defmodule AnglerWeb.SearchController do
     if q == "" do
       json(conn, %{"accounts" => [], "hashtags" => []})
     else
-      counts = Hashtags.usage_counts()
+      hashtags = Search.hashtags(q, limit: @limit)
+      counts = Hashtags.usage_counts(Enum.map(hashtags, & &1.name))
 
       json(conn, %{
         "accounts" => Enum.map(Search.accounts(q, limit: @limit), &account_json/1),
-        "hashtags" => Enum.map(Search.hashtags(q, limit: @limit), &hashtag_json(&1, counts))
+        "hashtags" => Enum.map(hashtags, &hashtag_json(&1, counts))
       })
     end
   end

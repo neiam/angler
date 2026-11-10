@@ -32,6 +32,16 @@ defmodule AnglerWeb.MastodonAPI.Status do
   fields are all `false` — appropriate for anonymous reads or for when the
   caller will overlay later in batch.
   """
+  # Everything `render_base/1` reads. `Repo.preload/2` skips associations that
+  # are already loaded, so callers that preloaded (some of) these pay nothing.
+  @render_preloads [
+    profile: [],
+    mentions: :profile,
+    status_hashtags: :hashtag,
+    media_attachments: [],
+    poll: :options
+  ]
+
   @spec render(Status.t() | Reblog.t(), integer() | nil, keyword()) :: map()
   def render(status, viewer_id \\ nil, opts \\ [])
 
@@ -40,13 +50,7 @@ defmodule AnglerWeb.MastodonAPI.Status do
   end
 
   def render(%Status{} = status, viewer_id, opts) do
-    status =
-      Repo.preload(status,
-        profile: [],
-        mentions: :profile,
-        status_hashtags: :hashtag,
-        media_attachments: []
-      )
+    status = Repo.preload(status, @render_preloads)
 
     base = render_base(status)
 
@@ -70,12 +74,15 @@ defmodule AnglerWeb.MastodonAPI.Status do
   def render_many([], _, _), do: []
 
   def render_many(statuses, nil, opts) do
-    Enum.map(statuses, &render(&1, nil, opts))
+    statuses
+    |> preload_for_render()
+    |> Enum.map(&render(&1, nil, opts))
   end
 
   # Items are statuses or boosts (`%Reblog{}` with `status` loaded); a
   # boost is judged by — and overlaid from — the post it boosts.
   def render_many(items, viewer_id, opts) when is_integer(viewer_id) do
+    items = preload_for_render(items)
     statuses = Enum.map(items, &boosted/1)
     overlays = ViewerOverlay.batch(viewer_id, Enum.map(statuses, & &1.id))
     actions = Matching.actions_for(viewer_id, statuses, opts[:context])
@@ -100,6 +107,25 @@ defmodule AnglerWeb.MastodonAPI.Status do
         %Reblog{} = reblog -> wrap(reblog, rendered, opts)
         _ -> rendered
       end
+    end)
+  end
+
+  # Load every association `render/3` needs for the whole page in one query per
+  # association, instead of one set of queries per status. Boosts are loaded
+  # through to the post they boost, plus the booster `wrap/3` renders.
+  defp preload_for_render(items) do
+    statuses = items |> Enum.map(&boosted/1) |> Repo.preload(@render_preloads)
+    by_id = Map.new(statuses, &{&1.id, &1})
+
+    reblogs =
+      items
+      |> Enum.filter(&match?(%Reblog{}, &1))
+      |> Repo.preload(:profile)
+      |> Map.new(&{&1.id, &1})
+
+    Enum.map(items, fn
+      %Reblog{} = r -> %{Map.fetch!(reblogs, r.id) | status: Map.fetch!(by_id, r.status.id)}
+      %Status{} = s -> Map.fetch!(by_id, s.id)
     end)
   end
 
@@ -300,7 +326,10 @@ defmodule AnglerWeb.MastodonAPI.Status do
     Enum.map(assets, fn %Asset{} = a -> Media.render(a) end)
   end
 
-  defp render_poll(%Status{id: status_id}) do
+  defp render_poll(%Status{poll: nil}), do: nil
+  defp render_poll(%Status{poll: %Angler.Polls.Poll{} = poll}), do: PollJSON.render(poll)
+
+  defp render_poll(%Status{poll: %Ecto.Association.NotLoaded{}, id: status_id}) do
     case Polls.get_for_status(status_id) do
       nil -> nil
       poll -> PollJSON.render(poll)

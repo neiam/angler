@@ -25,6 +25,7 @@ defmodule Angler.Application do
         [
           {Phoenix.PubSub, name: Angler.PubSub},
           Angler.RateLimit,
+          Angler.Hashtags.CountCache,
           {Oban, Application.fetch_env!(:angler, Oban)},
           # Start to serve requests, typically the last entry
           AnglerWeb.Endpoint

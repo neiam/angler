@@ -34,10 +34,9 @@ defmodule AnglerWeb.FollowedTagsLive do
   end
 
   defp load_tags(socket, profile) do
-    rows =
-      profile.id
-      |> Following.list()
-      |> Enum.map(&%{name: &1.name, count: Hashtags.usage_count(&1.name)})
+    tags = Following.list(profile.id)
+    counts = Hashtags.usage_counts(Enum.map(tags, & &1.name))
+    rows = Enum.map(tags, &%{name: &1.name, count: Map.fetch!(counts, &1.name)})
 
     assign(socket, :tags, rows)
   end

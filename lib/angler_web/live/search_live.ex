@@ -86,10 +86,15 @@ defmodule AnglerWeb.SearchLive do
   defp run_search(socket, q) do
     viewer_id = socket.assigns.current_profile && socket.assigns.current_profile.id
 
-    %{accounts: accounts, hashtags: hashtags, statuses: statuses} =
-      Search.all(q, viewer_id, limit: @limit)
+    tab = socket.assigns.tab
+    opts = [limit: @limit]
 
-    counts = Hashtags.usage_counts()
+    # Only query the buckets the active tab renders.
+    accounts = if show?(tab, :accounts), do: Search.accounts(q, opts), else: []
+    hashtags = if show?(tab, :hashtags), do: Search.hashtags(q, opts), else: []
+    statuses = if show?(tab, :statuses), do: Search.statuses(q, viewer_id, opts), else: []
+
+    counts = Hashtags.usage_counts(Enum.map(hashtags, & &1.name))
 
     socket
     |> assign(:searched?, true)

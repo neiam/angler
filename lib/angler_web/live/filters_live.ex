@@ -101,11 +101,12 @@ defmodule AnglerWeb.FiltersLive do
         }
       end)
 
+    muted = Muting.list(profile.id)
+    counts = Hashtags.usage_counts(Enum.map(muted, fn {tag, _action} -> tag.name end))
+
     mutes =
-      profile.id
-      |> Muting.list()
-      |> Enum.map(fn {tag, action} ->
-        %{name: tag.name, action: action, count: Hashtags.usage_count(tag.name)}
+      Enum.map(muted, fn {tag, action} ->
+        %{name: tag.name, action: action, count: Map.fetch!(counts, tag.name)}
       end)
 
     socket |> assign(:filters, filters) |> assign(:mutes, mutes)

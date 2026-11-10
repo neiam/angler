@@ -56,6 +56,7 @@ defmodule Angler.Statuses.Status do
     has_many :mentions, Angler.Statuses.Mention
     has_many :status_hashtags, Angler.Statuses.StatusHashtag
     has_many :media_attachments, Angler.Media.Asset, foreign_key: :status_id
+    has_one :poll, Angler.Polls.Poll, foreign_key: :status_id
 
     timestamps(type: :utc_datetime_usec)
   end

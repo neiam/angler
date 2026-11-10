@@ -156,23 +156,36 @@ defmodule Angler.Timelines do
   def hashtag(name, cursor, opts \\ []) when is_binary(name) and is_map(cursor) do
     name = name |> String.downcase() |> String.trim_leading("#")
 
-    # Status must be the FIRST binding: MastodonCursor.apply/3, filter_local/2
-    # and filter_only_media/2 all operate on the leading `[s]` binding. Starting
-    # from StatusHashtag instead made the cursor compare `max_id` against the
-    # join row's PK (a small auto-increment) rather than the status snowflake —
-    # so `id < max_id` was always true and the timeline never paginated.
+    case Angler.Hashtags.get_by_name(name) do
+      nil -> {[], []}
+      tag -> hashtag_page(tag.id, cursor, opts)
+    end
+  end
+
+  # Filtering on the tag *id* (not a join on `hashtags.name`) lets Postgres
+  # walk `status_hashtags (hashtag_id, status_id DESC)` in cursor order and stop
+  # after one page. Joined by name, the id isn't known when the plan is built,
+  # so every post carrying the tag was fetched and sorted for each page.
+  #
+  # Status must be the FIRST binding: MastodonCursor.apply/3, filter_local/2
+  # and filter_only_media/2 all operate on the leading `[s]` binding. Starting
+  # from StatusHashtag instead made the cursor compare `max_id` against the
+  # join row's PK (a small auto-increment) rather than the status snowflake —
+  # so `id < max_id` was always true and the timeline never paginated.
+  defp hashtag_page(hashtag_id, cursor, opts) do
     base =
       from s in Status,
         join: sh in StatusHashtag,
         on: sh.status_id == s.id,
-        join: h in Angler.Hashtags.Hashtag,
-        on: h.id == sh.hashtag_id,
-        where: h.name == ^name and s.visibility in [:public, :unlisted] and is_nil(s.deleted_at),
+        where:
+          sh.hashtag_id == ^hashtag_id and s.visibility in [:public, :unlisted] and
+            is_nil(s.deleted_at),
         select: s
 
     base = filter_local(base, opts)
     base = filter_only_media(base, opts)
     base = exclude_authors(base, hidden_author_ids(opts[:viewer_id]))
+    base = bound_tag_index(base, cursor)
 
     statuses =
       base
@@ -181,6 +194,14 @@ defmodule Angler.Timelines do
       |> MastodonCursor.finalize_order(cursor, :id)
 
     {statuses, statuses}
+  end
+
+  # The cursor bounds `s.id`; Postgres doesn't carry a range across the join,
+  # so repeat it on `sh.status_id` to start the index scan at the page.
+  defp bound_tag_index(q, cursor) do
+    q = if cursor.max_id, do: where(q, [_s, sh], sh.status_id < ^cursor.max_id), else: q
+    q = if cursor.since_id, do: where(q, [_s, sh], sh.status_id > ^cursor.since_id), else: q
+    if cursor.min_id, do: where(q, [_s, sh], sh.status_id > ^cursor.min_id), else: q
   end
 
   ## Internals
