@@ -156,7 +156,7 @@ defmodule AnglerWeb.LiveInteractionsTest do
 
   describe "profile page (ProfileLive)" do
     test "logged-in user can favourite a post from the profile", ctx do
-      {:ok, lv, _} = live(ctx.conn, ~p"/@alice")
+      {:ok, lv, _} = live(ctx.conn, ~p"/@alice/feed")
 
       lv
       |> element("button[phx-click=favourite][phx-value-id='#{ctx.status.id}']")

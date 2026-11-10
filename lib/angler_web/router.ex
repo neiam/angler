@@ -123,7 +123,10 @@ defmodule AnglerWeb.Router do
       live "/tags/:name/mason/clean", TagLive, :clean
       # After the mason routes, so a tag named "top" still gets its masonry.
       live "/tags/top/:period", TagsLive, :index
-      live "/@:username", ProfileLive
+      live "/@:username", ProfileLive, :grid
+      live "/@:username/feed", ProfileLive, :list
+      live "/@:username/mason", ProfileLive, :mason
+      live "/@:username/mason/clean", ProfileLive, :clean
       live "/@:username/followers", ProfileFollowsLive, :followers
       live "/@:username/following", ProfileFollowsLive, :following
       live "/p/:username/:id", StatusLive

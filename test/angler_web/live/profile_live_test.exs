@@ -51,7 +51,7 @@ defmodule AnglerWeb.ProfileLiveTest do
   end
 
   test "the owner can lift a post out of unlisted", %{owner_conn: conn, unlisted: unlisted} do
-    {:ok, lv, _html} = live(conn, ~p"/@alice")
+    {:ok, lv, _html} = live(conn, ~p"/@alice/feed")
 
     lv
     |> element(
@@ -66,7 +66,7 @@ defmodule AnglerWeb.ProfileLiveTest do
     conn: conn,
     pub: pub
   } do
-    {:ok, lv, _html} = live(conn, ~p"/@alice")
+    {:ok, lv, _html} = live(conn, ~p"/@alice/feed")
 
     refute has_element?(
              lv,
@@ -74,10 +74,47 @@ defmodule AnglerWeb.ProfileLiveTest do
            )
   end
 
-  test "feed cards carry the deep-link anchor target", %{conn: conn, pub: pub} do
-    {:ok, lv, _html} = live(conn, ~p"/@alice")
+  describe "layouts" do
+    test "the grid is the default; its tiles link to the post page", %{conn: conn, pub: pub} do
+      {:ok, lv, _html} = live(conn, ~p"/@alice")
 
-    # Grid tiles link to `#post-<id>`; the feed card is that scroll target.
-    assert has_element?(lv, ~s{#profile-feed div[id="post-#{pub.id}"]})
+      assert has_element?(lv, ~s{#profile-grid a#tile-#{pub.id}[href="/p/alice/#{pub.id}"]})
+      assert has_element?(lv, ~s{#layout-grid[aria-pressed="true"]})
+      # Grid xor feed: no stacked cards alongside it.
+      refute has_element?(lv, "#profile-feed")
+      refute has_element?(lv, "#profile-masonry")
+    end
+
+    test "/feed shows only the stacked cards", %{conn: conn, pub: pub} do
+      {:ok, lv, _html} = live(conn, ~p"/@alice/feed")
+
+      assert has_element?(lv, ~s{#profile-feed div[id="post-#{pub.id}"] article})
+      assert has_element?(lv, ~s{#layout-list[aria-pressed="true"]})
+      refute has_element?(lv, "#profile-grid")
+    end
+
+    test "masonry renders the wall, and clean hides captions", %{conn: conn, pub: pub} do
+      {:ok, lv, _html} = live(conn, ~p"/@alice/mason")
+
+      assert has_element?(lv, ~s{#profile-masonry article[id="post-#{pub.id}"]})
+      refute has_element?(lv, "#profile-masonry.hide-captions")
+      assert has_element?(lv, ~s{#captions-toggle[href="/@alice/mason/clean"]})
+
+      {:ok, lv, _html} = live(conn, ~p"/@alice/mason/clean")
+      assert has_element?(lv, "#profile-masonry.hide-captions")
+      assert has_element?(lv, ~s{#layout-masonry[aria-pressed="true"]})
+    end
+
+    test "the toggle patches between layouts, keeping the loaded posts", %{conn: conn, pub: pub} do
+      {:ok, lv, _html} = live(conn, ~p"/@alice")
+
+      lv |> element("#layout-list") |> render_click()
+      assert_patch(lv, ~p"/@alice/feed")
+      assert has_element?(lv, ~s{#profile-feed div[id="post-#{pub.id}"]})
+
+      lv |> element("#layout-masonry") |> render_click()
+      assert_patch(lv, ~p"/@alice/mason")
+      assert has_element?(lv, "#profile-masonry")
+    end
   end
 end
