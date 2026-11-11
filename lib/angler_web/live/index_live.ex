@@ -53,6 +53,7 @@ defmodule AnglerWeb.IndexLive do
      |> assign(:feed, nil)
      |> assign(:feed_topic, nil)
      |> assign(:boosters, %{})
+     |> assign(:via_tags, %{})
      |> assign(:home_cursor, nil)
      |> stream(:posts, [], dom_id: &dom_id/1)}
   end
@@ -102,11 +103,22 @@ defmodule AnglerWeb.IndexLive do
   defp react(socket, id, boost_id, kind) do
     case AnglerWeb.Live.Interactions.toggle(socket.assigns.current_profile, id, kind) do
       {:ok, rendered} ->
-        item = rewrap(rendered, boost_id, socket.assigns.boosters)
+        item =
+          rendered
+          |> tag_source(socket.assigns.via_tags)
+          |> rewrap(boost_id, socket.assigns.boosters)
+
         {:noreply, stream_insert(socket, :posts, item, dom_id: &dom_id/1)}
 
       :error ->
         {:noreply, socket}
+    end
+  end
+
+  defp tag_source(%{"id" => id} = rendered, via_tags) do
+    case via_tags do
+      %{^id => names} -> Map.put(rendered, "_via_tags", names)
+      _ -> rendered
     end
   end
 
@@ -163,6 +175,7 @@ defmodule AnglerWeb.IndexLive do
       |> assign(:feed_topic, topic)
       |> assign(:post_count, 0)
       |> assign(:boosters, %{})
+      |> assign(:via_tags, %{})
 
     fetch_home(socket, nil)
   end
@@ -197,7 +210,19 @@ defmodule AnglerWeb.IndexLive do
 
     cursor = MastodonCursor.parse(%{"max_id" => max_id && to_string(max_id)}, @feed_limit, 40)
     {posts, cursor_rows} = Timelines.home(profile.id, cursor, opts)
-    rendered = StatusJSON.render_many(posts, profile.id, context: "home")
+
+    # Posts here only through a followed hashtag carry `"_via_tags"`, which
+    # `post_card` shows as a "via #tag" line; kept in an assign so a re-render
+    # after a like or boost keeps it.
+    via_tags =
+      for {id, names} <- Timelines.home_tag_sources(profile.id, posts),
+          into: socket.assigns.via_tags,
+          do: {Integer.to_string(id), names}
+
+    rendered =
+      posts
+      |> StatusJSON.render_many(profile.id, context: "home")
+      |> Enum.map(&tag_source(&1, via_tags))
 
     boosters =
       for %{"id" => id, "reblog" => %{}, "account" => booster} <- rendered,
@@ -207,6 +232,7 @@ defmodule AnglerWeb.IndexLive do
     socket =
       socket
       |> assign(:boosters, boosters)
+      |> assign(:via_tags, via_tags)
       |> assign(:home_cursor, cursor_rows |> Enum.map(& &1.id) |> Enum.min(fn -> nil end))
       |> update(:post_count, &(&1 + length(rendered)))
 

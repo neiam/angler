@@ -105,4 +105,28 @@ defmodule AnglerWeb.IndexMineFeedTest do
     lv |> element("#feed-load-more") |> render_click()
     assert has_element?(lv, "#post-#{oldest.id}")
   end
+
+  describe "why a post is in the feed" do
+    test "posts from followed hashtags say which tag; followed accounts' don't", ctx do
+      {:ok, _} = Angler.Hashtags.Following.follow(ctx.bob, "sunset")
+      {:ok, :accepted, _} = Angler.Follows.follow(ctx.bob, ctx.carol)
+
+      via_tag = photo!(ctx.alice, "golden hour #sunset")
+      followed = photo!(ctx.carol, "also #sunset, but bob follows carol")
+      feed!(ctx.bob, via_tag)
+      feed!(ctx.bob, followed)
+
+      {:ok, lv, _html} = live(ctx.conn, ~p"/mine")
+
+      assert has_element?(lv, ~s{#post-#{via_tag.id} .via-tags a[href="/tags/sunset"]})
+      refute has_element?(lv, "#post-#{followed.id} .via-tags")
+
+      # The label survives a re-render after an interaction.
+      lv
+      |> element("#post-#{via_tag.id} button[phx-click=favourite]")
+      |> render_click()
+
+      assert has_element?(lv, "#post-#{via_tag.id} .via-tags")
+    end
+  end
 end

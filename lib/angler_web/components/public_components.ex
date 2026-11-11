@@ -45,6 +45,7 @@ defmodule AnglerWeb.PublicComponents do
       |> assign(:account, assigns.status["account"] || %{})
       |> assign(:media, assigns.status["media_attachments"] || [])
       |> assign(:filtered, filtered_info(assigns.status))
+      |> assign(:via_tags, assigns.status["_via_tags"] || [])
 
     ~H"""
     <article id={@id} class="card bg-base-200 border border-base-300">
@@ -58,6 +59,22 @@ defmodule AnglerWeb.PublicComponents do
             {display_name(@boosted_by)}
           </.account_link>
           boosted
+        </div>
+        <%!-- Home feed only: in the feed through a followed hashtag rather
+             than a followed account (`Timelines.home_tag_sources/2`). --%>
+        <div
+          :if={@via_tags != []}
+          class="via-tags -mb-1 flex flex-wrap items-center gap-x-1.5 text-xs text-base-content/60"
+        >
+          <.icon name="hero-hashtag-micro" class="size-4 text-primary" />
+          <span>via</span>
+          <.link
+            :for={name <- @via_tags}
+            navigate={~p"/tags/#{name}"}
+            class="font-medium text-primary hover:underline"
+          >
+            #{name}
+          </.link>
         </div>
         <header class="flex items-center gap-3">
           <.account_link account={@account} class="shrink-0">

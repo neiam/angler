@@ -58,6 +58,48 @@ defmodule Angler.Timelines do
     {statuses, cursor_rows}
   end
 
+  @doc """
+  Why posts are in `viewer_id`'s home feed: for each status among `items`
+  (statuses or boosts) that is there only through a **followed hashtag** —
+  the viewer neither wrote it nor follows its author — the names of the
+  followed tags it carries. Other statuses are absent from the map.
+
+  Derived from the current follows rather than stored on the feed entry, so it
+  answers "why would this be here now". Two queries per call, any page size.
+  """
+  @spec home_tag_sources(integer(), [Status.t() | Reblog.t()]) :: %{
+          optional(integer()) => [String.t()]
+        }
+  def home_tag_sources(viewer_id, items) when is_integer(viewer_id) do
+    statuses = for %Status{} = s <- items, s.profile_id != viewer_id, do: s
+
+    candidates =
+      case statuses do
+        [] ->
+          []
+
+        _ ->
+          followed = following_ids(viewer_id)
+          for s <- statuses, not MapSet.member?(followed, s.profile_id), do: s.id
+      end
+
+    if candidates == [] do
+      %{}
+    else
+      from(sh in StatusHashtag,
+        join: f in Angler.Hashtags.Follow,
+        on: f.hashtag_id == sh.hashtag_id and f.profile_id == ^viewer_id,
+        join: h in Angler.Hashtags.Hashtag,
+        on: h.id == sh.hashtag_id,
+        where: sh.status_id in ^candidates,
+        order_by: [asc: h.name],
+        select: {sh.status_id, h.name}
+      )
+      |> Repo.all()
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    end
+  end
+
   # An entry a boost put here is shown as that boost (`%Reblog{}` with the
   # booster and the status loaded), which the renderer turns into a
   # wrapper. With boosts off (`include_reblogs: false`), or for a booster
