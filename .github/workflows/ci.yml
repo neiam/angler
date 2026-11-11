@@ -79,9 +79,9 @@ jobs:
       # this "what CI runs".
       - run: mix precommit
 
-  # The public registries from GitHub only. The forge reads
-  # .github/workflows too, and there .forgejo/workflows/image.yml
-  # publishes to the forge's own registry instead.
+  # The public registries from GitHub only. The forge runs
+  # .forgejo/workflows/image.yml instead (it ignores .github/workflows once
+  # .forgejo/workflows exists) and publishes to its own registry.
   image:
     if: github.server_url == 'https://github.com'
     needs: test
@@ -93,7 +93,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
 
-      # GHCR uses the built-in token. Docker Hub and Quay need secrets set on
+      # GHCR uses the built-in GITHUB_TOKEN (needs `packages: write`, above).
+      # It briefly took a GHCR_TOKEN PAT + vars.GHCR_USER instead (735e819,
+      # 8c51c96), because the forge ran this file then and its own token
+      # can't reach ghcr.io; the forge has its own workflow now.
+      # Docker Hub and Quay need secrets set on
       # the repo (Settings → Secrets and variables → Actions):
       #   DOCKERHUB_USER / DOCKERHUB_TOKEN  (Docker Hub access token)
       #   QUAY_USERNAME / QUAY_TOKEN        (Quay robot account)
@@ -104,8 +108,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ vars.GHCR_USER || github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
