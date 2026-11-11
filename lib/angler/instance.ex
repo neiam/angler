@@ -169,6 +169,13 @@ defmodule Angler.Instance do
     s |> Settings.registration_changeset(%{toggles: toggles}) |> Repo.insert_or_update()
   end
 
+  @doc """
+  Whether the web frontend tints `#hashtag` links in captions with the accent
+  color (the admin settings' "Tinted hashtags" switch). Default on.
+  """
+  @spec tint_hashtags?() :: boolean()
+  def tint_hashtags?, do: toggle(:tint_hashtags, true)
+
   @doc "Whether moderator approval is required for new signups."
   @spec approval_required?() :: boolean()
   def approval_required? do

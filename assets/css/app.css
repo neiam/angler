@@ -394,6 +394,21 @@
 }
 .hide-captions .post-caption { display: none; }
 
+/* Caption #hashtags in the accent color, matching the home feed's "via #tag"
+   line (text-primary font-medium). Behind the "Tinted hashtags" admin switch,
+   which puts `tint-tags` on <main>. Local captions and sanitized remote ones
+   both mark tag links `class="mention hashtag"`. */
+.tint-tags a.hashtag {
+  color: var(--color-primary);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+.tint-tags a.hashtag:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Photo viewer (assets/js/lightbox.js) */
 html.lightbox-open { overflow: hidden; }
 .lightbox {

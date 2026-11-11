@@ -23,7 +23,7 @@ defmodule Angler.Admin.Pixelfed do
   alias Angler.Statuses.Status
 
   @config_keys ~w(federation_enabled open_registration stories_enabled
-                  enforce_email_verification autospam_enabled)
+                  enforce_email_verification autospam_enabled tint_hashtags)
 
   # Users and instances lists page by this many rows; a full page means
   # there may be another.
@@ -239,12 +239,12 @@ defmodule Angler.Admin.Pixelfed do
 
   @spec config_list() :: [map()]
   def config_list do
-    Enum.map(config_descriptors(), fn %{name: n, key: k, description: d} ->
+    Enum.map(config_descriptors(), fn %{name: n, key: k, description: d} = desc ->
       %{
         "name" => n,
         "description" => d,
         "key" => k,
-        "state" => Angler.Instance.toggle(String.to_atom(k), false)
+        "state" => Angler.Instance.toggle(String.to_atom(k), Map.get(desc, :default, false))
       }
     end)
   end
@@ -286,6 +286,14 @@ defmodule Angler.Admin.Pixelfed do
         name: "AutoSpam Detection",
         key: "autospam_enabled",
         description: "Detect and remove spam from public timelines."
+      },
+      # Read through `Angler.Instance.tint_hashtags?/0`; on unless switched off.
+      %{
+        name: "Tinted hashtags",
+        key: "tint_hashtags",
+        default: true,
+        description:
+          "Show #hashtags in post captions in the accent color, like the feed's \"via #tag\" line."
       }
     ]
   end

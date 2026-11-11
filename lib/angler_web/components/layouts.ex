@@ -134,12 +134,16 @@ defmodule AnglerWeb.Layouts do
       </div>
     </header>
 
+    <%!-- `tint-tags` colors caption #hashtag links (app.css); an admin switch. --%>
     <%= if @wide do %>
-      <main class="w-full">
+      <main id="main" class={["w-full", Angler.Instance.tint_hashtags?() && "tint-tags"]}>
         {render_slot(@inner_block)}
       </main>
     <% else %>
-      <main class="px-4 py-10 sm:px-6 lg:px-8">
+      <main
+        id="main"
+        class={["px-4 py-10 sm:px-6 lg:px-8", Angler.Instance.tint_hashtags?() && "tint-tags"]}
+      >
         <div class="mx-auto max-w-2xl space-y-4">
           {render_slot(@inner_block)}
         </div>

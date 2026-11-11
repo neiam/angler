@@ -82,7 +82,7 @@ defmodule AnglerWeb.AdminSettingsLive do
 
   # The admin config switches, shared with the admin app's /api/admin/config.
   # Only the ones Angler acts on; the API still lists upstream's full set.
-  @live_toggles ~w(open_registration stories_enabled)
+  @live_toggles ~w(open_registration stories_enabled tint_hashtags)
 
   defp assign_toggles(socket),
     do: assign(socket, :toggles, live_toggles(Angler.Admin.Pixelfed.config_list()))
