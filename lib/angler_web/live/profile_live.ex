@@ -11,6 +11,10 @@ defmodule AnglerWeb.ProfileLive do
   Grid tiles link to the post's own page (`/p/:username/:id`), as do the cards'
   timestamps.
 
+  Logged-in visitors get a Follow button (Following / Requested once sent),
+  backed by `Angler.Follows` like the API's follow endpoints; anonymous ones
+  are sent to log in first.
+
   Visibility is owner-scoped: anonymous/other viewers see public posts only,
   while the profile owner gets All / Public / Unlisted filter tabs (so a silent
   import of unlisted posts is reachable) plus per-post controls to change a
@@ -23,6 +27,7 @@ defmodule AnglerWeb.ProfileLive do
   import AnglerWeb.PublicComponents
 
   alias Angler.Federation.Workers.Backfill, as: BackfillWorker
+  alias Angler.Follows
   alias Angler.Profiles
   alias Angler.Profiles.Profile
   alias Angler.Statuses
@@ -55,10 +60,16 @@ defmodule AnglerWeb.ProfileLive do
           |> assign(:filter, filter)
           |> assign(:backfill?, backfill_allowed?(socket, profile))
           |> assign(:backfilling?, false)
+          |> assign_follow(viewer_id, owner?)
           |> load_first_page()
 
         if socket.assigns.backfill? and connected?(socket),
           do: Phoenix.PubSub.subscribe(Angler.PubSub, BackfillWorker.topic(profile.id))
+
+        # Follows involving this profile, from anywhere (the apps, another tab,
+        # a remote Accept, the account approving a request): keeps the button,
+        # "Follows you" and the counts current.
+        if connected?(socket), do: Follows.subscribe(profile.id)
 
         {:ok, socket}
 
@@ -157,7 +168,36 @@ defmodule AnglerWeb.ProfileLive do
 
   def handle_event("backfill", _params, socket), do: {:noreply, socket}
 
+  def handle_event("follow", _params, socket) do
+    %{current_profile: viewer, profile: target} = socket.assigns
+
+    case viewer && Follows.follow(viewer, target) do
+      nil ->
+        {:noreply, push_navigate(socket, to: ~p"/login?next=/@#{socket.assigns.acct}")}
+
+      {:ok, _state, _row} ->
+        {:noreply, refresh_follow(socket)}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Couldn't follow this account.")}
+    end
+  end
+
+  # Unfollow, or withdraw a pending request.
+  def handle_event(
+        "unfollow",
+        _params,
+        %{assigns: %{current_profile: %Profile{} = viewer}} = socket
+      ) do
+    :ok = Follows.unfollow(viewer, socket.assigns.profile)
+    {:noreply, refresh_follow(socket)}
+  end
+
+  def handle_event("unfollow", _params, socket), do: {:noreply, socket}
+
   @impl true
+  def handle_info({:follow_changed, _edge}, socket), do: {:noreply, refresh_follow(socket)}
+
   def handle_info({:backfill_done, result}, socket) do
     socket = assign(socket, :backfilling?, false)
 
@@ -198,6 +238,54 @@ defmodule AnglerWeb.ProfileLive do
   defp backfill_reason(_), do: "unreachable"
 
   ## Internals
+
+  # `:follow` is nil when there's no button (own profile), else :none,
+  # :requested (locked account, or a remote one that hasn't accepted yet) or
+  # :following.
+  defp assign_follow(socket, viewer_id, owner?) do
+    target = socket.assigns.profile
+
+    {follow, followed_by?} =
+      cond do
+        owner? or viewer_id == target.id -> {nil, false}
+        is_nil(viewer_id) -> {:none, false}
+        true -> {follow_state(viewer_id, target.id), followed_by?(viewer_id, target.id)}
+      end
+
+    socket |> assign(:follow, follow) |> assign(:followed_by?, followed_by?)
+  end
+
+  defp follow_state(viewer_id, target_id) do
+    case Follows.get_follower(target_id, viewer_id) do
+      %{accepted_at: %{}} ->
+        :following
+
+      %{} ->
+        :requested
+
+      nil ->
+        if Follows.get_request(target_id, viewer_id), do: :requested, else: :none
+    end
+  end
+
+  defp followed_by?(viewer_id, target_id),
+    do: match?(%{accepted_at: %{}}, Follows.get_follower(viewer_id, target_id))
+
+  # Re-read the edges and the counts they move.
+  defp refresh_follow(socket) do
+    profile = Profiles.get_profile(socket.assigns.profile.id) || socket.assigns.profile
+    viewer = socket.assigns.current_profile
+
+    socket = assign(socket, :profile, profile)
+
+    if viewer && socket.assigns.follow do
+      socket
+      |> assign(:follow, follow_state(viewer.id, profile.id))
+      |> assign(:followed_by?, followed_by?(viewer.id, profile.id))
+    else
+      socket
+    end
+  end
 
   defp viewer_id(socket),
     do: socket.assigns.current_profile && socket.assigns.current_profile.id
@@ -323,6 +411,8 @@ defmodule AnglerWeb.ProfileLive do
           remote?={@remote?}
           backfill?={@backfill?}
           backfilling?={@backfilling?}
+          follow={@follow}
+          followed_by?={@followed_by?}
         />
 
         <div class="divider"></div>
@@ -477,19 +567,84 @@ defmodule AnglerWeb.ProfileLive do
     """
   end
 
+  # Follow / Following / Requested. "Following" and "Requested" reveal what a
+  # click does (Unfollow / Cancel) on hover and focus.
+  attr :state, :atom, required: true
+  attr :locked?, :boolean, default: false
+
+  defp follow_button(%{state: :none} = assigns) do
+    ~H"""
+    <button
+      id="follow-button"
+      type="button"
+      phx-click="follow"
+      phx-disable-with="Following…"
+      class="btn btn-primary btn-sm shrink-0 gap-1 transition-transform active:scale-95"
+    >
+      <.icon name={if @locked?, do: "hero-lock-closed-micro", else: "hero-plus-micro"} class="size-4" />
+      {if @locked?, do: "Request to follow", else: "Follow"}
+    </button>
+    """
+  end
+
+  defp follow_button(assigns) do
+    ~H"""
+    <button
+      id="follow-button"
+      type="button"
+      phx-click="unfollow"
+      data-confirm={@state == :following && "Unfollow this account?"}
+      aria-label={if @state == :following, do: "Unfollow", else: "Cancel follow request"}
+      class={[
+        "group btn btn-outline btn-sm shrink-0 gap-1 transition-colors",
+        "hover:border-error hover:bg-error hover:text-error-content",
+        "focus-visible:border-error focus-visible:bg-error focus-visible:text-error-content"
+      ]}
+    >
+      <span class="flex items-center gap-1 group-hover:hidden group-focus-visible:hidden">
+        <.icon
+          name={if @state == :following, do: "hero-check-micro", else: "hero-clock-micro"}
+          class="size-4"
+        />
+        {if @state == :following, do: "Following", else: "Requested"}
+      </span>
+      <span class="hidden items-center gap-1 group-hover:flex group-focus-visible:flex">
+        <.icon name="hero-x-mark-micro" class="size-4" />
+        {if @state == :following, do: "Unfollow", else: "Cancel"}
+      </span>
+    </button>
+    """
+  end
+
   attr :account, :map, required: true
   attr :profile, :map, required: true
   attr :remote?, :boolean, required: true
   attr :backfill?, :boolean, required: true
   attr :backfilling?, :boolean, required: true
+  attr :follow, :atom, default: nil
+  attr :followed_by?, :boolean, default: false
 
   defp profile_header(assigns) do
     ~H"""
     <header class="flex items-start gap-4">
       <.avatar account={@account} class="size-20" />
       <div class="min-w-0 flex-1">
-        <h1 class="text-2xl font-bold truncate">{display_name(@account)}</h1>
-        <div class="text-base-content/60">@{@account["acct"]}</div>
+        <div class="flex items-start gap-3">
+          <div class="min-w-0 flex-1">
+            <h1 class="text-2xl font-bold truncate">{display_name(@account)}</h1>
+            <div class="flex flex-wrap items-center gap-2 text-base-content/60">
+              @{@account["acct"]}
+              <span
+                :if={@followed_by?}
+                id="follows-you"
+                class="badge badge-sm badge-ghost text-base-content/70"
+              >
+                Follows you
+              </span>
+            </div>
+          </div>
+          <.follow_button :if={@follow} state={@follow} locked?={@profile.is_private} />
+        </div>
         <div :if={@profile.bio not in [nil, ""]} class="mt-2 prose prose-sm max-w-none break-words">
           {raw(
             if(@profile.domain,

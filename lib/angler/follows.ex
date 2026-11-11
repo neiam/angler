@@ -27,6 +27,30 @@ defmodule Angler.Follows do
   alias Angler.Profiles.Profile
   alias Angler.Repo
 
+  ## Change notifications
+
+  @doc """
+  Subscribe the caller to follow-edge changes involving `profile_id`, as
+  follower or followee. Messages are
+  `{:follow_changed, %{followee_id: id, follower_id: id}}`; re-read the edge
+  rather than trusting a state in the message.
+  """
+  @spec subscribe(integer()) :: :ok | {:error, term()}
+  def subscribe(profile_id) when is_integer(profile_id),
+    do: Phoenix.PubSub.subscribe(Angler.PubSub, topic(profile_id))
+
+  defp topic(profile_id), do: "follows:#{profile_id}"
+
+  # Tell both ends that the edge `follower -> followee` changed.
+  defp changed(followee_id, follower_id) do
+    msg = {:follow_changed, %{followee_id: followee_id, follower_id: follower_id}}
+
+    for id <- Enum.uniq([followee_id, follower_id]),
+        do: Phoenix.PubSub.broadcast(Angler.PubSub, topic(id), msg)
+
+    :ok
+  end
+
   ## Reads
 
   @doc "Get a follower row by `(profile_id = followee, following_id = follower)`."
@@ -143,6 +167,7 @@ defmodule Angler.Follows do
           type: "follow_request"
         })
 
+        changed(target.id, actor.id)
         {:ok, :pending, fr}
 
       err ->
@@ -184,6 +209,7 @@ defmodule Angler.Follows do
           type: "follow"
         })
 
+        changed(follower.profile_id, follower.following_id)
         {:ok, :accepted, follower}
 
       err ->
@@ -227,6 +253,7 @@ defmodule Angler.Follows do
             })
 
             Angler.Federation.Backfill.after_follow(target, actor.id)
+            changed(target.id, actor.id)
             {:ok, :pending_remote, follower}
 
           err ->
@@ -262,6 +289,8 @@ defmodule Angler.Follows do
       if request, do: Repo.delete!(request)
       :ok
     end)
+
+    if follower || request, do: changed(target.id, actor.id)
 
     if not is_nil(target.domain) and follower do
       FollowDeliver.enqueue(:undo, %{
@@ -340,6 +369,7 @@ defmodule Angler.Follows do
 
         inc_counters!(follower.profile_id, :followers_count, 1)
         inc_counters!(follower.following_id, :following_count, 1)
+        changed(follower.profile_id, follower.following_id)
         {:ok, accepted}
     end
   end
@@ -365,7 +395,7 @@ defmodule Angler.Follows do
         where: r.profile_id == ^followee_id and r.following_id == ^follower_id
     )
 
-    :ok
+    changed(followee_id, follower_id)
   end
 
   ## Follow requests (authorize / reject — locked-account flow)
@@ -441,6 +471,7 @@ defmodule Angler.Follows do
               })
             end
 
+            changed(target.id, follower.id)
             {:ok, row}
 
           err ->
@@ -461,6 +492,7 @@ defmodule Angler.Follows do
 
       %FollowRequest{} = request ->
         Repo.delete!(request)
+        changed(target.id, follower.id)
 
         if not is_nil(follower.domain) and is_binary(request.remote_url) do
           FollowDeliver.enqueue(:reject, %{
