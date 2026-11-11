@@ -23,10 +23,12 @@ jobs:
     runs-on: arc-runner-set
     env:
       MIX_ENV: test
-      # Under forgejo-runner/act the job runs in a container, so the postgres
-      # service is reached by its service name, not localhost (which works on
-      # GitHub-hosted runners).
-      POSTGRES_HOST: postgres
+      # This job runs on the runner itself (no `container:`), so the postgres
+      # service is reached through its published port on localhost. The
+      # service *name* only resolves from inside a job container, as on the
+      # forge (.forgejo/workflows/image.yml uses POSTGRES_HOST: postgres); here
+      # it failed with `tcp connect (postgres:5432): nxdomain`.
+      POSTGRES_HOST: localhost
       # Cap the test DB pool (and, via test_helper, ExUnit's max_cases) below
       # the Postgres service's default max_connections (100). Big CI runners
       # otherwise scale the pool to cores × 2 and exhaust connections.
