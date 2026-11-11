@@ -42,10 +42,10 @@ jobs:
         run: command -v python3 || (sudo apt-get update && sudo apt-get install -y --no-install-recommends python3)
 
       # The same toolchain ci.yml and the Dockerfile build with: a lockfile
-      # is only as good as the resolver that wrote it. Through the forge's
-      # fork of erlef/setup-beam, as in ci.yml, which defaults ImageOS to
-      # ubuntu-24.04 where forgejo/act would inject an unmappable one.
-      - uses: https://gg.neiam.co/neiam/action-setup-beam@v1
+      # is only as good as the resolver that wrote it. Through our fork of
+      # erlef/setup-beam (mirrored to GitHub), as in ci.yml, which defaults
+      # ImageOS to ubuntu-24.04 where the ARC runner forces an unmappable one.
+      - uses: neiam/action-setup-beam@v1
         with:
           elixir-version: "1.20.4"
           otp-version: "28.5.0.8"
