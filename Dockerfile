@@ -28,16 +28,24 @@ RUN apt-get update \
 # prepare build dir
 WORKDIR /app
 
-# install hex + rebar
-RUN mix local.hex --force \
-  && mix local.rebar --force
+# install hex + rebar. Retried with backoff: CI runners' route to
+# builds.hex.pm is flaky (one run installed hex, then timed out on
+# rebar.csv from the same host), and a timeout here fails the whole image.
+RUN n=0; until mix local.hex --force && mix local.rebar --force; do \
+      n=$((n + 1)); [ "$n" -ge 5 ] && exit 1; \
+      echo "hex/rebar install failed; retry $n/4 in $((n * 10))s"; sleep $((n * 10)); \
+    done
 
 # set build ENV
 ENV MIX_ENV="prod"
 
 # install mix dependencies
 COPY mix.exs mix.lock ./
-RUN mix deps.get --only $MIX_ENV
+# Same flaky route (hex.pm / repo.hex.pm), same retry.
+RUN n=0; until mix deps.get --only $MIX_ENV; do \
+      n=$((n + 1)); [ "$n" -ge 5 ] && exit 1; \
+      echo "deps.get failed; retry $n/4 in $((n * 10))s"; sleep $((n * 10)); \
+    done
 RUN mkdir config
 
 # copy compile-time config files before we compile dependencies
